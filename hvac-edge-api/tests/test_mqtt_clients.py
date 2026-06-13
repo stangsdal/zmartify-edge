@@ -15,6 +15,7 @@ def _set_db(monkeypatch, tmp_path):
     db_path = tmp_path / "mqtt_clients.sqlite"
     monkeypatch.setenv("HVAC_EDGE_DB_PATH", str(db_path))
     monkeypatch.setenv("HVAC_EDGE_APPLY_MQTT_COMMANDS", "0")
+    monkeypatch.setenv("HVAC_EDGE_DRY_RUN_ACL_WRITE", "1")
     initialize_database()
 
 

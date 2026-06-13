@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any
 
 from app.db import get_connection
+from app.mqtt_acl import generate_acl_file
 from app.mqtt_users import (
     MqttUserCommandError,
     create_or_update_mqtt_user,
@@ -212,7 +213,12 @@ def assign_device_site(device_id: str, site_id: int) -> dict[str, Any]:
             """,
             (device_id,),
         ).fetchone()
-        return _row_to_dict(row) or {}
+        generate_acl_file(conn)
+    try:
+        reload_broker()
+    except MqttUserCommandError as exc:
+        raise RegistryOperationError(str(exc)) from exc
+    return _row_to_dict(row) or {}
 
 
 def rename_device(device_id: str, display_name: str) -> dict[str, Any]:
@@ -241,6 +247,11 @@ def delete_device(device_id: str) -> None:
         cur = conn.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
         if cur.rowcount == 0:
             raise RegistryNotFoundError("device not found")
+        generate_acl_file(conn)
+    try:
+        reload_broker()
+    except MqttUserCommandError as exc:
+        raise RegistryOperationError(str(exc)) from exc
 
 
 def _ensure_scope_exists(
@@ -341,6 +352,7 @@ def _auto_provision_device_mqtt_client(conn: sqlite3.Connection, device: dict[st
         device_pk_id=device["id"],
     )
     _write_mqtt_credentials(conn, mqtt_client_id=client["id"], password_plain=password)
+    generate_acl_file(conn)
     create_or_update_mqtt_user(username, password)
     reload_broker()
 
@@ -408,6 +420,7 @@ def create_mqtt_client(
             device_pk_id=device_pk_id,
         )
         _write_mqtt_credentials(conn, mqtt_client_id=client["id"], password_plain=password)
+        generate_acl_file(conn)
 
     try:
         create_or_update_mqtt_user(resolved_username, password)
@@ -458,6 +471,7 @@ def rotate_mqtt_client_password(client_id: int) -> dict[str, Any]:
             raise RegistryNotFoundError("mqtt client not found")
         username = row["username"]
         _write_mqtt_credentials(conn, mqtt_client_id=client_id, password_plain=password)
+        generate_acl_file(conn)
 
     try:
         create_or_update_mqtt_user(username, password)
@@ -489,6 +503,7 @@ def set_mqtt_client_enabled(client_id: int, enabled: bool) -> dict[str, Any]:
             """,
             (client_id,),
         ).fetchone()
+        generate_acl_file(conn)
 
     try:
         reload_broker()
@@ -503,6 +518,7 @@ def delete_mqtt_client(client_id: int) -> None:
         cur = conn.execute("DELETE FROM mqtt_clients WHERE id = ?", (client_id,))
         if cur.rowcount == 0:
             raise RegistryNotFoundError("mqtt client not found")
+        generate_acl_file(conn)
 
     try:
         reload_broker()

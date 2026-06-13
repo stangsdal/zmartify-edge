@@ -1,4 +1,4 @@
-# hvac-edge-api (Phase C in progress)
+# hvac-edge-api (Phases A-D implemented)
 
 This directory contains the initial backend scaffold for the Raspberry Pi edge milestone.
 
@@ -10,7 +10,7 @@ This directory contains the initial backend scaffold for the Raspberry Pi edge m
 - Phase B registry CRUD endpoints for domains, sites, and devices
 - Phase C MQTT client lifecycle endpoints (create/list/get/rotate/enable/disable/delete)
 - Automatic device MQTT client provisioning on device registration
-- Placeholder for ACL generation and security helpers
+- Phase D ACL generation from registry state with generation logging
 
 ## Local run (dev)
 
@@ -58,6 +58,8 @@ API endpoints currently:
 ## MQTT command execution mode
 
 By default, external broker commands are disabled for safe local development.
+In this mode ACL generation runs in dry-run mode automatically and still records
+rows in `acl_generation_log`.
 
 - `HVAC_EDGE_APPLY_MQTT_COMMANDS=0` (default)
 
@@ -66,8 +68,13 @@ To enable real `mosquitto_passwd` and broker reload actions:
 ```bash
 export HVAC_EDGE_APPLY_MQTT_COMMANDS=1
 export HVAC_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
+export HVAC_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
 export HVAC_EDGE_MOSQUITTO_PASSWD_BIN=mosquitto_passwd
 export HVAC_EDGE_MQTT_RELOAD_CMD='docker kill -s HUP hvac-mosquitto'
 # optional fallback
 export HVAC_EDGE_MQTT_RESTART_CMD='docker restart hvac-mosquitto'
 ```
+
+Optional overrides:
+
+- `HVAC_EDGE_DRY_RUN_ACL_WRITE=1` force dry-run ACL generation even when command mode is enabled.

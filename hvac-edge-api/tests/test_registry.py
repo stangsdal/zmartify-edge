@@ -22,6 +22,8 @@ from app.registry import (
 def _set_db(monkeypatch, tmp_path):
     db_path = tmp_path / "registry.sqlite"
     monkeypatch.setenv("HVAC_EDGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("HVAC_EDGE_APPLY_MQTT_COMMANDS", "0")
+    monkeypatch.setenv("HVAC_EDGE_DRY_RUN_ACL_WRITE", "1")
     initialize_database()
     return db_path
 
