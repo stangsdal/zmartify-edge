@@ -4,20 +4,27 @@ from app.db import get_db_path, initialize_database
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
+    RegistryOperationError,
     assign_device_site,
     create_device,
     create_domain,
+    create_mqtt_client,
     create_site,
     delete_device,
     delete_domain,
+    delete_mqtt_client,
     delete_site,
     get_device,
     get_domain,
+    get_mqtt_client,
     get_site,
     list_devices,
     list_domains,
+    list_mqtt_clients,
     list_sites,
     rename_device,
+    rotate_mqtt_client_password,
+    set_mqtt_client_enabled,
 )
 from app.schemas import (
     DeviceAssignSite,
@@ -26,6 +33,9 @@ from app.schemas import (
     DeviceRename,
     DomainCreate,
     DomainOut,
+    MqttClientCreate,
+    MqttClientOut,
+    MqttCredentialOut,
     SiteCreate,
     SiteOut,
 )
@@ -50,8 +60,8 @@ def health() -> dict:
 @app.get("/registry/status")
 def registry_status() -> dict:
     return {
-        "phase": "B",
-        "status": "registry_crud_enabled",
+        "phase": "C",
+        "status": "registry_and_mqtt_client_lifecycle_enabled",
     }
 
 
@@ -131,6 +141,8 @@ def api_create_device(payload: DeviceCreate) -> dict:
         )
     except RegistryConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @app.get("/devices", response_model=list[DeviceOut])
@@ -168,4 +180,82 @@ def api_delete_device(device_id: str) -> Response:
         delete_device(device_id)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/mqtt/clients", response_model=MqttCredentialOut, status_code=status.HTTP_201_CREATED)
+def api_create_mqtt_client(payload: MqttClientCreate) -> dict:
+    try:
+        created = create_mqtt_client(
+            client_type=payload.client_type,
+            domain_id=payload.domain_id,
+            site_id=payload.site_id,
+            device_pk_id=payload.device_id,
+            username=payload.username,
+        )
+        return {
+            "mqtt_client_id": created["id"],
+            "username": created["username"],
+            "password": created["password"],
+            "password_one_time": True,
+        }
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RegistryConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/mqtt/clients", response_model=list[MqttClientOut])
+def api_list_mqtt_clients() -> list[dict]:
+    return list_mqtt_clients()
+
+
+@app.get("/mqtt/clients/{client_id}", response_model=MqttClientOut)
+def api_get_mqtt_client(client_id: int) -> dict:
+    try:
+        return get_mqtt_client(client_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/mqtt/clients/{client_id}/rotate-password", response_model=MqttCredentialOut)
+def api_rotate_mqtt_password(client_id: int) -> dict:
+    try:
+        return rotate_mqtt_client_password(client_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/mqtt/clients/{client_id}/disable", response_model=MqttClientOut)
+def api_disable_mqtt_client(client_id: int) -> dict:
+    try:
+        return set_mqtt_client_enabled(client_id, enabled=False)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/mqtt/clients/{client_id}/enable", response_model=MqttClientOut)
+def api_enable_mqtt_client(client_id: int) -> dict:
+    try:
+        return set_mqtt_client_enabled(client_id, enabled=True)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.delete("/mqtt/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+def api_delete_mqtt_client(client_id: int) -> Response:
+    try:
+        delete_mqtt_client(client_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

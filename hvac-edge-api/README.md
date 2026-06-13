@@ -1,4 +1,4 @@
-# hvac-edge-api (Phase B in progress)
+# hvac-edge-api (Phase C in progress)
 
 This directory contains the initial backend scaffold for the Raspberry Pi edge milestone.
 
@@ -8,7 +8,9 @@ This directory contains the initial backend scaffold for the Raspberry Pi edge m
 - Startup-time SQLite migration runner
 - Migration `001_init.sql` with registry schema
 - Phase B registry CRUD endpoints for domains, sites, and devices
-- Placeholders for MQTT users, ACL generation, and security helpers
+- Phase C MQTT client lifecycle endpoints (create/list/get/rotate/enable/disable/delete)
+- Automatic device MQTT client provisioning on device registration
+- Placeholder for ACL generation and security helpers
 
 ## Local run (dev)
 
@@ -45,3 +47,27 @@ API endpoints currently:
 - `POST /devices/{device_id}/assign-site`
 - `POST /devices/{device_id}/rename`
 - `DELETE /devices/{device_id}`
+- `POST /mqtt/clients`
+- `GET /mqtt/clients`
+- `GET /mqtt/clients/{id}`
+- `POST /mqtt/clients/{id}/rotate-password`
+- `POST /mqtt/clients/{id}/disable`
+- `POST /mqtt/clients/{id}/enable`
+- `DELETE /mqtt/clients/{id}`
+
+## MQTT command execution mode
+
+By default, external broker commands are disabled for safe local development.
+
+- `HVAC_EDGE_APPLY_MQTT_COMMANDS=0` (default)
+
+To enable real `mosquitto_passwd` and broker reload actions:
+
+```bash
+export HVAC_EDGE_APPLY_MQTT_COMMANDS=1
+export HVAC_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
+export HVAC_EDGE_MOSQUITTO_PASSWD_BIN=mosquitto_passwd
+export HVAC_EDGE_MQTT_RELOAD_CMD='docker kill -s HUP hvac-mosquitto'
+# optional fallback
+export HVAC_EDGE_MQTT_RESTART_CMD='docker restart hvac-mosquitto'
+```
