@@ -1,0 +1,32 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: hvac-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  hvac-edge-api:
+    image: python:3.12-slim
+    container_name: hvac-edge-api
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./hvac-edge-api:/app
+      - hvac-edge-data:/data
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - HVAC_EDGE_DB_PATH=/data/hvac-edge.sqlite
+    depends_on:
+      - mosquitto
+
+volumes:
+  hvac-edge-data:
