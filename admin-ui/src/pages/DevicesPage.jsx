@@ -12,6 +12,7 @@ export function DevicesPage() {
     firmware_version: "",
   });
   const [error, setError] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   async function load() {
     try {
@@ -65,7 +66,30 @@ export function DevicesPage() {
         {devices.map((d) => (
           <li key={d.device_id} className="row between">
             <span>{d.device_id} - {d.display_name}</span>
-            <Link to={`/devices/${d.device_id}`}>Open</Link>
+            <span className="row">
+              <Link to={`/devices/${d.device_id}`}>Open</Link>
+              {confirmDeleteId === d.device_id ? (
+                <>
+                  <button
+                    className="danger"
+                    onClick={async () => {
+                      await apiFetch(`/devices/${d.device_id}`, { method: "DELETE" });
+                      setConfirmDeleteId(null);
+                      await load();
+                    }}
+                  >
+                    Confirm
+                  </button>
+                  <button className="secondary" onClick={() => setConfirmDeleteId(null)}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button className="danger" onClick={() => setConfirmDeleteId(d.device_id)}>
+                  Delete
+                </button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
