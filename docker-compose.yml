@@ -23,6 +23,7 @@ services:
     volumes:
       - hvac-edge-data:/data
       - ./mosquitto/config:/mosquitto/config
+      - ./admin-ui/dist:/admin-ui/dist:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MQTT_HOST=mosquitto
@@ -35,6 +36,7 @@ services:
       - HVAC_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
       - HVAC_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
       - HVAC_EDGE_DRY_RUN_ACL_WRITE=0
+      - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
 

@@ -5,6 +5,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from app.file_permissions import normalize_mosquitto_file_permissions
 from app.mqtt_users import should_apply_external_commands
 
 
@@ -35,6 +36,8 @@ def _write_acl_atomic(output_path: Path, content: str) -> None:
         tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
         tmp_path.write_text(content, encoding="utf-8")
         tmp_path.replace(output_path)
+
+    normalize_mosquitto_file_permissions(output_path)
 
 
 def _load_acl_sources(conn: sqlite3.Connection) -> tuple[list[sqlite3.Row], list[sqlite3.Row], list[sqlite3.Row]]:
@@ -184,6 +187,48 @@ def build_acl_status(conn: sqlite3.Connection, *, acl_path: Path, limit: int) ->
             "sha256": checksum,
         },
         "generation_logs": logs,
+    }
+
+
+def build_acl_preview_for_client(conn: sqlite3.Connection, client_id: int) -> dict:
+    client = conn.execute(
+        """
+        SELECT id, username, client_type, domain_id, site_id, device_id, enabled
+        FROM mqtt_clients
+        WHERE id = ?
+        """,
+        (client_id,),
+    ).fetchone()
+    if client is None:
+        raise ValueError("mqtt client not found")
+
+    clients, devices, sites = _load_acl_sources(conn)
+    acl_content = _render_acl_content(clients, devices, sites)
+
+    target_user_line = f"user {client['username']}"
+    lines = acl_content.splitlines()
+    in_block = False
+    topics: list[str] = []
+    for line in lines:
+        if line.startswith("user "):
+            in_block = line == target_user_line
+            continue
+        if not in_block:
+            continue
+        if line.startswith("topic "):
+            topics.append(line)
+
+    return {
+        "client": {
+            "id": client["id"],
+            "username": client["username"],
+            "client_type": client["client_type"],
+            "enabled": bool(client["enabled"]),
+            "domain_id": client["domain_id"],
+            "site_id": client["site_id"],
+            "device_id": client["device_id"],
+        },
+        "topics": topics,
     }
 
 

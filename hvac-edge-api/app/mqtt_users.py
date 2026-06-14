@@ -8,6 +8,8 @@ import string
 import subprocess
 import re
 
+from app.file_permissions import normalize_mosquitto_file_permissions
+
 
 class MqttUserCommandError(RuntimeError):
     """Raised when mosquitto or broker reload command execution fails."""
@@ -70,6 +72,11 @@ def create_or_update_mqtt_user(username: str, password: str) -> None:
         raise MqttUserCommandError(
             f"mosquitto_passwd failed (code={result.returncode}): {result.stderr.strip()}"
         )
+
+    try:
+        normalize_mosquitto_file_permissions(passwd_file)
+    except PermissionError as exc:
+        raise MqttUserCommandError(f"failed to normalize passwd file permissions: {exc}") from exc
 
 
 def reload_broker() -> None:

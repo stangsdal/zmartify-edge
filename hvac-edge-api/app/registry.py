@@ -75,6 +75,18 @@ def delete_domain(domain_id: int) -> None:
             raise RegistryNotFoundError("domain not found")
 
 
+def rename_domain(domain_id: int, name: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        cur = conn.execute("UPDATE domains SET name = ? WHERE id = ?", (name, domain_id))
+        if cur.rowcount == 0:
+            raise RegistryNotFoundError("domain not found")
+        row = conn.execute(
+            "SELECT id, slug, name, created_at FROM domains WHERE id = ?",
+            (domain_id,),
+        ).fetchone()
+        return _row_to_dict(row) or {}
+
+
 def create_site(domain_id: int, slug: str, name: str) -> dict[str, Any]:
     with get_connection() as conn:
         exists = conn.execute("SELECT 1 FROM domains WHERE id = ?", (domain_id,)).fetchone()
@@ -524,3 +536,18 @@ def delete_mqtt_client(client_id: int) -> None:
         reload_broker()
     except MqttUserCommandError as exc:
         raise RegistryOperationError(str(exc)) from exc
+
+
+def regenerate_acl_now() -> dict[str, Any]:
+    with get_connection() as conn:
+        content = generate_acl_file(conn)
+
+    try:
+        reload_broker()
+    except MqttUserCommandError as exc:
+        raise RegistryOperationError(str(exc)) from exc
+
+    return {
+        "ok": True,
+        "line_count": len(content.splitlines()),
+    }
