@@ -8,6 +8,7 @@ export function DomainsPage() {
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   async function load() {
     try {
@@ -51,15 +52,27 @@ export function DomainsPage() {
             </span>
             <span className="row">
               <Link to={`/domains/${d.id}`}>Open</Link>
-              <button
-                className="danger"
-                onClick={async () => {
-                  await apiFetch(`/domains/${d.id}`, { method: "DELETE" });
-                  await load();
-                }}
-              >
-                Delete
-              </button>
+              {confirmDeleteId === d.id ? (
+                <>
+                  <button
+                    className="danger"
+                    onClick={async () => {
+                      await apiFetch(`/domains/${d.id}`, { method: "DELETE" });
+                      setConfirmDeleteId(null);
+                      await load();
+                    }}
+                  >
+                    Confirm
+                  </button>
+                  <button className="secondary" onClick={() => setConfirmDeleteId(null)}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button className="danger" onClick={() => setConfirmDeleteId(d.id)}>
+                  Delete
+                </button>
+              )}
             </span>
           </li>
         ))}
