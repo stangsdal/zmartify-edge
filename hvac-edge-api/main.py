@@ -54,56 +54,46 @@ app = FastAPI(title="HVAC Edge API", version="0.1.0")
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt")
 
+
+def _create_spa_handler(dist_path: Path):
+    """Factory function to create SPA handler with correct path binding."""
+    def handler(_path: str = "") -> FileResponse:  # noqa: ARG001 - path used by route matching
+        return FileResponse(dist_path / "index.html")
+    return handler
+
+
 # Admin UI (React) at /ui
-_ADMIN_UI_DIST_CANDIDATES = [
+admin_ui_dist_candidates = [
     Path("/admin-ui/dist"),
     Path(__file__).resolve().parent / "admin-ui" / "dist",
     Path(__file__).resolve().parent.parent / "admin-ui" / "dist",
 ]
-for _candidate in _ADMIN_UI_DIST_CANDIDATES:
-    if _candidate.exists():
-        _assets_dir = _candidate / "assets"
-        if _assets_dir.exists():
-            app.mount("/ui/assets", StaticFiles(directory=_assets_dir), name="admin-ui-assets")
+for admin_ui_dist in admin_ui_dist_candidates:
+    if admin_ui_dist.exists():
+        assets_dir = admin_ui_dist / "assets"
+        if assets_dir.exists():
+            app.mount("/ui/assets", StaticFiles(directory=assets_dir), name="admin-ui-assets")
 
-        @app.get("/ui")
-        def admin_ui_root() -> FileResponse:
-            return FileResponse(_candidate / "index.html")
-
-        @app.get("/ui/")
-        def admin_ui_root_slash() -> FileResponse:
-            return FileResponse(_candidate / "index.html")
-
-        @app.get("/ui/{path:path}")
-        def admin_ui_spa(path: str) -> FileResponse:  # noqa: ARG001 - path used by route matching
-            return FileResponse(_candidate / "index.html")
-
+        app.add_api_route("/ui", _create_spa_handler(admin_ui_dist), methods=["GET"])
+        app.add_api_route("/ui/", _create_spa_handler(admin_ui_dist), methods=["GET"])
+        app.add_api_route("/ui/{path:path}", _create_spa_handler(admin_ui_dist), methods=["GET"])
         break
 
 # Ionic PWA (Ionic React) at /app
-_IONIC_PWA_DIST_CANDIDATES = [
+ionic_pwa_dist_candidates = [
     Path("/app-dist"),
     Path(__file__).resolve().parent / "hvac-admin" / "dist",
     Path(__file__).resolve().parent.parent / "hvac-admin" / "dist",
 ]
-for _candidate in _IONIC_PWA_DIST_CANDIDATES:
-    if _candidate.exists():
-        _assets_dir = _candidate / "assets"
-        if _assets_dir.exists():
-            app.mount("/app/assets", StaticFiles(directory=_assets_dir), name="ionic-pwa-assets")
+for ionic_pwa_dist in ionic_pwa_dist_candidates:
+    if ionic_pwa_dist.exists():
+        assets_dir = ionic_pwa_dist / "assets"
+        if assets_dir.exists():
+            app.mount("/app/assets", StaticFiles(directory=assets_dir), name="ionic-pwa-assets")
 
-        @app.get("/app")
-        def ionic_pwa_root() -> FileResponse:
-            return FileResponse(_candidate / "index.html")
-
-        @app.get("/app/")
-        def ionic_pwa_root_slash() -> FileResponse:
-            return FileResponse(_candidate / "index.html")
-
-        @app.get("/app/{path:path}")
-        def ionic_pwa_spa(path: str) -> FileResponse:  # noqa: ARG001 - path used by route matching
-            return FileResponse(_candidate / "index.html")
-
+        app.add_api_route("/app", _create_spa_handler(ionic_pwa_dist), methods=["GET"])
+        app.add_api_route("/app/", _create_spa_handler(ionic_pwa_dist), methods=["GET"])
+        app.add_api_route("/app/{path:path}", _create_spa_handler(ionic_pwa_dist), methods=["GET"])
         break
 
 
