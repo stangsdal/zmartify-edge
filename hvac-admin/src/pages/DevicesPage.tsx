@@ -14,9 +14,47 @@ import {
   IonInput,
   IonLoading,
   IonAlert,
+  IonSpinner,
 } from '@ionic/react';
 import { deviceApi } from '../api/devices';
 import { Device } from '../types/api';
+import { useDeviceZones } from '../hooks/useDeviceZones';
+import { ZoneCard } from '../components/ZoneCard';
+
+function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
+  const { zoneState, loading, error, updateZoneSetpoint, refetch } = useDeviceZones(deviceId);
+
+  if (loading) {
+    return (
+      <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <IonSpinner name="crescent" />
+        <span>Loading zones...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return <p style={{ color: 'red' }}>{error}</p>;
+  }
+
+  if (!zoneState || zoneState.zones.length === 0) {
+    return <p style={{ color: '#666' }}>No zones available for this device.</p>;
+  }
+
+  return (
+    <div style={{ marginTop: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <strong>Zones ({zoneState.zones.length})</strong>
+        <IonButton size="small" fill="outline" onClick={refetch}>
+          Refresh Zones
+        </IonButton>
+      </div>
+      {zoneState.zones.map((zone) => (
+        <ZoneCard key={zone.zone_id} zone={zone} onSetpointChange={updateZoneSetpoint} />
+      ))}
+    </div>
+  );
+}
 
 export function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -30,6 +68,7 @@ export function DevicesPage() {
   const [creating, setCreating] = useState(false);
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
 
   const fetchDevices = async () => {
     try {
@@ -184,36 +223,55 @@ export function DevicesPage() {
         ) : (
           <IonList>
             {devices.map((device) => (
-              <IonItem key={device.device_id}>
-                <IonLabel>
-                  <strong>{device.display_name}</strong>
-                  <p>{device.device_id}</p>
-                  {device.mac && <p>MAC: {device.mac}</p>}
-                  {device.site_id && (
-                    <p style={{ color: '#666' }}>Site ID: {device.site_id}</p>
-                  )}
-                  {device.online !== undefined && (
-                    <p
-                      style={{
-                        color: device.online ? 'green' : 'red',
-                      }}
-                    >
-                      {device.online ? 'Online' : 'Offline'}
-                    </p>
-                  )}
-                </IonLabel>
-                <IonButton
-                  slot="end"
-                  color="danger"
-                  size="small"
-                  onClick={() => {
-                    setDeleteTarget(device.device_id);
-                    setShowDeleteAlert(true);
-                  }}
-                >
-                  Delete
-                </IonButton>
-              </IonItem>
+              <div key={device.device_id}>
+                <IonItem>
+                  <IonLabel>
+                    <strong>{device.display_name}</strong>
+                    <p>{device.device_id}</p>
+                    {device.mac && <p>MAC: {device.mac}</p>}
+                    {device.site_id && (
+                      <p style={{ color: '#666' }}>Site ID: {device.site_id}</p>
+                    )}
+                    {device.online !== undefined && (
+                      <p
+                        style={{
+                          color: device.online ? 'green' : 'red',
+                        }}
+                      >
+                        {device.online ? 'Online' : 'Offline'}
+                      </p>
+                    )}
+                  </IonLabel>
+                  <IonButton
+                    slot="end"
+                    size="small"
+                    fill="outline"
+                    onClick={() =>
+                      setExpandedDeviceId(
+                        expandedDeviceId === device.device_id ? null : device.device_id
+                      )
+                    }
+                  >
+                    {expandedDeviceId === device.device_id ? 'Hide Zones' : 'Zones'}
+                  </IonButton>
+                  <IonButton
+                    slot="end"
+                    color="danger"
+                    size="small"
+                    onClick={() => {
+                      setDeleteTarget(device.device_id);
+                      setShowDeleteAlert(true);
+                    }}
+                  >
+                    Delete
+                  </IonButton>
+                </IonItem>
+                {expandedDeviceId === device.device_id && (
+                  <div style={{ padding: '8px 16px 16px 16px', backgroundColor: '#f8f9fa' }}>
+                    <DeviceZonesPanel deviceId={device.device_id} />
+                  </div>
+                )}
+              </div>
             ))}
           </IonList>
         )}
