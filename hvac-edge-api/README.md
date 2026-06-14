@@ -29,6 +29,9 @@ cd edge
 docker compose up -d --build
 ```
 
+`hvac-edge-api` is now built from `hvac-edge-api/Dockerfile` with system and
+Python dependencies baked into the image.
+
 API endpoints currently:
 
 - `GET /health`
