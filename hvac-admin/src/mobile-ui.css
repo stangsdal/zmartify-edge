@@ -1,0 +1,123 @@
+/* Enhanced Mobile UI Styles - Phase 4 */
+
+:root {
+  --mobile-padding: 12px;
+  --touch-target-min: 44px;
+  --card-border-radius: 8px;
+  --transition-speed: 200ms;
+}
+
+/* Touch-friendly button sizing */
+button, [role="button"], .ion-button {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  transition: background-color var(--transition-speed) ease-in-out;
+}
+
+button:active, [role="button"]:active {
+  opacity: 0.8;
+  transform: scale(0.98);
+}
+
+/* Mobile-optimized card layout */
+.ion-card {
+  border-radius: var(--card-border-radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: box-shadow var(--transition-speed), transform var(--transition-speed);
+}
+
+.ion-card:active {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+/* Responsive grid - single column on mobile */
+@media (max-width: 768px) {
+  .ion-grid {
+    padding: var(--mobile-padding);
+  }
+
+  .ion-row {
+    flex-wrap: wrap;
+  }
+
+  [style*="display: grid"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Form inputs mobile-optimized */
+input, select, textarea {
+  font-size: 16px; /* Prevents zoom on iOS */
+  padding: 12px;
+  border-radius: var(--card-border-radius);
+  border: 1px solid #ccc;
+}
+
+/* Mobile swipe-friendly spacing */
+.ion-list {
+  --ion-item-border-style: solid;
+  --ion-item-border-color: #f0f0f0;
+}
+
+/* Loading states */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading {
+  animation: spin 1s linear infinite;
+}
+
+/* Haptic feedback visual indicator */
+.tap-indicator {
+  position: relative;
+  overflow: hidden;
+}
+
+.tap-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.tap-indicator:active::after {
+  width: 100px;
+  height: 100px;
+  animation: ripple 600ms ease-out;
+}
+
+@keyframes ripple {
+  0% {
+    width: 0;
+    height: 0;
+    opacity: 1;
+  }
+  100% {
+    width: 200px;
+    height: 200px;
+    opacity: 0;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .ion-card {
+    background-color: #1e1e1e;
+    color: #fff;
+  }
+
+  input, select, textarea {
+    background-color: #2d2d2d;
+    color: #fff;
+    border-color: #444;
+  }
+}
