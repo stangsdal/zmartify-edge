@@ -53,3 +53,35 @@ export interface AclPreview {
   client_id: string;
   rules: string[];
 }
+
+export interface LoginResponse {
+  access_token: string;
+  expires_at: string;
+}
+
+export interface SetupStatus {
+  initialized: boolean;
+}
+
+export interface User {
+  id: number;
+  username: string;
+  email?: string;
+  display_name: string;
+  enabled: number;
+  created_at: string;
+  updated_at?: string;
+  last_login_at?: string;
+  roles: string[];
+}
+
+export interface AuditLogEntry {
+  id: number;
+  user_id?: number;
+  username?: string;
+  action: string;
+  resource_type?: string;
+  resource_id?: string;
+  metadata?: string;
+  created_at: string;
+}

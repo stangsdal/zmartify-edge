@@ -12,9 +12,11 @@ import {
   IonCard,
 } from '@ionic/react';
 import { apiClient } from '../api/client';
+import { authApi } from '../api/auth';
 
 export function LoginPage() {
-  const [token, setToken] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [baseUrl, setBaseUrl] = useState(
     () => localStorage.getItem('api_base_url') || 'http://192.168.10.53:8080'
   );
@@ -28,20 +30,24 @@ export function LoginPage() {
     }
   }, [history]);
 
-  const handleSaveToken = () => {
-    if (token.trim()) {
-      apiClient.setAuthToken(token);
+  const handleLogin = async () => {
+    try {
       apiClient.setBaseUrl(baseUrl);
-      setMessage('Token saved');
+      const data = await authApi.login(username, password);
+      apiClient.setAuthToken(data.access_token);
+      setMessage('Login successful');
       setTimeout(() => {
         history.push('/dashboard');
-      }, 500);
+      }, 300);
+    } catch (e) {
+      setMessage(String(e));
     }
   };
 
   const handleClearToken = () => {
-    setToken('');
-    localStorage.removeItem('admin_api_token');
+    setUsername('');
+    setPassword('');
+    apiClient.clearAuthToken();
     setMessage('Token cleared');
   };
 
@@ -64,18 +70,27 @@ export function LoginPage() {
             />
 
             <IonLabel style={{ marginTop: '16px', display: 'block' }}>
-              Admin Bearer Token
+              Username
             </IonLabel>
             <IonInput
-              value={token}
-              onIonChange={(e) => setToken(e.detail.value || '')}
-              placeholder="Bearer token"
+              value={username}
+              onIonChange={(e) => setUsername(e.detail.value || '')}
+              placeholder="admin"
+            />
+
+            <IonLabel style={{ marginTop: '16px', display: 'block' }}>
+              Password
+            </IonLabel>
+            <IonInput
+              value={password}
+              onIonChange={(e) => setPassword(e.detail.value || '')}
+              placeholder="Your password"
               type="password"
             />
 
             <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
-              <IonButton onClick={handleSaveToken} expand="block">
-                Save
+              <IonButton onClick={handleLogin} expand="block">
+                Login
               </IonButton>
               <IonButton onClick={handleClearToken} expand="block" color="medium">
                 Clear

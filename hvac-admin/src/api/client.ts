@@ -24,6 +24,14 @@ export class ApiClient {
     localStorage.setItem('admin_api_token', token);
   }
 
+  clearAuthToken(): void {
+    localStorage.removeItem('admin_api_token');
+  }
+
+  getAuthToken(): string | null {
+    return getAuthToken();
+  }
+
   private getHeaders(): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',

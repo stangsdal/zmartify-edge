@@ -128,3 +128,60 @@ class MqttCredentialOut(BaseModel):
     username: str
     password: str
     password_one_time: bool = True
+
+
+class AuthLoginIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class AuthLoginOut(BaseModel):
+    access_token: str
+    expires_at: str
+
+
+class SetupStatusOut(BaseModel):
+    initialized: bool
+
+
+class UserCreateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    password: str = Field(min_length=12)
+    email: str | None = None
+    roles: list[str] = Field(default_factory=list)
+
+
+class UserRoleUpdateIn(BaseModel):
+    roles: list[str] = Field(default_factory=list)
+
+
+class UserResetPasswordIn(BaseModel):
+    password: str = Field(min_length=12)
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    email: str | None
+    display_name: str
+    enabled: int
+    created_at: str
+    updated_at: str | None
+    last_login_at: str | None
+    roles: list[str]
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    user_id: int | None
+    username: str | None
+    action: str
+    resource_type: str | None
+    resource_id: str | None
+    metadata: str | None
+    created_at: str

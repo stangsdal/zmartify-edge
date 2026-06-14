@@ -1,11 +1,33 @@
 import os
-import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.auth import (
+    AuthError,
+    ROLE_ADMIN,
+    ROLE_INSTALLER,
+    ROLE_OWNER,
+    ROLE_VIEWER,
+    authenticate_bearer_token,
+    authenticate_emergency_token,
+    audit_action,
+    create_user,
+    delete_user,
+    ensure_bootstrap_owner,
+    get_user,
+    is_initialized,
+    list_audit_logs,
+    list_users,
+    login,
+    logout_token,
+    require_any_role,
+    reset_user_password,
+    set_user_enabled,
+    set_user_roles,
+)
 from app.db import get_connection, get_db_path, initialize_database
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.registry import (
@@ -46,13 +68,21 @@ from app.schemas import (
     MqttClientCreate,
     MqttClientOut,
     MqttCredentialOut,
+    SetupStatusOut,
+    UserCreateIn,
+    UserOut,
+    UserResetPasswordIn,
+    UserRoleUpdateIn,
+    AuthLoginIn,
+    AuthLoginOut,
+    AuditLogOut,
     SiteCreate,
     SiteOut,
 )
 
 app = FastAPI(title="HVAC Edge API", version="0.1.0")
 
-_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt")
+_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile")
 
 
 def _create_spa_handler(dist_path: Path):
@@ -109,17 +139,19 @@ async def admin_token_middleware(request: Request, call_next):
     if request.method == "OPTIONS" or not _is_protected_path(request.url.path):
         return await call_next(request)
 
-    configured_token = os.getenv("ADMIN_API_TOKEN", "").strip()
-    if not configured_token:
-        return JSONResponse(status_code=503, content={"detail": "admin token not configured"})
-
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
         return JSONResponse(status_code=401, content={"detail": "missing bearer token"})
 
-    provided_token = authorization[len("Bearer ") :].strip()
-    if not secrets.compare_digest(provided_token, configured_token):
-        return JSONResponse(status_code=403, content={"detail": "invalid bearer token"})
+    token = authorization[len("Bearer ") :].strip()
+    try:
+        auth_user = authenticate_bearer_token(token)
+    except AuthError:
+        auth_user = authenticate_emergency_token(token)
+        if auth_user is None:
+            return JSONResponse(status_code=403, content={"detail": "invalid bearer token"})
+
+    request.state.auth_user = auth_user
 
     return await call_next(request)
 
@@ -127,6 +159,60 @@ async def admin_token_middleware(request: Request, call_next):
 @app.on_event("startup")
 def startup_event() -> None:
     initialize_database()
+    ensure_bootstrap_owner()
+
+
+def _require_roles(request: Request, allowed_roles: set[str]) -> None:
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    try:
+        require_any_role(auth_user, allowed_roles)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.get("/setup/status", response_model=SetupStatusOut)
+def setup_status() -> dict:
+    return {"initialized": is_initialized()}
+
+
+@app.post("/auth/login", response_model=AuthLoginOut)
+def auth_login(payload: AuthLoginIn) -> dict:
+    try:
+        token, expires_at, _user_id = login(payload.username, payload.password)
+        return {"access_token": token, "expires_at": expires_at}
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request) -> dict:
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    logout_token(auth_user.token_id, auth_user.user_id)
+    return {"ok": True}
+
+
+@app.get("/auth/me", response_model=UserOut)
+def auth_me(request: Request) -> dict:
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    if auth_user.user_id is None:
+        return {
+            "id": 0,
+            "username": auth_user.username,
+            "email": None,
+            "display_name": "Emergency Owner",
+            "enabled": 1,
+            "created_at": "",
+            "updated_at": None,
+            "last_login_at": None,
+            "roles": sorted(auth_user.roles),
+        }
+    return get_user(auth_user.user_id)
 
 
 @app.get("/health")
@@ -147,14 +233,16 @@ def registry_status() -> dict:
 
 
 @app.get("/admin/acl/status")
-def acl_status(limit: int = 10) -> dict:
+def acl_status(request: Request, limit: int = 10) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     acl_path = Path(os.getenv("HVAC_EDGE_MQTT_ACL_FILE", "/mosquitto/config/acl"))
     with get_connection() as conn:
         return build_acl_status(conn, acl_path=acl_path, limit=limit)
 
 
 @app.get("/admin/acl/preview/{client_id}")
-def acl_preview(client_id: int) -> dict:
+def acl_preview(client_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     with get_connection() as conn:
         try:
             return build_acl_preview_for_client(conn, client_id)
@@ -163,28 +251,37 @@ def acl_preview(client_id: int) -> dict:
 
 
 @app.post("/admin/acl/regenerate")
-def admin_regenerate_acl() -> dict:
+def admin_regenerate_acl(request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
-        return regenerate_acl_now()
+        result = regenerate_acl_now()
+        auth_user = request.state.auth_user
+        audit_action(actor_user_id=auth_user.user_id, action="acl_regeneration", resource_type="acl")
+        return result
     except RegistryOperationError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @app.post("/domains", response_model=DomainOut, status_code=status.HTTP_201_CREATED)
-def api_create_domain(payload: DomainCreate) -> dict:
+def api_create_domain(payload: DomainCreate, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
-        return create_domain(payload.slug, payload.name)
+        domain = create_domain(payload.slug, payload.name)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="create_domain", resource_type="domain", resource_id=str(domain["id"]))
+        return domain
     except RegistryConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @app.get("/domains", response_model=list[DomainOut])
-def api_list_domains() -> list[dict]:
+def api_list_domains(request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     return list_domains()
 
 
 @app.get("/domains/{domain_id}", response_model=DomainOut)
-def api_get_domain(domain_id: int) -> dict:
+def api_get_domain(domain_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         return get_domain(domain_id)
     except RegistryNotFoundError as exc:
@@ -192,7 +289,8 @@ def api_get_domain(domain_id: int) -> dict:
 
 
 @app.post("/domains/{domain_id}/rename", response_model=DomainOut)
-def api_rename_domain(domain_id: int, payload: DomainRename) -> dict:
+def api_rename_domain(domain_id: int, payload: DomainRename, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
         return rename_domain(domain_id, payload.name)
     except RegistryNotFoundError as exc:
@@ -200,18 +298,23 @@ def api_rename_domain(domain_id: int, payload: DomainRename) -> dict:
 
 
 @app.delete("/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_domain(domain_id: int) -> Response:
+def api_delete_domain(domain_id: int, request: Request) -> Response:
+    _require_roles(request, {ROLE_OWNER})
     try:
         delete_domain(domain_id)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="delete_domain", resource_type="domain", resource_id=str(domain_id))
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/domains/{domain_id}/sites", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
-def api_create_site(domain_id: int, payload: SiteCreate) -> dict:
+def api_create_site(domain_id: int, payload: SiteCreate, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
-        return create_site(domain_id, payload.slug, payload.name)
+        site = create_site(domain_id, payload.slug, payload.name)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="create_site", resource_type="site", resource_id=str(site["id"]))
+        return site
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except RegistryConflictError as exc:
@@ -219,7 +322,8 @@ def api_create_site(domain_id: int, payload: SiteCreate) -> dict:
 
 
 @app.get("/domains/{domain_id}/sites", response_model=list[SiteOut])
-def api_list_sites(domain_id: int) -> list[dict]:
+def api_list_sites(domain_id: int, request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         return list_sites(domain_id)
     except RegistryNotFoundError as exc:
@@ -227,7 +331,8 @@ def api_list_sites(domain_id: int) -> list[dict]:
 
 
 @app.get("/sites/{site_id}", response_model=SiteOut)
-def api_get_site(site_id: int) -> dict:
+def api_get_site(site_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         return get_site(site_id)
     except RegistryNotFoundError as exc:
@@ -235,23 +340,28 @@ def api_get_site(site_id: int) -> dict:
 
 
 @app.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_site(site_id: int) -> Response:
+def api_delete_site(site_id: int, request: Request) -> Response:
+    _require_roles(request, {ROLE_OWNER})
     try:
         delete_site(site_id)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="delete_site", resource_type="site", resource_id=str(site_id))
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/devices", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
-def api_create_device(payload: DeviceCreate) -> dict:
+def api_create_device(payload: DeviceCreate, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
-        return create_device(
+        device = create_device(
             device_id=payload.device_id,
             display_name=payload.display_name,
             mac=payload.mac,
             firmware_version=payload.firmware_version,
         )
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="register_device", resource_type="device", resource_id=device["device_id"])
+        return device
     except RegistryConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RegistryOperationError as exc:
@@ -259,12 +369,14 @@ def api_create_device(payload: DeviceCreate) -> dict:
 
 
 @app.get("/devices", response_model=list[DeviceOut])
-def api_list_devices() -> list[dict]:
+def api_list_devices(request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     return list_devices()
 
 
 @app.get("/devices/{device_id}", response_model=DeviceOut)
-def api_get_device(device_id: str) -> dict:
+def api_get_device(device_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         return get_device(device_id)
     except RegistryNotFoundError as exc:
@@ -272,7 +384,8 @@ def api_get_device(device_id: str) -> dict:
 
 
 @app.post("/devices/{device_id}/assign-site", response_model=DeviceOut)
-def api_assign_site(device_id: str, payload: DeviceAssignSite) -> dict:
+def api_assign_site(device_id: str, payload: DeviceAssignSite, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
         return assign_device_site(device_id, payload.site_id)
     except RegistryNotFoundError as exc:
@@ -280,7 +393,8 @@ def api_assign_site(device_id: str, payload: DeviceAssignSite) -> dict:
 
 
 @app.post("/devices/{device_id}/rename", response_model=DeviceOut)
-def api_rename_device(device_id: str, payload: DeviceRename) -> dict:
+def api_rename_device(device_id: str, payload: DeviceRename, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
         return rename_device(device_id, payload.display_name)
     except RegistryNotFoundError as exc:
@@ -288,16 +402,19 @@ def api_rename_device(device_id: str, payload: DeviceRename) -> dict:
 
 
 @app.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_device(device_id: str) -> Response:
+def api_delete_device(device_id: str, request: Request) -> Response:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
         delete_device(device_id)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="delete_device", resource_type="device", resource_id=device_id)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/mqtt/clients", response_model=MqttCredentialOut, status_code=status.HTTP_201_CREATED)
-def api_create_mqtt_client(payload: MqttClientCreate) -> dict:
+def api_create_mqtt_client(payload: MqttClientCreate, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
         created = create_mqtt_client(
             client_type=payload.client_type,
@@ -306,6 +423,7 @@ def api_create_mqtt_client(payload: MqttClientCreate) -> dict:
             device_pk_id=payload.device_id,
             username=payload.username,
         )
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="create_mqtt_client", resource_type="mqtt_client", resource_id=str(created["id"]))
         return {
             "mqtt_client_id": created["id"],
             "username": created["username"],
@@ -321,12 +439,14 @@ def api_create_mqtt_client(payload: MqttClientCreate) -> dict:
 
 
 @app.get("/mqtt/clients", response_model=list[MqttClientOut])
-def api_list_mqtt_clients() -> list[dict]:
+def api_list_mqtt_clients(request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     return list_mqtt_clients()
 
 
 @app.get("/mqtt/clients/{client_id}", response_model=MqttClientOut)
-def api_get_mqtt_client(client_id: int) -> dict:
+def api_get_mqtt_client(client_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         return get_mqtt_client(client_id)
     except RegistryNotFoundError as exc:
@@ -334,9 +454,12 @@ def api_get_mqtt_client(client_id: int) -> dict:
 
 
 @app.post("/mqtt/clients/{client_id}/rotate-password", response_model=MqttCredentialOut)
-def api_rotate_mqtt_password(client_id: int) -> dict:
+def api_rotate_mqtt_password(client_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
-        return rotate_mqtt_client_password(client_id)
+        rotated = rotate_mqtt_client_password(client_id)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="rotate_mqtt_password", resource_type="mqtt_client", resource_id=str(client_id))
+        return rotated
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except RegistryOperationError as exc:
@@ -344,7 +467,8 @@ def api_rotate_mqtt_password(client_id: int) -> dict:
 
 
 @app.post("/mqtt/clients/{client_id}/disable", response_model=MqttClientOut)
-def api_disable_mqtt_client(client_id: int) -> dict:
+def api_disable_mqtt_client(client_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
         return set_mqtt_client_enabled(client_id, enabled=False)
     except RegistryNotFoundError as exc:
@@ -354,7 +478,8 @@ def api_disable_mqtt_client(client_id: int) -> dict:
 
 
 @app.post("/mqtt/clients/{client_id}/enable", response_model=MqttClientOut)
-def api_enable_mqtt_client(client_id: int) -> dict:
+def api_enable_mqtt_client(client_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
         return set_mqtt_client_enabled(client_id, enabled=True)
     except RegistryNotFoundError as exc:
@@ -364,7 +489,8 @@ def api_enable_mqtt_client(client_id: int) -> dict:
 
 
 @app.delete("/mqtt/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_mqtt_client(client_id: int) -> Response:
+def api_delete_mqtt_client(client_id: int, request: Request) -> Response:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
     try:
         delete_mqtt_client(client_id)
     except RegistryNotFoundError as exc:
@@ -375,7 +501,8 @@ def api_delete_mqtt_client(client_id: int) -> Response:
 
 
 @app.get("/mobile/sites")
-def mobile_sites() -> dict:
+def mobile_sites(request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -401,7 +528,8 @@ def mobile_sites() -> dict:
 
 
 @app.get("/mobile/sites/{site_id}/devices")
-def mobile_site_devices(site_id: int) -> dict:
+def mobile_site_devices(site_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     with get_connection() as conn:
         site = conn.execute("SELECT id, name FROM sites WHERE id = ?", (site_id,)).fetchone()
         if site is None:
@@ -466,7 +594,8 @@ def _default_device_zones(device_id: str) -> list[dict]:
 
 
 @app.get("/mobile/devices/{device_id}")
-def mobile_device(device_id: str) -> dict:
+def mobile_device(device_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     with get_connection() as conn:
         row = conn.execute(
             """
@@ -494,7 +623,8 @@ def mobile_device(device_id: str) -> dict:
 
 
 @app.get("/mobile/devices/{device_id}/zones")
-def mobile_device_zones(device_id: str) -> dict:
+def mobile_device_zones(device_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     with get_connection() as conn:
         exists = conn.execute("SELECT 1 FROM devices WHERE device_id = ?", (device_id,)).fetchone()
 
@@ -505,7 +635,8 @@ def mobile_device_zones(device_id: str) -> dict:
 
 
 @app.post("/mobile/devices/{device_id}/zones/{zone_id}/setpoint")
-def mobile_setpoint(device_id: str, zone_id: int, payload: dict) -> dict:
+def mobile_setpoint(device_id: str, zone_id: int, payload: dict, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     target = payload.get("target_temperature_c")
     if not isinstance(target, (int, float)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_temperature_c must be numeric")
@@ -525,7 +656,8 @@ def mobile_setpoint(device_id: str, zone_id: int, payload: dict) -> dict:
 
 
 @app.get("/mobile/events")
-def mobile_events(limit: int = 50) -> dict:
+def mobile_events(request: Request, limit: int = 50) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     safe_limit = max(1, min(limit, 200))
     with get_connection() as conn:
         rows = conn.execute(
@@ -550,3 +682,101 @@ def mobile_events(limit: int = 50) -> dict:
             for row in rows
         ]
     }
+
+
+@app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def api_create_user(payload: UserCreateIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    try:
+        return create_user(
+            actor_user_id=request.state.auth_user.user_id,
+            username=payload.username,
+            display_name=payload.display_name,
+            password=payload.password,
+            email=payload.email,
+            roles=payload.roles,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/users", response_model=list[UserOut])
+def api_list_users(request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    return list_users()
+
+
+@app.get("/users/{user_id}", response_model=UserOut)
+def api_get_user(user_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    try:
+        return get_user(user_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/users/{user_id}/disable", response_model=UserOut)
+def api_disable_user(user_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    try:
+        return set_user_enabled(actor_user_id=request.state.auth_user.user_id, user_id=user_id, enabled=False)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/users/{user_id}/enable", response_model=UserOut)
+def api_enable_user(user_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    try:
+        return set_user_enabled(actor_user_id=request.state.auth_user.user_id, user_id=user_id, enabled=True)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/users/{user_id}/reset-password", response_model=UserOut)
+def api_reset_user_password(user_id: int, payload: UserResetPasswordIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    try:
+        return reset_user_password(
+            actor_user_id=request.state.auth_user.user_id,
+            user_id=user_id,
+            password=payload.password,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/users/{user_id}/roles", response_model=UserOut)
+def api_set_user_roles(user_id: int, payload: UserRoleUpdateIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    actor = request.state.auth_user
+    if ROLE_ADMIN in actor.roles and ROLE_OWNER in set(payload.roles):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin cannot assign owner role")
+    try:
+        return set_user_roles(
+            actor_user_id=actor.user_id,
+            user_id=user_id,
+            roles=payload.roles,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def api_delete_user(user_id: int, request: Request) -> Response:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    actor = request.state.auth_user
+    target = get_user(user_id)
+    if ROLE_OWNER in target["roles"] and ROLE_OWNER not in actor.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="only owner can delete owner")
+    try:
+        delete_user(actor_user_id=actor.user_id, user_id=user_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/admin/audit-log", response_model=list[AuditLogOut])
+def api_audit_log(request: Request, limit: int = 200) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    return list_audit_logs(limit=limit)
