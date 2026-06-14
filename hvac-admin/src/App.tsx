@@ -9,6 +9,7 @@ import {
 import {
   homeOutline,
   folderOutline,
+  gridOutline,
   phonePortraitOutline,
   wifiOutline,
   settingsOutline,
@@ -18,6 +19,7 @@ import { useHistory } from 'react-router-dom';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DomainsPage } from './pages/DomainsPage';
+import { SitesPage } from './pages/SitesPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { MqttClientsPage } from './pages/MqttClientsPage';
 import { SystemPage } from './pages/SystemPage';
@@ -37,6 +39,7 @@ export function App() {
         <Route exact path="/login" component={LoginPage} />
         <Route exact path="/dashboard" component={DashboardPage} />
         <Route exact path="/domains" component={DomainsPage} />
+        <Route exact path="/sites" component={SitesPage} />
         <Route exact path="/devices" component={DevicesPage} />
         <Route exact path="/mqtt-clients" component={MqttClientsPage} />
         <Route exact path="/system" component={SystemPage} />
@@ -52,6 +55,11 @@ export function App() {
         <IonTabButton tab="domains" href="/domains">
           <IonIcon icon={folderOutline} />
           Domains
+        </IonTabButton>
+
+        <IonTabButton tab="sites" href="/sites">
+          <IonIcon icon={gridOutline} />
+          Sites
         </IonTabButton>
 
         <IonTabButton tab="devices" href="/devices">
