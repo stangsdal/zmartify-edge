@@ -1,6 +1,10 @@
+import os
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Response, status
 
-from app.db import get_db_path, initialize_database
+from app.db import get_connection, get_db_path, initialize_database
+from app.mqtt_acl import build_acl_status
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -63,6 +67,13 @@ def registry_status() -> dict:
         "phase": "C",
         "status": "registry_and_mqtt_client_lifecycle_enabled",
     }
+
+
+@app.get("/admin/acl/status")
+def acl_status(limit: int = 10) -> dict:
+    acl_path = Path(os.getenv("HVAC_EDGE_MQTT_ACL_FILE", "/mosquitto/config/acl"))
+    with get_connection() as conn:
+        return build_acl_status(conn, acl_path=acl_path, limit=limit)
 
 
 @app.post("/domains", response_model=DomainOut, status_code=status.HTTP_201_CREATED)

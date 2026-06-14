@@ -130,6 +130,47 @@ def _log_generation(conn: sqlite3.Connection, success: bool, message: str) -> No
     )
 
 
+def build_acl_status(conn: sqlite3.Connection, *, acl_path: Path, limit: int) -> dict:
+    safe_limit = max(1, min(limit, 100))
+    exists = acl_path.exists()
+    size_bytes = acl_path.stat().st_size if exists else 0
+    checksum = None
+    if exists:
+        import hashlib
+
+        checksum = hashlib.sha256(acl_path.read_bytes()).hexdigest()
+
+    rows = conn.execute(
+        """
+        SELECT id, success, message, generated_at
+        FROM acl_generation_log
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (safe_limit,),
+    ).fetchall()
+
+    logs = [
+        {
+            "id": row["id"],
+            "success": bool(row["success"]),
+            "message": row["message"],
+            "generated_at": row["generated_at"],
+        }
+        for row in rows
+    ]
+
+    return {
+        "acl_file": {
+            "path": str(acl_path),
+            "exists": exists,
+            "size_bytes": size_bytes,
+            "sha256": checksum,
+        },
+        "generation_logs": logs,
+    }
+
+
 def generate_acl_file(conn: sqlite3.Connection) -> str:
     clients, devices, sites = _load_acl_sources(conn)
     content = _render_acl_content(clients, devices, sites)
