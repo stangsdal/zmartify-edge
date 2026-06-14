@@ -20,9 +20,16 @@ def _acl_output_path() -> Path:
 
 def _write_acl_atomic(output_path: Path, content: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    tmp_path.replace(output_path)
+    if output_path.exists():
+        # Write in-place to preserve existing ownership/permissions (important
+        # when the broker process owns the file and this process runs as a
+        # different user but still has write access via group or world bits).
+        with output_path.open("w", encoding="utf-8") as fh:
+            fh.write(content)
+    else:
+        tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(output_path)
 
 
 def _load_acl_sources(conn: sqlite3.Connection) -> tuple[list[sqlite3.Row], list[sqlite3.Row], list[sqlite3.Row]]:
@@ -104,7 +111,7 @@ def _render_acl_content(clients: list[sqlite3.Row], devices: list[sqlite3.Row], 
             for dev_id in domain_devices.get(resolved_domain_id, []):
                 lines.append(f"topic read homie/5/{dev_id}/#")
                 if client_type in {"homeassistant", "homey", "service"}:
-                    lines.append(f"topic write homie/5/{dev_id}/zone-+/target-temperature/set")
+                    lines.append(f"topic write homie/5/{dev_id}/+/target-temperature/set")
         else:
             # Conservative fallback for unscoped service users.
             if client_type == "service":

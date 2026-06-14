@@ -51,7 +51,7 @@ def test_acl_generation_contains_expected_topics(monkeypatch, tmp_path):
     assert "topic readwrite homie/5/hvac-gateway-7a254c/#" in acl_content
     assert "user homeassistant_house" in acl_content
     assert "topic read homie/5/hvac-gateway-7a254c/#" in acl_content
-    assert "topic write homie/5/hvac-gateway-7a254c/zone-+/target-temperature/set" in acl_content
+    assert "topic write homie/5/hvac-gateway-7a254c/+/target-temperature/set" in acl_content
 
 
 def test_acl_generation_log_written(monkeypatch, tmp_path):
