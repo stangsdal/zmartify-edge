@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
 from app.mqtt_users import should_apply_external_commands
+
+
+_ACL_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+_TOPIC_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -77,8 +82,18 @@ def _render_acl_content(clients: list[sqlite3.Row], devices: list[sqlite3.Row], 
 
     device_id_by_pk = {row["id"]: row["device_id"] for row in devices}
 
+    def safe_username(username: str) -> str:
+        if not _ACL_USERNAME_RE.fullmatch(username):
+            raise ValueError(f"invalid ACL username: {username!r}")
+        return username
+
+    def safe_topic_segment(segment: str) -> str:
+        if not _TOPIC_SEGMENT_RE.fullmatch(segment):
+            raise ValueError(f"invalid ACL topic segment: {segment!r}")
+        return segment
+
     for client in clients:
-        username = client["username"]
+        username = safe_username(client["username"])
         client_type = client["client_type"]
         domain_id = client["domain_id"]
         site_id = client["site_id"]
@@ -98,7 +113,7 @@ def _render_acl_content(clients: list[sqlite3.Row], devices: list[sqlite3.Row], 
             if device_topic_id is None and username.startswith("device_"):
                 device_topic_id = username[len("device_"):]
             if device_topic_id:
-                lines.append(f"topic readwrite homie/5/{device_topic_id}/#")
+                lines.append(f"topic readwrite homie/5/{safe_topic_segment(device_topic_id)}/#")
             lines.append("")
             continue
 
@@ -109,9 +124,10 @@ def _render_acl_content(clients: list[sqlite3.Row], devices: list[sqlite3.Row], 
 
         if resolved_domain_id is not None:
             for dev_id in domain_devices.get(resolved_domain_id, []):
-                lines.append(f"topic read homie/5/{dev_id}/#")
+                safe_dev_id = safe_topic_segment(dev_id)
+                lines.append(f"topic read homie/5/{safe_dev_id}/#")
                 if client_type in {"homeassistant", "homey", "service"}:
-                    lines.append(f"topic write homie/5/{dev_id}/+/target-temperature/set")
+                    lines.append(f"topic write homie/5/{safe_dev_id}/+/target-temperature/set")
         else:
             # Conservative fallback for unscoped service users.
             if client_type == "service":
