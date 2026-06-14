@@ -54,6 +54,7 @@ app = FastAPI(title="HVAC Edge API", version="0.1.0")
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt")
 
+# Admin UI (React) at /ui
 _ADMIN_UI_DIST_CANDIDATES = [
     Path("/admin-ui/dist"),
     Path(__file__).resolve().parent / "admin-ui" / "dist",
@@ -75,6 +76,32 @@ for _candidate in _ADMIN_UI_DIST_CANDIDATES:
 
         @app.get("/ui/{path:path}")
         def admin_ui_spa(path: str) -> FileResponse:  # noqa: ARG001 - path used by route matching
+            return FileResponse(_candidate / "index.html")
+
+        break
+
+# Ionic PWA (Ionic React) at /app
+_IONIC_PWA_DIST_CANDIDATES = [
+    Path("/app-dist"),
+    Path(__file__).resolve().parent / "hvac-admin" / "dist",
+    Path(__file__).resolve().parent.parent / "hvac-admin" / "dist",
+]
+for _candidate in _IONIC_PWA_DIST_CANDIDATES:
+    if _candidate.exists():
+        _assets_dir = _candidate / "assets"
+        if _assets_dir.exists():
+            app.mount("/app/assets", StaticFiles(directory=_assets_dir), name="ionic-pwa-assets")
+
+        @app.get("/app")
+        def ionic_pwa_root() -> FileResponse:
+            return FileResponse(_candidate / "index.html")
+
+        @app.get("/app/")
+        def ionic_pwa_root_slash() -> FileResponse:
+            return FileResponse(_candidate / "index.html")
+
+        @app.get("/app/{path:path}")
+        def ionic_pwa_spa(path: str) -> FileResponse:  # noqa: ARG001 - path used by route matching
             return FileResponse(_candidate / "index.html")
 
         break
