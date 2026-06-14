@@ -23,6 +23,7 @@ import { SitesPage } from './pages/SitesPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { MqttClientsPage } from './pages/MqttClientsPage';
 import { SystemPage } from './pages/SystemPage';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
 export function App() {
   const history = useHistory();
@@ -34,7 +35,9 @@ export function App() {
   };
 
   return (
-    <IonTabs>
+    <>
+      <OfflineIndicator />
+      <IonTabs>
       <IonRouterOutlet>
         <Route exact path="/login" component={LoginPage} />
         <Route exact path="/dashboard" component={DashboardPage} />
@@ -83,6 +86,7 @@ export function App() {
         </IonTabButton>
       </IonTabBar>
     </IonTabs>
+    </>
   );
 }
 
