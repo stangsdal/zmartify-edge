@@ -8,9 +8,22 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .ts,.tsx"
+    "lint": "eslint . --ext .ts,.tsx",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:ios": "npm run cap:sync && npx cap open ios",
+    "cap:android": "npm run cap:sync && npx cap open android",
+    "cap:copy": "npx cap copy",
+    "phase:deploy": "npm run build && cd ../../ && ./ops/deploy_edge.sh"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/cli": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.4.0",
+    "@capacitor/keyboard": "^8.0.3",
+    "@capacitor/status-bar": "^8.0.2",
     "@ionic/react": "^8.0.0",
     "@ionic/react-router": "^8.0.0",
     "ionicons": "^7.1.0",
