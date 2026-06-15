@@ -71,6 +71,12 @@ def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c:
         ]
     )
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+    except FileNotFoundError as exc:
+        raise MqttCommandError("mosquitto_pub binary not found in edge-api container") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise MqttCommandError("mosquitto publish timed out") from exc
+
     if result.returncode != 0:
         raise MqttCommandError(f"mosquitto_pub failed: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}")
