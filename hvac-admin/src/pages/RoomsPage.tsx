@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { RoomCard } from '../components/RoomCard';
 import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { apiClient } from '../api/client';
 
 interface RoomWithRef extends MobileZone {
   zone_ref: string;
@@ -15,6 +16,7 @@ export function RoomsPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
+  const socketsRef = useRef<Map<string, WebSocket>>(new Map());
 
   const handleRename = async (room: RoomWithRef) => {
     const nextName = window.prompt('New room name', room.name);
@@ -30,6 +32,42 @@ export function RoomsPage() {
     } catch (error) {
       window.alert(String(error));
     }
+  };
+
+  const subscribeToZoneUpdates = (zoneRef: string) => {
+    const token = apiClient.getAuthToken();
+    if (!token) return;
+
+    const rawBase = localStorage.getItem('api_base_url') || window.location.origin;
+    const wsBase = rawBase.startsWith('https://')
+      ? rawBase.replace('https://', 'wss://')
+      : rawBase.replace('http://', 'ws://');
+
+    const endpoint = `${wsBase}/mobile/ws/zones/${encodeURIComponent(zoneRef)}?token=${encodeURIComponent(token)}`;
+    const socket = new WebSocket(endpoint);
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === 'zone_update' && payload.zone) {
+          setRooms((prev) =>
+            prev.map((room) =>
+              room.zone_ref === zoneRef
+                ? { ...room, ...payload.zone }
+                : room
+            )
+          );
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    };
+
+    socket.onerror = () => {
+      socket?.close();
+    };
+
+    socketsRef.current.set(zoneRef, socket);
   };
 
   useEffect(() => {
@@ -56,6 +94,21 @@ export function RoomsPage() {
     };
     loadRooms().catch(console.error);
   }, [selectedSite]);
+
+  useEffect(() => {
+    // Subscribe to updates for each room
+    rooms.forEach((room) => {
+      if (!socketsRef.current.has(room.zone_ref)) {
+        subscribeToZoneUpdates(room.zone_ref);
+      }
+    });
+
+    // Cleanup sockets when component unmounts or rooms change
+    return () => {
+      socketsRef.current.forEach((socket) => socket?.close());
+      socketsRef.current.clear();
+    };
+  }, [rooms]);
 
   const sortedRooms = useMemo(() => {
     return [...rooms].sort((a, b) => a.name.localeCompare(b.name));
