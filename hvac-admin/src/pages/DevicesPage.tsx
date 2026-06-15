@@ -283,6 +283,14 @@ export function DevicesPage() {
                   </IonButton>
                   <IonButton
                     slot="end"
+                    size="small"
+                    fill="outline"
+                    onClick={() => history.push(`/app/devices/${device.device_id}/history`)}
+                  >
+                    History
+                  </IonButton>
+                  <IonButton
+                    slot="end"
                     color="danger"
                     size="small"
                     onClick={() => {

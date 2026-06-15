@@ -739,6 +739,124 @@ def get_device_freshness(device_external_id: str) -> dict[str, Any]:
     }
 
 
+_HISTORY_WINDOWS: dict[str, tuple[timedelta, int]] = {
+    "1h": (timedelta(hours=1), 60),
+    "24h": (timedelta(hours=24), 300),
+    "7d": (timedelta(days=7), 3600),
+    "30d": (timedelta(days=30), 21600),
+}
+
+
+def _history_window(window: str) -> tuple[timedelta, int]:
+    if window not in _HISTORY_WINDOWS:
+        raise DomainModelError("window must be one of: 1h, 24h, 7d, 30d")
+    return _HISTORY_WINDOWS[window]
+
+
+def _aggregate_numeric_points(rows: list[Any], *, value_key: str, bucket_seconds: int, now: datetime) -> list[dict[str, Any]]:
+    grouped: dict[int, list[float]] = {}
+    for row in rows:
+        created = _parse_iso_datetime(row["created_at"])
+        if created is None:
+            continue
+        value = row[value_key]
+        if value is None:
+            continue
+        epoch = int(created.timestamp())
+        bucket = epoch - (epoch % bucket_seconds)
+        grouped.setdefault(bucket, []).append(float(value))
+
+    result: list[dict[str, Any]] = []
+    for bucket in sorted(grouped.keys()):
+        values = grouped[bucket]
+        avg_value = sum(values) / len(values)
+        bucket_dt = datetime.fromtimestamp(bucket, tz=UTC)
+        result.append({"bucket_start": bucket_dt.isoformat(), "value": round(avg_value, 3), "age_ms": _age_ms(bucket_dt.isoformat(), now)})
+    return result
+
+
+def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
+    span, bucket_seconds = _history_window(window)
+    now = datetime.now(UTC)
+    cutoff = (now - span).replace(microsecond=0).isoformat()
+    device_external_id, zone_id = resolve_zone_ref(zone_ref)
+
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        temp_rows = conn.execute(
+            """
+            SELECT current_temperature, target_temperature, created_at
+            FROM temperature_history
+            WHERE device_id = ? AND zone_id = ? AND created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (device["id"], zone_id, cutoff),
+        ).fetchall()
+        setpoint_rows = conn.execute(
+            """
+            SELECT target_temperature, created_at
+            FROM setpoint_history
+            WHERE device_id = ? AND zone_id = ? AND created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (device["id"], zone_id, cutoff),
+        ).fetchall()
+        demand_rows = conn.execute(
+            """
+            SELECT demand, created_at
+            FROM demand_history
+            WHERE device_id = ? AND zone_id = ? AND created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (device["id"], zone_id, cutoff),
+        ).fetchall()
+
+    temperature_current = _aggregate_numeric_points(temp_rows, value_key="current_temperature", bucket_seconds=bucket_seconds, now=now)
+    temperature_target = _aggregate_numeric_points(temp_rows, value_key="target_temperature", bucket_seconds=bucket_seconds, now=now)
+    setpoint_points = _aggregate_numeric_points(setpoint_rows, value_key="target_temperature", bucket_seconds=bucket_seconds, now=now)
+    demand_points = _aggregate_numeric_points(demand_rows, value_key="demand", bucket_seconds=bucket_seconds, now=now)
+
+    return {
+        "device_id": device_external_id,
+        "zone_id": zone_id,
+        "zone_ref": zone_ref,
+        "window": window,
+        "bucket_seconds": bucket_seconds,
+        "temperature_current": temperature_current,
+        "temperature_target": temperature_target,
+        "setpoint": setpoint_points,
+        "demand": demand_points,
+    }
+
+
+def get_device_history(device_external_id: str, *, window: str = "24h") -> dict[str, Any]:
+    span, bucket_seconds = _history_window(window)
+    now = datetime.now(UTC)
+    cutoff = (now - span).replace(microsecond=0).isoformat()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        health_rows = conn.execute(
+            """
+            SELECT online, mqtt_connected, created_at
+            FROM device_health_history
+            WHERE device_id = ? AND created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (device["id"], cutoff),
+        ).fetchall()
+
+    online_points = _aggregate_numeric_points(health_rows, value_key="online", bucket_seconds=bucket_seconds, now=now)
+    mqtt_points = _aggregate_numeric_points(health_rows, value_key="mqtt_connected", bucket_seconds=bucket_seconds, now=now)
+
+    return {
+        "device_id": device_external_id,
+        "window": window,
+        "bucket_seconds": bucket_seconds,
+        "online": online_points,
+        "mqtt_connected": mqtt_points,
+    }
+
+
 def _insert_notifications_for_event(conn: Any, event_id: int, event_type: str) -> None:
     if event_type not in NOTIFICATION_EVENT_TYPES:
         return

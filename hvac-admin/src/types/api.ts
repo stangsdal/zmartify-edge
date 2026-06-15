@@ -58,6 +58,7 @@ export interface DeviceClaimRequest {
 }
 
 export interface Zone {
+  zone_uuid?: string;
   zone_id: string | number;
   name: string;
   target_temperature_c?: number;
@@ -86,6 +87,32 @@ export interface DeviceFreshness {
     source_timestamp?: string | null;
     freshness_age_ms?: number | null;
   }>;
+}
+
+export interface HistoryPoint {
+  bucket_start: string;
+  value: number;
+  age_ms: number | null;
+}
+
+export interface DeviceHistory {
+  device_id: string;
+  window: '1h' | '24h' | '7d' | '30d';
+  bucket_seconds: number;
+  online: HistoryPoint[];
+  mqtt_connected: HistoryPoint[];
+}
+
+export interface ZoneHistory {
+  device_id: string;
+  zone_id: number;
+  zone_ref: string;
+  window: '1h' | '24h' | '7d' | '30d';
+  bucket_seconds: number;
+  temperature_current: HistoryPoint[];
+  temperature_target: HistoryPoint[];
+  setpoint: HistoryPoint[];
+  demand: HistoryPoint[];
 }
 
 export interface MqttClient {

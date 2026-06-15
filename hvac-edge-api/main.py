@@ -39,8 +39,10 @@ from app.device_onboarding import (
 from app.domain_model import (
     DomainModelError,
     get_device_channel,
+    get_device_history,
     get_device_freshness,
     get_device_zone,
+    get_zone_history,
     get_mobile_site,
     ingest_device_twin_snapshot,
     list_device_channels,
@@ -1074,6 +1076,28 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             "command_state": "queued",
             "zone": zone,
         }
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/mobile/zones/{zone_ref}/history")
+def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return get_zone_history(zone_ref, window=window)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/mobile/devices/{device_id}/history")
+def mobile_device_history(device_id: str, request: Request, window: str = "24h") -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return get_device_history(device_id, window=window)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:

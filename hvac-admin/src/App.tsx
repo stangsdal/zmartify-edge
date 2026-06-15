@@ -33,6 +33,7 @@ import { UsersPage } from './pages/UsersPage';
 import { RolesPage } from './pages/RolesPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { DeviceHistoryPage } from './pages/DeviceHistoryPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { authApi } from './api/auth';
@@ -68,6 +69,7 @@ export function App() {
         <Route exact path={`${appBase}/sites`} component={SitesPage} />
         <Route exact path={`${appBase}/devices`} component={DevicesPage} />
         <Route exact path={`${appBase}/devices/add`} component={AddDevicePage} />
+        <Route exact path={`${appBase}/devices/:id/history`} component={DeviceHistoryPage} />
         <Route exact path={`${appBase}/mqtt-clients`} component={MqttClientsPage} />
         <Route exact path={`${appBase}/system`} component={SystemPage} />
         <Route exact path={`${appBase}/users`} component={UsersPage} />

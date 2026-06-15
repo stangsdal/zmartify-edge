@@ -471,6 +471,45 @@ def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):
     assert health_count >= 1
 
 
+def test_mobile_history_endpoints(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-hist02")
+    zones = client.get(f"/devices/{device_id}/zones", headers=headers)
+    assert zones.status_code == 200
+    zone_ref = zones.json()[0]["zone_uuid"]
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 20.9, "target_temperature_c": 21.4, "demand": True}],
+        },
+    )
+    assert ingest.status_code == 200
+
+    zone_history = client.get(f"/mobile/zones/{zone_ref}/history", headers=headers, params={"window": "24h"})
+    assert zone_history.status_code == 200
+    zone_body = zone_history.json()
+    assert zone_body["device_id"] == device_id
+    assert zone_body["window"] == "24h"
+    assert isinstance(zone_body["temperature_current"], list)
+
+    device_history = client.get(f"/mobile/devices/{device_id}/history", headers=headers, params={"window": "24h"})
+    assert device_history.status_code == 200
+    device_body = device_history.json()
+    assert device_body["device_id"] == device_id
+    assert device_body["window"] == "24h"
+    assert isinstance(device_body["online"], list)
+
+    invalid = client.get(f"/mobile/devices/{device_id}/history", headers=headers, params={"window": "2h"})
+    assert invalid.status_code == 400
+
+
 def test_device_admin_token_can_ingest_for_own_device_only(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     admin_headers = {"Authorization": "Bearer emergency-token"}
