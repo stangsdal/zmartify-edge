@@ -80,3 +80,31 @@ def test_user_crud_with_owner(monkeypatch, tmp_path: Path):
     audit = client.get("/admin/audit-log", headers=headers)
     assert audit.status_code == 200
     assert len(audit.json()) >= 1
+
+
+def test_auth_me_with_bearer_token(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HVAC_EDGE_ENABLE_EMERGENCY_TOKEN", "1")
+    monkeypatch.setenv("ADMIN_API_TOKEN", "emergency-token")
+    client = _client(monkeypatch, tmp_path)
+
+    headers = {"Authorization": "Bearer emergency-token"}
+    created = client.post(
+        "/users",
+        headers=headers,
+        json={
+            "username": "admin2",
+            "display_name": "Admin Two",
+            "password": "VeryStrongPass123!",
+            "roles": ["admin"],
+        },
+    )
+    assert created.status_code == 201
+
+    login = client.post("/auth/login", json={"username": "admin2", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["username"] == "admin2"
+    assert "admin" in me.json()["roles"]

@@ -145,6 +145,7 @@ from app.schemas import (
 app = FastAPI(title="HVAC Edge API", version="0.1.0")
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
+_PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
 
 
 def _extract_device_ingest_device_id(path: str) -> str | None:
@@ -197,6 +198,8 @@ for ionic_pwa_dist in ionic_pwa_dist_candidates:
 
 
 def _is_protected_path(path: str) -> bool:
+    if path in _PROTECTED_EXACT_PATHS:
+        return True
     for prefix in _PROTECTED_PREFIXES:
         if path == prefix or path.startswith(prefix + "/"):
             return True
