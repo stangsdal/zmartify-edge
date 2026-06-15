@@ -29,6 +29,7 @@ class DomainRename(BaseModel):
 
 class DomainOut(BaseModel):
     id: int
+    uuid: str | None = None
     slug: str
     name: str
     created_at: str
@@ -50,6 +51,7 @@ class SiteCreate(BaseModel):
 
 class SiteOut(BaseModel):
     id: int
+    uuid: str | None = None
     domain_id: int
     slug: str
     name: str
@@ -84,6 +86,7 @@ class DeviceRename(BaseModel):
 
 class DeviceOut(BaseModel):
     id: int
+    uuid: str | None = None
     device_id: str
     display_name: str
     mac: str | None
@@ -365,6 +368,7 @@ class UserResetPasswordIn(BaseModel):
 
 class UserOut(BaseModel):
     id: int
+    uuid: str | None = None
     username: str
     email: str | None
     display_name: str

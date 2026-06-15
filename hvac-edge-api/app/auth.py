@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -40,6 +41,10 @@ def _now_utc() -> datetime:
 
 def _iso(dt: datetime) -> str:
     return dt.isoformat()
+
+
+def _new_uuid() -> str:
+    return str(uuid.uuid4())
 
 
 def hash_password(password: str) -> str:
@@ -101,10 +106,10 @@ def ensure_bootstrap_owner() -> None:
         password_hash = hash_password(password)
         cur = conn.execute(
             """
-            INSERT INTO users(username, display_name, password_hash, enabled)
-            VALUES (?, ?, ?, 1)
+            INSERT INTO users(uuid, username, display_name, password_hash, enabled)
+            VALUES (?, ?, ?, ?, 1)
             """,
-            ("admin", "Administrator", password_hash),
+            (_new_uuid(), "admin", "Administrator", password_hash),
         )
 
         roles = _role_ids(conn)
@@ -341,7 +346,7 @@ def list_users() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, username, email, display_name, enabled, created_at, updated_at, last_login_at
+            SELECT id, uuid, username, email, display_name, enabled, created_at, updated_at, last_login_at
             FROM users
             ORDER BY id
             """
@@ -352,6 +357,7 @@ def list_users() -> list[dict]:
             out.append(
                 {
                     "id": row["id"],
+                    "uuid": row["uuid"],
                     "username": row["username"],
                     "email": row["email"],
                     "display_name": row["display_name"],
@@ -369,7 +375,7 @@ def get_user(user_id: int) -> dict:
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT id, username, email, display_name, enabled, created_at, updated_at, last_login_at
+            SELECT id, uuid, username, email, display_name, enabled, created_at, updated_at, last_login_at
             FROM users
             WHERE id = ?
             """,
@@ -379,6 +385,7 @@ def get_user(user_id: int) -> dict:
             raise AuthError("user not found")
         return {
             "id": row["id"],
+            "uuid": row["uuid"],
             "username": row["username"],
             "email": row["email"],
             "display_name": row["display_name"],
@@ -398,10 +405,10 @@ def create_user(*, actor_user_id: int | None, username: str, display_name: str, 
         try:
             cur = conn.execute(
                 """
-                INSERT INTO users(username, email, display_name, password_hash, enabled)
-                VALUES (?, ?, ?, ?, 1)
+                INSERT INTO users(uuid, username, email, display_name, password_hash, enabled)
+                VALUES (?, ?, ?, ?, ?, 1)
                 """,
-                (username, email, display_name, hash_password(password)),
+                (_new_uuid(), username, email, display_name, hash_password(password)),
             )
         except sqlite3.IntegrityError as exc:
             raise AuthError("username already exists") from exc
