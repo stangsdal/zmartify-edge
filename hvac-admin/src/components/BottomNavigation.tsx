@@ -13,36 +13,33 @@ export function BottomNavigation({ appBase, isAdmin = false }: BottomNavigationP
         <IonIcon icon={homeOutline} />
         Home
       </IonTabButton>
-      {isAdmin ? (
-        <>
-          <IonTabButton tab="devices" href={`${appBase}/devices`}>
-            <IonIcon icon={hardwareChipOutline} />
-            Devices
-          </IonTabButton>
-          <IonTabButton tab="users" href={`${appBase}/users`}>
-            <IonIcon icon={peopleOutline} />
-            Users
-          </IonTabButton>
-          <IonTabButton tab="rooms" href={`${appBase}/rooms`}>
-            <IonIcon icon={gridOutline} />
-            Rooms
-          </IonTabButton>
-        </>
-      ) : (
-        <>
-          <IonTabButton tab="rooms" href={`${appBase}/rooms`}>
-            <IonIcon icon={gridOutline} />
-            Rooms
-          </IonTabButton>
-          <IonTabButton tab="history" href={`${appBase}/history`}>
-            <IonIcon icon={statsChartOutline} />
-            History
-          </IonTabButton>
-          <IonTabButton tab="alerts" href={`${appBase}/alerts`}>
-            <IonIcon icon={notificationsOutline} />
-            Alerts
-          </IonTabButton>
-        </>
+      {isAdmin && (
+        <IonTabButton tab="devices" href={`${appBase}/devices`}>
+          <IonIcon icon={hardwareChipOutline} />
+          Devices
+        </IonTabButton>
+      )}
+      {isAdmin && (
+        <IonTabButton tab="users" href={`${appBase}/users`}>
+          <IonIcon icon={peopleOutline} />
+          Users
+        </IonTabButton>
+      )}
+      <IonTabButton tab="rooms" href={`${appBase}/rooms`}>
+        <IonIcon icon={gridOutline} />
+        Rooms
+      </IonTabButton>
+      {!isAdmin && (
+        <IonTabButton tab="history" href={`${appBase}/history`}>
+          <IonIcon icon={statsChartOutline} />
+          History
+        </IonTabButton>
+      )}
+      {!isAdmin && (
+        <IonTabButton tab="alerts" href={`${appBase}/alerts`}>
+          <IonIcon icon={notificationsOutline} />
+          Alerts
+        </IonTabButton>
       )}
       <IonTabButton tab="settings" href={`${appBase}/settings`}>
         <IonIcon icon={settingsOutline} />
