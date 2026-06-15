@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
+  IonAlert,
   IonContent,
   IonHeader,
+  IonLoading,
   IonTitle,
   IonToolbar,
   IonPage,
@@ -14,15 +16,21 @@ import {
   IonList,
 } from '@ionic/react';
 import { usersApi } from '../api/users';
-import { User } from '../types/api';
+import { domainApi } from '../api/domains';
+import { siteApi } from '../api/sites';
+import { Domain, Site, User } from '../types/api';
 
 export function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [siteOptions, setSiteOptions] = useState<Array<{ id: number; label: string }>>([]);
   const [error, setError] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [roles, setRoles] = useState('viewer');
+  const [siteAccessUser, setSiteAccessUser] = useState<User | null>(null);
+  const [siteAccessSelected, setSiteAccessSelected] = useState<number[]>([]);
+  const [siteAccessLoading, setSiteAccessLoading] = useState(false);
 
   const load = async () => {
     try {
@@ -33,8 +41,28 @@ export function UsersPage() {
     }
   };
 
+  const loadSiteOptions = async () => {
+    try {
+      const domains: Domain[] = await domainApi.list();
+      const siteLists = await Promise.all(domains.map((domain) => siteApi.listByDomain(domain.id)));
+      const flatSites: Site[] = siteLists.flat();
+      setSiteOptions(
+        flatSites.map((site) => {
+          const domain = domains.find((d) => d.id === site.domain_id);
+          return {
+            id: site.id,
+            label: domain ? `${site.name} (${domain.name})` : site.name,
+          };
+        })
+      );
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   useEffect(() => {
     load();
+    loadSiteOptions();
   }, []);
 
   const create = async () => {
@@ -73,23 +101,35 @@ export function UsersPage() {
 
   const changeSiteAccess = async (user: User) => {
     try {
+      setSiteAccessLoading(true);
       const current = await usersApi.getSiteAccess(user.id);
-      const hint = current.site_ids.length ? current.site_ids.join(',') : '';
-      const next = window.prompt('Allowed site IDs (comma-separated numeric IDs). Leave blank for unrestricted.', hint);
-      if (next === null) {
-        return;
-      }
-      const parsed = next
-        .split(',')
-        .map((raw) => raw.trim())
-        .filter(Boolean)
-        .map((raw) => Number(raw))
+      setSiteAccessSelected(current.site_ids);
+      setSiteAccessUser(user);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSiteAccessLoading(false);
+    }
+  };
+
+  const saveSiteAccess = async (selectedValues: Array<string | number>) => {
+    if (!siteAccessUser) {
+      return;
+    }
+    try {
+      setSiteAccessLoading(true);
+      const parsed = selectedValues
+        .map((value) => Number(value))
         .filter((value) => Number.isFinite(value) && value > 0)
         .map((value) => Math.trunc(value));
-      await usersApi.setSiteAccess(user.id, parsed);
+      await usersApi.setSiteAccess(siteAccessUser.id, parsed);
       await load();
     } catch (e) {
       setError(String(e));
+    } finally {
+      setSiteAccessLoading(false);
+      setSiteAccessUser(null);
+      setSiteAccessSelected([]);
     }
   };
 
@@ -101,6 +141,38 @@ export function UsersPage() {
         </IonToolbar>
       </IonHeader>
       <IonContent className="ion-padding">
+        <IonLoading isOpen={siteAccessLoading} message="Updating access..." />
+        <IonAlert
+          isOpen={siteAccessUser !== null}
+          header={siteAccessUser ? `Site Access: ${siteAccessUser.username}` : 'Site Access'}
+          message="Choose the properties this user can access. Clear all for unrestricted access."
+          inputs={siteOptions.map((site) => ({
+            type: 'checkbox',
+            label: site.label,
+            value: String(site.id),
+            checked: siteAccessSelected.includes(site.id),
+          }))}
+          buttons={[
+            {
+              text: 'Cancel',
+              role: 'cancel',
+              handler: () => {
+                setSiteAccessUser(null);
+                setSiteAccessSelected([]);
+              },
+            },
+            {
+              text: 'Save',
+              handler: (selected: Array<string | number>) => {
+                void saveSiteAccess(selected || []);
+              },
+            },
+          ]}
+          onDidDismiss={() => {
+            setSiteAccessUser(null);
+            setSiteAccessSelected([]);
+          }}
+        />
         {error && <p style={{ color: 'red' }}>{error}</p>}
         <IonCard>
           <IonCardContent>
