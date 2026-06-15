@@ -5,7 +5,6 @@ import json
 import os
 import secrets
 import sqlite3
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -20,9 +19,6 @@ ROLE_INSTALLER = "installer"
 ROLE_VIEWER = "viewer"
 
 _PASSWORD_HASHER = PasswordHasher()
-
-# Simple in-process login guard.
-_LOGIN_FAILURES: dict[str, list[float]] = {}
 
 
 class AuthError(ValueError):
@@ -134,20 +130,93 @@ def _login_max_attempts() -> int:
     return int(os.getenv("HVAC_EDGE_LOGIN_MAX_ATTEMPTS", "5"))
 
 
-def _is_locked(username: str) -> bool:
-    now = time.time()
-    window = _login_limit_window_seconds()
-    attempts = [ts for ts in _LOGIN_FAILURES.get(username, []) if now - ts <= window]
-    _LOGIN_FAILURES[username] = attempts
-    return len(attempts) >= _login_max_attempts()
+def _login_lockout_seconds() -> int:
+    return int(os.getenv("HVAC_EDGE_LOGIN_LOCKOUT_SECONDS", "900"))
 
 
-def _record_failure(username: str) -> None:
-    _LOGIN_FAILURES.setdefault(username, []).append(time.time())
+def _parse_dt(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
-def _clear_failures(username: str) -> None:
-    _LOGIN_FAILURES.pop(username, None)
+def _clear_failures(conn: sqlite3.Connection, username: str) -> None:
+    conn.execute("DELETE FROM auth_login_state WHERE username = ?", (username,))
+
+
+def _is_locked(conn: sqlite3.Connection, username: str) -> bool:
+    row = conn.execute(
+        "SELECT lock_until, window_started_at FROM auth_login_state WHERE username = ?",
+        (username,),
+    ).fetchone()
+    if row is None:
+        return False
+
+    now = _now_utc()
+    lock_until = _parse_dt(row["lock_until"])
+    if lock_until and now < lock_until:
+        return True
+
+    # Expired lock or stale window; clear row.
+    window_started_at = _parse_dt(row["window_started_at"])
+    if lock_until or (
+        window_started_at and (now - window_started_at).total_seconds() > _login_limit_window_seconds()
+    ):
+        _clear_failures(conn, username)
+        conn.commit()
+    return False
+
+
+def _record_failure(conn: sqlite3.Connection, username: str, user_id: int | None = None) -> None:
+    now = _now_utc()
+    row = conn.execute(
+        "SELECT failed_count, window_started_at FROM auth_login_state WHERE username = ?",
+        (username,),
+    ).fetchone()
+
+    window_started = _parse_dt(row["window_started_at"]) if row else None
+    failed_count = int(row["failed_count"]) if row else 0
+
+    if window_started is None or (now - window_started).total_seconds() > _login_limit_window_seconds():
+        failed_count = 1
+        window_started = now
+    else:
+        failed_count += 1
+
+    lock_until: datetime | None = None
+    if failed_count >= _login_max_attempts():
+        lock_until = now + timedelta(seconds=_login_lockout_seconds())
+        failed_count = 0
+        _audit(
+            conn,
+            user_id,
+            "login_lockout",
+            "auth",
+            username,
+            {"lock_until": _iso(lock_until)},
+        )
+
+    conn.execute(
+        """
+        INSERT INTO auth_login_state(username, failed_count, window_started_at, lock_until, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(username) DO UPDATE SET
+          failed_count = excluded.failed_count,
+          window_started_at = excluded.window_started_at,
+          lock_until = excluded.lock_until,
+          updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            username,
+            failed_count,
+            _iso(window_started),
+            _iso(lock_until) if lock_until else None,
+        ),
+    )
+    conn.commit()
 
 
 def _token_ttl_hours() -> int:
@@ -155,25 +224,25 @@ def _token_ttl_hours() -> int:
 
 
 def login(username: str, password: str) -> tuple[str, str, int]:
-    if _is_locked(username):
-        raise AuthError("account temporarily locked due to repeated failed login attempts")
-
     with get_connection() as conn:
+        if _is_locked(conn, username):
+            raise AuthError("account temporarily locked due to repeated failed login attempts")
+
         user = conn.execute(
             "SELECT id, username, password_hash, enabled FROM users WHERE username = ?",
             (username,),
         ).fetchone()
         if user is None or user["enabled"] != 1:
-            _record_failure(username)
+            _record_failure(conn, username)
             raise AuthError("invalid username or password")
 
         if not verify_password(user["password_hash"], password):
-            _record_failure(username)
+            _record_failure(conn, username, user_id=user["id"])
             _audit(conn, user["id"], "login_failed", "user", str(user["id"]))
             conn.commit()
             raise AuthError("invalid username or password")
 
-        _clear_failures(username)
+        _clear_failures(conn, username)
 
         raw_token = secrets.token_urlsafe(48)
         token_hash = hash_token(raw_token)
