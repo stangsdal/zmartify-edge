@@ -62,6 +62,7 @@ from app.domain_model import (
 )
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.registry import (
+    authenticate_device_admin_token,
     RegistryConflictError,
     RegistryNotFoundError,
     RegistryOperationError,
@@ -138,6 +139,13 @@ app = FastAPI(title="HVAC Edge API", version="0.1.0")
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
 
 
+def _extract_device_ingest_device_id(path: str) -> str | None:
+    parts = path.strip("/").split("/")
+    if len(parts) == 4 and parts[0] == "devices" and parts[2] == "ingest" and parts[3] == "twin":
+        return parts[1]
+    return None
+
+
 def _create_spa_handler(dist_path: Path):
     """Factory function to create SPA handler with correct path binding."""
     def handler(_path: str = "") -> FileResponse:  # noqa: ARG001 - path used by route matching
@@ -199,12 +207,16 @@ async def admin_token_middleware(request: Request, call_next):
     token = authorization[len("Bearer ") :].strip()
     try:
         auth_user = authenticate_bearer_token(token)
+        request.state.auth_user = auth_user
     except AuthError:
+        ingest_device_id = _extract_device_ingest_device_id(request.url.path)
+        if ingest_device_id and authenticate_device_admin_token(ingest_device_id, token):
+            request.state.device_token_device_id = ingest_device_id
+            return await call_next(request)
         auth_user = authenticate_emergency_token(token)
         if auth_user is None:
             return JSONResponse(status_code=403, content={"detail": "invalid bearer token"})
-
-    request.state.auth_user = auth_user
+        request.state.auth_user = auth_user
 
     return await call_next(request)
 
@@ -747,7 +759,9 @@ def api_set_device_channel_zone_links(device_id: str, channel_id: int, payload: 
 
 @app.post("/devices/{device_id}/ingest/twin")
 def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    device_token_device_id = getattr(request.state, "device_token_device_id", None)
+    if device_token_device_id != device_id:
+        _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
         return ingest_device_twin_snapshot(
             device_id,

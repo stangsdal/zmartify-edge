@@ -321,6 +321,22 @@ def get_device_admin_token(device_id: str) -> str:
         return str(token)
 
 
+def authenticate_device_admin_token(device_id: str, token: str) -> bool:
+    if not token:
+        return False
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT device_admin_token FROM devices WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        stored = row["device_admin_token"]
+        if not stored:
+            return False
+        return secrets.compare_digest(str(stored), token)
+
+
 def get_device_onboarding_context(device_id: str) -> dict[str, Any]:
     with get_connection() as conn:
         row = conn.execute(

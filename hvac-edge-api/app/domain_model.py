@@ -178,6 +178,7 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
 
 
 def get_device_zone(device_external_id: str, zone_id: int) -> dict[str, Any]:
+    ensure_default_zones(device_external_id, zone_count=max(3, int(zone_id)))
     zones = list_device_zones(device_external_id)
     for zone in zones:
         if int(zone["zone_id"]) == int(zone_id):
@@ -364,7 +365,10 @@ def _write_channel_metadata(
 
 def set_channel_zone_links(device_external_id: str, channel_id: int, zone_ids: list[int]) -> dict[str, Any]:
     ensure_default_channels(device_external_id)
-    ensure_default_zones(device_external_id)
+    max_zone_id = 3
+    if zone_ids:
+        max_zone_id = max(max_zone_id, max(int(zone_id) for zone_id in zone_ids))
+    ensure_default_zones(device_external_id, zone_count=max_zone_id)
 
     cleaned = sorted({int(zone_id) for zone_id in zone_ids if int(zone_id) > 0})
     now = _now_iso()
@@ -676,7 +680,7 @@ def upsert_zone_state(
     source: str = "rest",
     source_timestamp: str | None = None,
 ) -> dict[str, Any]:
-    ensure_default_zones(device_external_id)
+    ensure_default_zones(device_external_id, zone_count=max(3, int(zone_id)))
     now = _now_iso()
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)

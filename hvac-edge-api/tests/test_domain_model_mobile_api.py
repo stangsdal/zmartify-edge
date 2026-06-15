@@ -315,3 +315,56 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     mobile = client.get(f"/mobile/devices/{device_id}", headers=headers)
     assert mobile.status_code == 200
     assert mobile.json()["channels"][0]["linked_zone_ids"] == [1, 2]
+
+
+def test_device_admin_token_can_ingest_for_own_device_only(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    admin_headers = {"Authorization": "Bearer emergency-token"}
+
+    device_a = _seed_domain_site_device(client, admin_headers, "hvac-gateway-a1b2c3")
+    device_b = _seed_domain_site_device(client, admin_headers, "hvac-gateway-d4e5f6")
+
+    from app.registry import ensure_device_admin_token
+
+    token = ensure_device_admin_token(device_a)
+    device_headers = {"Authorization": f"Bearer {token}"}
+
+    own = client.post(
+        f"/devices/{device_a}/ingest/twin",
+        headers=device_headers,
+        json={"source": "firmware_periodic", "online": True, "zones": [{"zone_id": 1, "current_temperature_c": 22.0}]},
+    )
+    assert own.status_code == 200
+
+    other = client.post(
+        f"/devices/{device_b}/ingest/twin",
+        headers=device_headers,
+        json={"source": "firmware_periodic", "online": True, "zones": [{"zone_id": 1, "current_temperature_c": 22.0}]},
+    )
+    assert other.status_code == 403
+
+
+def test_ingest_allows_high_zone_ids_beyond_default_bootstrap(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-778899")
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "zones": [
+                {"zone_id": 1, "current_temperature_c": 21.0},
+                {"zone_id": 8, "current_temperature_c": 19.5},
+            ],
+        },
+    )
+    assert ingest.status_code == 200
+    assert ingest.json()["zone_updates"] == 2
+
+    zone_8 = client.get(f"/devices/{device_id}/zones/8", headers=headers)
+    assert zone_8.status_code == 200
+    assert zone_8.json()["current_temperature_c"] == 19.5
