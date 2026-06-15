@@ -16,6 +16,7 @@ import {
   IonAlert,
   IonSpinner,
 } from '@ionic/react';
+import { useHistory } from 'react-router-dom';
 import { deviceApi } from '../api/devices';
 import { Device } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
@@ -57,6 +58,7 @@ function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
 }
 
 export function DevicesPage() {
+  const history = useHistory();
   const [devices, setDevices] = useState<Device[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -163,6 +165,15 @@ export function DevicesPage() {
             </IonCardContent>
           </IonCard>
         )}
+
+        <IonButton
+          expand="block"
+          fill="outline"
+          onClick={() => history.push('/devices/add')}
+          className="ion-margin-bottom"
+        >
+          Add Device
+        </IonButton>
 
         <IonButton
           expand="block"

@@ -89,10 +89,54 @@ class DeviceOut(BaseModel):
     mac: str | None
     firmware_version: str | None
     site_id: int | None
+    local_url: str | None = None
     device_type: str
     integration_mode: str
     created_at: str
     last_seen_at: str | None
+
+
+class DeviceDiscoverIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    base_url: str = Field(min_length=1)
+
+
+class DeviceDiscoverOut(BaseModel):
+    base_url: str
+    identity: dict
+    claim: dict
+    status: dict
+
+
+class DeviceClaimIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    base_url: str = Field(min_length=1)
+    claim_token: str = Field(min_length=1)
+    domain_id: int
+    site_id: int
+    display_name: str | None = None
+
+
+class DevicePushConfigIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    claim_token: str | None = None
+
+
+class DeviceClaimOut(BaseModel):
+    device: DeviceOut
+    onboarding_status: dict
+
+
+class DeviceOnboardingStatusOut(BaseModel):
+    state: str
+    device_id: str
+    edge_url: str | None
+    mqtt_configured: bool
+    mqtt_connected: bool
+    last_error: str | None
 
 
 class MqttClientCreate(BaseModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from typing import Any
 
@@ -158,7 +159,7 @@ def create_device(
             )
             row = conn.execute(
                 """
-                SELECT id, device_id, display_name, mac, firmware_version, site_id,
+                SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
                        device_type, integration_mode, created_at, last_seen_at
                 FROM devices
                 WHERE id = ?
@@ -179,7 +180,7 @@ def list_devices() -> list[dict[str, Any]]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, device_id, display_name, mac, firmware_version, site_id,
+            SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
                    device_type, integration_mode, created_at, last_seen_at
             FROM devices
             ORDER BY id
@@ -192,7 +193,7 @@ def get_device(device_id: str) -> dict[str, Any]:
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT id, device_id, display_name, mac, firmware_version, site_id,
+            SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
                    device_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
@@ -218,7 +219,7 @@ def assign_device_site(device_id: str, site_id: int) -> dict[str, Any]:
         conn.execute("UPDATE devices SET site_id = ? WHERE device_id = ?", (site_id, device_id))
         row = conn.execute(
             """
-            SELECT id, device_id, display_name, mac, firmware_version, site_id,
+            SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
                    device_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
@@ -244,7 +245,7 @@ def rename_device(device_id: str, display_name: str) -> dict[str, Any]:
 
         row = conn.execute(
             """
-            SELECT id, device_id, display_name, mac, firmware_version, site_id,
+            SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
                    device_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
@@ -264,6 +265,99 @@ def delete_device(device_id: str) -> None:
         reload_broker()
     except MqttUserCommandError as exc:
         raise RegistryOperationError(str(exc)) from exc
+
+
+def update_device_local_url(device_id: str, local_url: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE devices SET local_url = ? WHERE device_id = ?",
+            (local_url, device_id),
+        )
+        if cur.rowcount == 0:
+            raise RegistryNotFoundError("device not found")
+        row = conn.execute(
+            """
+            SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
+                   device_type, integration_mode, created_at, last_seen_at
+            FROM devices
+            WHERE device_id = ?
+            """,
+            (device_id,),
+        ).fetchone()
+        return _row_to_dict(row) or {}
+
+
+def ensure_device_admin_token(device_id: str) -> str:
+    token = secrets.token_urlsafe(24)
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT device_admin_token FROM devices WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFoundError("device not found")
+        existing = row["device_admin_token"]
+        if existing:
+            return str(existing)
+        conn.execute(
+            "UPDATE devices SET device_admin_token = ? WHERE device_id = ?",
+            (token, device_id),
+        )
+        conn.commit()
+    return token
+
+
+def get_device_admin_token(device_id: str) -> str:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT device_admin_token FROM devices WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFoundError("device not found")
+        token = row["device_admin_token"]
+        if not token:
+            raise RegistryNotFoundError("device admin token not available")
+        return str(token)
+
+
+def get_device_onboarding_context(device_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT d.id, d.device_id, d.display_name, d.mac, d.firmware_version, d.site_id, d.local_url,
+                   d.device_type, d.integration_mode, d.created_at, d.last_seen_at,
+                   s.domain_id
+            FROM devices d
+            LEFT JOIN sites s ON s.id = d.site_id
+            WHERE d.device_id = ?
+            """,
+            (device_id,),
+        ).fetchone()
+        result = _row_to_dict(row)
+        if result is None:
+            raise RegistryNotFoundError("device not found")
+        return result
+
+
+def get_device_mqtt_credentials(device_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT mc.id AS mqtt_client_id, mc.username, cred.password_plain_for_initial_display AS password
+            FROM devices d
+            JOIN mqtt_clients mc ON mc.device_id = d.id AND mc.client_type = 'device'
+            JOIN mqtt_credentials cred ON cred.mqtt_client_id = mc.id
+            WHERE d.device_id = ?
+            ORDER BY mc.id ASC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+        result = _row_to_dict(row)
+        if result is None or not result.get("password"):
+            raise RegistryNotFoundError("device mqtt credentials not available")
+        return result
 
 
 def _ensure_scope_exists(

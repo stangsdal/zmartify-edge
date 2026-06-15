@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+def _client(monkeypatch, tmp_path: Path):
+    db_path = tmp_path / "device_onboarding.sqlite"
+    monkeypatch.setenv("HVAC_EDGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("HVAC_EDGE_APPLY_MQTT_COMMANDS", "0")
+    monkeypatch.setenv("HVAC_EDGE_DRY_RUN_ACL_WRITE", "1")
+    monkeypatch.setenv("HVAC_EDGE_ENABLE_EMERGENCY_TOKEN", "1")
+    monkeypatch.setenv("ADMIN_API_TOKEN", "emergency-token")
+
+    from app.db import initialize_database
+    from app.auth import ensure_bootstrap_owner
+
+    initialize_database()
+    ensure_bootstrap_owner()
+
+    from main import app
+
+    return TestClient(app)
+
+
+def test_discover_and_claim_device(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    import main
+
+    def fake_discover(base_url: str) -> dict:
+        assert base_url == "192.168.10.60"
+        return {
+            "base_url": "http://192.168.10.60",
+            "identity": {
+                "device_id": "hvac-gateway-aabbccddeeff",
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "firmware_version": "1.2.3",
+                "hardware": "waveshare-esp32-s3-rs485-can",
+                "capabilities": ["ahc9000", "mqtt", "homie-v5", "ota", "rs485"],
+            },
+            "claim": {"device_id": "hvac-gateway-aabbccddeeff", "claim_token": "123456", "expires_in_s": 600},
+            "status": {"state": "unclaimed", "device_id": "hvac-gateway-aabbccddeeff", "edge_url": None, "mqtt_configured": False, "mqtt_connected": False, "last_error": None},
+        }
+
+    def fake_push(base_url: str, payload: dict) -> dict:
+        assert base_url in {"192.168.10.60", "http://192.168.10.60"}
+        assert payload["device_admin_token"]
+        if "claim_token" in payload:
+            assert payload["claim_token"] == "123456"
+        assert payload["mqtt_username"] == "device_hvac-gateway-aabbccddeeff"
+        assert payload["mqtt_password"]
+        return {"ok": True, "state": "mqtt_configured"}
+
+    def fake_status(base_url: str) -> dict:
+        assert base_url in {"192.168.10.60", "http://192.168.10.60"}
+        return {
+            "state": "online",
+            "device_id": "hvac-gateway-aabbccddeeff",
+            "edge_url": "http://testserver",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        }
+
+    monkeypatch.setattr(main, "discover_remote_device", fake_discover)
+    monkeypatch.setattr(main, "push_remote_onboarding_config", fake_push)
+    monkeypatch.setattr(main, "get_remote_onboarding_status", fake_status)
+
+    domain = client.post("/domains", headers=headers, json={"slug": "house", "name": "House"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=headers, json={"slug": "main", "name": "Main"})
+    assert site.status_code == 201
+    site_id = site.json()["id"]
+
+    discover = client.post("/devices/discover", headers=headers, json={"base_url": "192.168.10.60"})
+    assert discover.status_code == 200
+    assert discover.json()["identity"]["device_id"] == "hvac-gateway-aabbccddeeff"
+
+    claim = client.post(
+        "/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "192.168.10.60",
+            "claim_token": "123456",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Boiler Room Gateway",
+        },
+    )
+    assert claim.status_code == 201
+    body = claim.json()
+    assert body["device"]["device_id"] == "hvac-gateway-aabbccddeeff"
+    assert body["device"]["local_url"] == "http://192.168.10.60"
+    assert body["onboarding_status"]["state"] == "online"
+
+    status_resp = client.get("/devices/hvac-gateway-aabbccddeeff/onboarding-status", headers=headers)
+    assert status_resp.status_code == 200
+    assert status_resp.json()["mqtt_connected"] is True
+
+    push = client.post(
+        "/devices/hvac-gateway-aabbccddeeff/push-config",
+        headers=headers,
+        json={},
+    )
+    assert push.status_code == 200
+    assert push.json()["state"] == "online"

@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { Device } from '../types/api';
+import { Device, DeviceClaimRequest, DeviceDiscovery } from '../types/api';
 
 export const deviceApi = {
   list: () => apiClient.get('/devices'),
@@ -18,6 +18,15 @@ export const deviceApi = {
       mac,
       firmware_version: firmwareVersion,
     }),
+
+  discover: (baseUrl: string): Promise<DeviceDiscovery> =>
+    apiClient.post('/devices/discover', { base_url: baseUrl }),
+
+  claim: (payload: DeviceClaimRequest) =>
+    apiClient.post('/devices/claim', payload),
+
+  getOnboardingStatus: (deviceId: string) =>
+    apiClient.get(`/devices/${deviceId}/onboarding-status`),
   
   assignToSite: (deviceId: string, siteId: number): Promise<Device> =>
     apiClient.post(`/devices/${deviceId}/site`, { site_id: siteId }),

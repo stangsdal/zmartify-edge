@@ -25,6 +25,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { DomainsPage } from './pages/DomainsPage';
 import { SitesPage } from './pages/SitesPage';
 import { DevicesPage } from './pages/DevicesPage';
+import { AddDevicePage } from './pages/AddDevicePage';
 import { MqttClientsPage } from './pages/MqttClientsPage';
 import { SystemPage } from './pages/SystemPage';
 import { UsersPage } from './pages/UsersPage';
@@ -52,6 +53,7 @@ export function App() {
         <Route exact path="/domains" component={DomainsPage} />
         <Route exact path="/sites" component={SitesPage} />
         <Route exact path="/devices" component={DevicesPage} />
+        <Route exact path="/devices/add" component={AddDevicePage} />
         <Route exact path="/mqtt-clients" component={MqttClientsPage} />
         <Route exact path="/system" component={SystemPage} />
         <Route exact path="/users" component={UsersPage} />

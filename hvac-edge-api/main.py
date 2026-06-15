@@ -29,6 +29,13 @@ from app.auth import (
     set_user_roles,
 )
 from app.db import get_connection, get_db_path, initialize_database
+from app.device_onboarding import (
+    DeviceOnboardingError,
+    discover_remote_device,
+    get_remote_onboarding_status,
+    normalize_device_base_url,
+    push_remote_onboarding_config,
+)
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.registry import (
     RegistryConflictError,
@@ -44,6 +51,9 @@ from app.registry import (
     delete_mqtt_client,
     delete_site,
     get_device,
+    get_device_admin_token,
+    get_device_mqtt_credentials,
+    get_device_onboarding_context,
     get_domain,
     get_mqtt_client,
     get_site,
@@ -55,12 +65,20 @@ from app.registry import (
     rename_domain,
     rename_device,
     rotate_mqtt_client_password,
+    ensure_device_admin_token,
     set_mqtt_client_enabled,
+    update_device_local_url,
 )
 from app.schemas import (
     DeviceAssignSite,
+    DeviceClaimIn,
+    DeviceClaimOut,
     DeviceCreate,
+    DeviceDiscoverIn,
+    DeviceDiscoverOut,
+    DeviceOnboardingStatusOut,
     DeviceOut,
+    DevicePushConfigIn,
     DeviceRename,
     DomainCreate,
     DomainRename,
@@ -182,6 +200,44 @@ def _enforce_admin_user_guardrails(actor_roles: set[str], target_roles: list[str
 
     if action in {"delete_user", "set_roles"} and ROLE_ADMIN in target_role_set:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin cannot modify peer admin user")
+
+
+def _edge_public_base_url(request: Request) -> str:
+    configured = os.getenv("HVAC_EDGE_PUBLIC_API_BASE", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+def _edge_public_mqtt_uri(request: Request) -> str:
+    configured = os.getenv("HVAC_EDGE_PUBLIC_MQTT_URI", "").strip()
+    if configured:
+        return configured
+    host = request.url.hostname or "127.0.0.1"
+    port = os.getenv("HVAC_EDGE_PUBLIC_MQTT_PORT", "1883").strip() or "1883"
+    return f"mqtt://{host}:{port}"
+
+
+def _build_device_push_payload(request: Request, device_id: str, claim_token: str | None) -> dict:
+    context = get_device_onboarding_context(device_id)
+    credentials = get_device_mqtt_credentials(device_id)
+    device_admin_token = get_device_admin_token(device_id)
+    if context.get("site_id") is None or context.get("domain_id") is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device must be assigned to a site before push-config")
+
+    payload = {
+        "device_admin_token": device_admin_token,
+        "edge_url": _edge_public_base_url(request),
+        "mqtt_uri": _edge_public_mqtt_uri(request),
+        "mqtt_username": credentials["username"],
+        "mqtt_password": credentials["password"],
+        "mqtt_base": "homie/5",
+        "domain_id": context["domain_id"],
+        "site_id": context["site_id"],
+    }
+    if claim_token:
+        payload["claim_token"] = claim_token
+    return payload
 
 
 @app.get("/setup/status", response_model=SetupStatusOut)
@@ -380,6 +436,63 @@ def api_create_device(payload: DeviceCreate, request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
+@app.post("/devices/discover", response_model=DeviceDiscoverOut)
+def api_discover_device(payload: DeviceDiscoverIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        discovered = discover_remote_device(payload.base_url)
+        audit_action(
+            actor_user_id=request.state.auth_user.user_id,
+            action="discover_device",
+            resource_type="device_base_url",
+            resource_id=discovered["base_url"],
+        )
+        return discovered
+    except DeviceOnboardingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/devices/claim", response_model=DeviceClaimOut, status_code=status.HTTP_201_CREATED)
+def api_claim_device(payload: DeviceClaimIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        discovered = discover_remote_device(payload.base_url)
+        identity = discovered["identity"]
+        device_id = identity["device_id"]
+        display_name = payload.display_name or identity["device_id"]
+
+        device = create_device(
+            device_id=device_id,
+            display_name=display_name,
+            mac=identity.get("mac"),
+            firmware_version=identity.get("firmware_version"),
+        )
+        device = assign_device_site(device_id, payload.site_id)
+        device = update_device_local_url(device_id, normalize_device_base_url(payload.base_url))
+        ensure_device_admin_token(device_id)
+
+        push_payload = _build_device_push_payload(request, device_id, payload.claim_token)
+        push_remote_onboarding_config(payload.base_url, push_payload)
+        onboarding_status = get_remote_onboarding_status(payload.base_url)
+
+        audit_action(
+            actor_user_id=request.state.auth_user.user_id,
+            action="claim_device",
+            resource_type="device",
+            resource_id=device_id,
+            metadata={"site_id": payload.site_id, "domain_id": payload.domain_id, "base_url": device.get("local_url")},
+        )
+        return {"device": device, "onboarding_status": onboarding_status}
+    except RegistryConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RegistryOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    except DeviceOnboardingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @app.get("/devices", response_model=list[DeviceOut])
 def api_list_devices(request: Request) -> list[dict]:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
@@ -393,6 +506,40 @@ def api_get_device(device_id: str, request: Request) -> dict:
         return get_device(device_id)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/push-config", response_model=DeviceOnboardingStatusOut)
+def api_push_device_config(device_id: str, payload: DevicePushConfigIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        device = get_device_onboarding_context(device_id)
+        local_url = device.get("local_url")
+        if not local_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
+        push_payload = _build_device_push_payload(request, device_id, payload.claim_token)
+        push_remote_onboarding_config(local_url, push_payload)
+        status_payload = get_remote_onboarding_status(local_url)
+        audit_action(actor_user_id=request.state.auth_user.user_id, action="push_device_config", resource_type="device", resource_id=device_id)
+        return status_payload
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DeviceOnboardingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/devices/{device_id}/onboarding-status", response_model=DeviceOnboardingStatusOut)
+def api_device_onboarding_status(device_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        device = get_device_onboarding_context(device_id)
+        local_url = device.get("local_url")
+        if not local_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
+        return get_remote_onboarding_status(local_url)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DeviceOnboardingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @app.post("/devices/{device_id}/assign-site", response_model=DeviceOut)

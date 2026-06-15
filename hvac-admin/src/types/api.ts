@@ -12,13 +12,47 @@ export interface Site {
 }
 
 export interface Device {
+  id?: number;
   device_id: string;
   display_name: string;
   mac?: string;
   firmware_version?: string;
   site_id?: number;
+  local_url?: string;
   online?: boolean;
   zones?: Zone[];
+}
+
+export interface DeviceDiscovery {
+  base_url: string;
+  identity: {
+    device_id: string;
+    mac: string;
+    firmware_version: string;
+    hardware: string;
+    capabilities: string[];
+  };
+  claim: {
+    device_id: string;
+    claim_token: string;
+    expires_in_s: number;
+  };
+  status: {
+    state: string;
+    device_id: string;
+    edge_url?: string | null;
+    mqtt_configured: boolean;
+    mqtt_connected: boolean;
+    last_error?: string | null;
+  };
+}
+
+export interface DeviceClaimRequest {
+  base_url: string;
+  claim_token: string;
+  domain_id: number;
+  site_id: number;
+  display_name?: string;
 }
 
 export interface Zone {
