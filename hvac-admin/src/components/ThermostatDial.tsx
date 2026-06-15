@@ -24,9 +24,17 @@ export function ThermostatDial({
   onChange,
 }: ThermostatDialProps) {
   const ratio = useMemo(() => (value - min) / (max - min), [value, min, max]);
-  const angle = 270 * ratio - 135;
+  const clampedRatio = Math.max(0, Math.min(1, ratio));
+  const angle = 270 * clampedRatio - 135;
+  const ringRadius = 128;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const measuredTemp = typeof currentTemperature === 'number' ? currentTemperature : value;
+  const tempDelta = Math.abs(value - measuredTemp);
+  const deltaRatio = Math.min(tempDelta / 6, 1);
+  const deltaArcLength = ringCircumference * deltaRatio;
   const primaryColor = heating ? '#FF6A2B' : '#67FBFF';
   const secondaryColor = heating ? '#ffb08f' : 'rgba(255,255,255,0.65)';
+  const deltaColor = value >= measuredTemp ? '#FF8A4B' : '#67FBFF';
 
   return (
     <div className="relative mx-auto w-full max-w-[360px] overflow-hidden rounded-[2rem] border border-white/10 hero-glow bg-[radial-gradient(circle_at_top,rgba(103,251,255,0.16),transparent_38%),linear-gradient(180deg,rgba(21,28,44,0.92),rgba(21,28,44,0.78))] p-5 text-white shadow-2xl">
@@ -38,33 +46,35 @@ export function ThermostatDial({
       </div>
 
       <div className="relative mt-4 flex items-center justify-center">
-        <svg viewBox="0 0 280 280" className="h-[240px] w-[240px]">
-          <circle cx="140" cy="140" r="110" stroke="rgba(255,255,255,0.18)" strokeWidth="16" fill="none" />
+        <svg viewBox="0 0 320 320" className="h-[268px] w-[268px]">
+          <circle cx="160" cy="160" r={ringRadius} stroke="rgba(255,255,255,0.18)" strokeWidth="8" fill="none" />
           <circle
-            cx="140"
-            cy="140"
-            r="110"
-            stroke={primaryColor}
-            strokeWidth="16"
+            cx="160"
+            cy="160"
+            r={ringRadius}
+            stroke={deltaColor}
+            strokeWidth="8"
             fill="none"
-            strokeDasharray={`${2 * Math.PI * 110}`}
-            strokeDashoffset={`${(1 - ratio) * 2 * Math.PI * 110}`}
+            strokeDasharray={`${ringCircumference}`}
+            strokeDashoffset={`${ringCircumference - deltaArcLength}`}
             strokeLinecap="round"
-            transform="rotate(-135 140 140)"
+            transform="rotate(-90 160 160)"
+            opacity={deltaArcLength > 0 ? 1 : 0}
           />
           <line
-            x1="140"
-            y1="140"
-            x2={140 + 92 * Math.cos((angle * Math.PI) / 180)}
-            y2={140 + 92 * Math.sin((angle * Math.PI) / 180)}
+            x1="160"
+            y1="160"
+            x2={160 + 110 * Math.cos((angle * Math.PI) / 180)}
+            y2={160 + 110 * Math.sin((angle * Math.PI) / 180)}
             stroke={primaryColor}
-            strokeWidth="5"
+            strokeWidth="4"
             strokeLinecap="round"
+            opacity={0.85}
           />
           <circle
-            cx={140 + 92 * Math.cos((angle * Math.PI) / 180)}
-            cy={140 + 92 * Math.sin((angle * Math.PI) / 180)}
-            r="6"
+            cx={160 + 110 * Math.cos((angle * Math.PI) / 180)}
+            cy={160 + 110 * Math.sin((angle * Math.PI) / 180)}
+            r="7"
             fill={primaryColor}
           />
         </svg>
@@ -78,10 +88,9 @@ export function ThermostatDial({
           <p className="text-[1.9rem] font-semibold leading-none" style={{ color: secondaryColor }}>
             {value.toFixed(1)}°C
           </p>
-          <p className="mt-2 text-sm font-medium" style={{ color: primaryColor }}>
-            {statusLabel || (heating ? 'Heating' : 'Idle')}
+          <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em]" style={{ color: deltaColor }}>
+            Delta {tempDelta.toFixed(1)}°C
           </p>
-          <p className="mt-4 text-sm text-white/80">{roomName || ''}</p>
         </div>
       </div>
 
@@ -89,11 +98,11 @@ export function ThermostatDial({
         <div className="absolute left-0 right-0 top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-white/18" />
         <div
           className="absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-full"
-          style={{ width: `${ratio * 100}%`, backgroundColor: primaryColor }}
+          style={{ width: `${clampedRatio * 100}%`, backgroundColor: primaryColor }}
         />
         <div
           className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/70 shadow-[0_0_0_8px_rgba(103,251,255,0.12)]"
-          style={{ left: `${ratio * 100}%`, backgroundColor: primaryColor }}
+          style={{ left: `${clampedRatio * 100}%`, backgroundColor: primaryColor }}
         />
         <input
           aria-label="Temperature dial"

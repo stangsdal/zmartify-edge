@@ -20,6 +20,8 @@ export function RoomDetailPage() {
   const lastAppliedRef = useRef<number | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
       const sites = await mobileApi.listSites();
       for (const site of sites.sites || []) {
@@ -29,11 +31,13 @@ export function RoomDetailPage() {
           for (const z of dev.zones || []) {
             const zref = z.zone_uuid || `${device.device_id}:${z.zone_id}`;
             if (zref === resolvedRef) {
+              if (cancelled) return;
               setZone(z);
               const nextTarget = z.target_temperature_c ?? 21;
-              setTarget(nextTarget);
-              lastAppliedRef.current = nextTarget;
-              setDirty(false);
+              if (!dirty && !saving) {
+                setTarget(nextTarget);
+                lastAppliedRef.current = nextTarget;
+              }
               setSaveError('');
               return;
             }
@@ -41,8 +45,17 @@ export function RoomDetailPage() {
         }
       }
     };
+
     load().catch(console.error);
-  }, [resolvedRef]);
+    const intervalId = window.setInterval(() => {
+      load().catch(console.error);
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [dirty, resolvedRef, saving]);
 
   const statusText = useMemo(() => {
     if (!zone) return 'Loading room status...';
