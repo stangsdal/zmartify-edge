@@ -381,6 +381,39 @@ def test_mobile_device_freshness_endpoint(monkeypatch, tmp_path: Path):
     assert any(channel["channel_id"] == 1 and channel["freshness_age_ms"] is not None for channel in body["channels"])
 
 
+def test_mobile_api_hides_internal_database_ids(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-bnd001")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
+
+    setpoint = client.post(
+        f"/mobile/zones/{zone_ref}/setpoint",
+        headers=headers,
+        json={"target_temperature_c": 22.0},
+    )
+    assert setpoint.status_code == 200
+
+    mobile_device = client.get(f"/mobile/devices/{device_id}", headers=headers)
+    assert mobile_device.status_code == 200
+    site_id = mobile_device.json()["site"]["site_id"]
+
+    site_devices = client.get(f"/mobile/sites/{site_id}/devices", headers=headers)
+    assert site_devices.status_code == 200
+    assert isinstance(site_devices.json()["site_id"], str)
+
+    assert isinstance(mobile_device.json()["site"]["site_id"], str)
+
+    mobile_events = client.get("/mobile/events", headers=headers)
+    assert mobile_events.status_code == 200
+    assert len(mobile_events.json()["events"]) >= 1
+    sample = mobile_events.json()["events"][0]
+    assert "id" not in sample
+    assert "domain_id" not in sample
+    assert "site_id" not in sample
+
+
 def test_device_admin_token_can_ingest_for_own_device_only(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     admin_headers = {"Authorization": "Bearer emergency-token"}

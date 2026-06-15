@@ -198,6 +198,44 @@ def _is_protected_path(path: str) -> bool:
     return False
 
 
+def _resolve_domain_filter_id(domain_ref: str | None) -> int | None:
+    if not domain_ref:
+        return None
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM domains WHERE uuid = ? OR slug = ? OR CAST(id AS TEXT) = ?",
+            (domain_ref, domain_ref, domain_ref),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="domain not found")
+    return int(row["id"])
+
+
+def _resolve_site_filter_id(site_ref: str | None) -> int | None:
+    if not site_ref:
+        return None
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM sites WHERE uuid = ? OR slug = ? OR CAST(id AS TEXT) = ?",
+            (site_ref, site_ref, site_ref),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+    return int(row["id"])
+
+
+def _mobile_event_projection(event: dict) -> dict:
+    payload = dict(event.get("payload") or {})
+    return {
+        "event_id": event.get("uuid"),
+        "event_type": event.get("event_type"),
+        "created_at": event.get("created_at"),
+        "device_id": event.get("device_external_id") or payload.get("device_id"),
+        "zone_id": event.get("zone_id"),
+        "payload": payload,
+    }
+
+
 @app.middleware("http")
 async def admin_token_middleware(request: Request, call_next):
     if request.method == "OPTIONS" or not _is_protected_path(request.url.path):
@@ -930,36 +968,26 @@ def mobile_site_detail(site_id: str, request: Request) -> dict:
 
 
 @app.get("/mobile/sites/{site_id}/devices")
-def mobile_site_devices(site_id: int, request: Request) -> dict:
+def mobile_site_devices(site_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    with get_connection() as conn:
-        site = conn.execute("SELECT id, name FROM sites WHERE id = ?", (site_id,)).fetchone()
-        if site is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
-
-        rows = conn.execute(
-            """
-            SELECT device_id, display_name, firmware_version, integration_mode, last_seen_at
-            FROM devices
-            WHERE site_id = ?
-            ORDER BY id
-            """,
-            (site_id,),
-        ).fetchall()
-
-    devices = []
-    for row in rows:
-        devices.append(
+    try:
+        site = get_mobile_site(site_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return {
+        "site_id": site["site_id"],
+        "site_name": site["site_name"],
+        "devices": [
             {
-                "device_id": row["device_id"],
-                "display_name": row["display_name"],
-                "firmware_version": row["firmware_version"],
-                "online": bool(row["last_seen_at"]),
-                "integration_mode": row["integration_mode"],
+                "device_id": item.get("device_id"),
+                "display_name": item.get("display_name"),
+                "firmware_version": item.get("firmware_version"),
+                "online": bool(item.get("online")),
+                "integration_mode": "gateway",
             }
-        )
-
-    return {"site_id": site["id"], "site_name": site["name"], "devices": devices}
+            for item in site.get("devices", [])
+        ],
+    }
 
 
 @app.get("/mobile/devices/{device_id}")
@@ -968,8 +996,8 @@ def mobile_device(device_id: str, request: Request) -> dict:
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT d.device_id, d.display_name, d.firmware_version, d.integration_mode,
-                   d.last_seen_at, s.id AS site_id, s.name AS site_name
+                     SELECT d.device_id, d.display_name, d.firmware_version, d.integration_mode,
+                         d.last_seen_at, s.uuid AS site_uuid, s.slug AS site_slug, s.name AS site_name
             FROM devices d
             LEFT JOIN sites s ON s.id = d.site_id
             WHERE d.device_id = ?
@@ -988,7 +1016,9 @@ def mobile_device(device_id: str, request: Request) -> dict:
         "firmware_version": row["firmware_version"],
         "online": bool(row["last_seen_at"]),
         "integration_mode": row["integration_mode"],
-        "site": {"site_id": row["site_id"], "site_name": row["site_name"]} if row["site_id"] else None,
+        "site": {"site_id": row["site_uuid"] or row["site_slug"], "site_name": row["site_name"]}
+        if row["site_uuid"] or row["site_slug"]
+        else None,
         "zones": zones,
         "channels": channels,
     }
@@ -1093,11 +1123,14 @@ def mobile_events(
     request: Request,
     limit: int = 50,
     event_type: str | None = None,
-    domain_id: int | None = None,
-    site_id: int | None = None,
+    domain_id: str | None = None,
+    site_id: str | None = None,
 ) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return {"events": list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)}
+    resolved_domain_id = _resolve_domain_filter_id(domain_id)
+    resolved_site_id = _resolve_site_filter_id(site_id)
+    events = list_events(limit=limit, event_type=event_type, domain_id=resolved_domain_id, site_id=resolved_site_id)
+    return {"events": [_mobile_event_projection(event) for event in events]}
 
 
 @app.get("/mobile/notifications", response_model=list[NotificationOut])
