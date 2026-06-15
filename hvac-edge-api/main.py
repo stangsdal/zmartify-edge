@@ -41,6 +41,7 @@ from app.domain_model import (
     get_device_channel,
     get_device_zone,
     get_mobile_site,
+    ingest_device_twin_snapshot,
     list_device_channels,
     list_device_zones,
     list_events,
@@ -53,6 +54,7 @@ from app.domain_model import (
     rename_zone,
     resolve_zone_ref,
     set_channel_metadata,
+    set_channel_zone_links,
     set_zone_metadata,
     upsert_device_state,
     upsert_channel_state,
@@ -95,6 +97,8 @@ from app.schemas import (
     ChannelMetadataIn,
     ChannelOut,
     ChannelStateIn,
+    ChannelZoneLinksIn,
+    DeviceTwinIngestIn,
     DeviceAssignSite,
     DeviceClaimIn,
     DeviceClaimOut,
@@ -718,6 +722,42 @@ def api_set_device_channel_state(device_id: str, channel_id: int, payload: Chann
             active=payload.active,
             fault=payload.fault,
             source="admin_api",
+        )
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/channels/{channel_id}/link-zones", response_model=ChannelOut)
+def api_set_device_channel_zone_links(device_id: str, channel_id: int, payload: ChannelZoneLinksIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        channel = set_channel_zone_links(device_id, channel_id, payload.zone_ids)
+        log_event(
+            "channel_zone_links_updated",
+            payload={"device_id": device_id, "channel_id": channel_id, "zone_ids": payload.zone_ids},
+        )
+        return channel
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/ingest/twin")
+def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        return ingest_device_twin_snapshot(
+            device_id,
+            source=payload.source,
+            source_timestamp=payload.source_timestamp,
+            online=payload.online,
+            mqtt_connected=payload.mqtt_connected,
+            last_error=payload.last_error,
+            zones=[item.model_dump(exclude_none=True) for item in payload.zones],
+            channels=[item.model_dump(exclude_none=True) for item in payload.channels],
         )
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

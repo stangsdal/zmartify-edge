@@ -264,3 +264,54 @@ def test_channel_metadata_state_and_mobile_shape(monkeypatch, tmp_path: Path):
     assert mobile_device.status_code == 200
     assert "channels" in mobile_device.json()
     assert len(mobile_device.json()["channels"]) >= 8
+
+
+def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-445566")
+
+    links = client.post(
+        f"/devices/{device_id}/channels/1/link-zones",
+        headers=headers,
+        json={"zone_ids": [1, 2]},
+    )
+    assert links.status_code == 200
+    assert links.json()["linked_zone_ids"] == [1, 2]
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "device_push",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [
+                {"zone_id": 1, "current_temperature_c": 21.2, "target_temperature_c": 22.0, "active": True},
+                {"zone_id": 2, "current_temperature_c": 20.1, "target_temperature_c": 21.0, "active": False},
+            ],
+            "channels": [
+                {"channel_id": 1, "active": True},
+                {"channel_id": 2, "active": False, "fault": "stuck"},
+            ],
+        },
+    )
+    assert ingest.status_code == 200
+    body = ingest.json()
+    assert body["zone_updates"] == 2
+    assert body["channel_updates"] == 2
+
+    zone1 = client.get(f"/devices/{device_id}/zones/1", headers=headers)
+    assert zone1.status_code == 200
+    assert zone1.json()["current_temperature_c"] == 21.2
+    assert zone1.json()["target_temperature_c"] == 22.0
+
+    channel1 = client.get(f"/devices/{device_id}/channels/1", headers=headers)
+    assert channel1.status_code == 200
+    assert channel1.json()["active"] is True
+    assert channel1.json()["linked_zone_ids"] == [1, 2]
+
+    mobile = client.get(f"/mobile/devices/{device_id}", headers=headers)
+    assert mobile.status_code == 200
+    assert mobile.json()["channels"][0]["linked_zone_ids"] == [1, 2]

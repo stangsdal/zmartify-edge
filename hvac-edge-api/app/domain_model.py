@@ -37,6 +37,26 @@ def _row_to_dict(row: Any) -> dict[str, Any] | None:
     return {k: row[k] for k in row.keys()}
 
 
+def _parse_int_list_json(raw: str | None) -> list[int]:
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(values, list):
+        return []
+    result: list[int] = []
+    for value in values:
+        try:
+            int_value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if int_value > 0:
+            result.append(int_value)
+    return sorted(set(result))
+
+
 def _resolve_device(conn: Any, device_external_id: str) -> dict[str, Any]:
     row = conn.execute(
         """
@@ -171,7 +191,7 @@ def list_device_channels(device_external_id: str) -> list[dict[str, Any]]:
         device = _resolve_device(conn, device_external_id)
         rows = conn.execute(
             """
-            SELECT cm.uuid AS channel_uuid, cm.channel_id, cm.name, cm.icon, cm.sort_order,
+                 SELECT cm.uuid AS channel_uuid, cm.channel_id, cm.name, cm.icon, cm.sort_order, cm.linked_zone_ids_json,
                    cs.active, cs.fault, cs.source_timestamp, cs.updated_at,
                    ds.online AS device_online
             FROM channel_metadata cm
@@ -192,6 +212,7 @@ def list_device_channels(device_external_id: str) -> list[dict[str, Any]]:
                 "name": row["name"],
                 "icon": row["icon"],
                 "sort_order": row["sort_order"],
+                "linked_zone_ids": _parse_int_list_json(row["linked_zone_ids_json"]),
                 "active": None if row["active"] is None else bool(row["active"]),
                 "fault": row["fault"],
                 "updated_at": row["updated_at"],
@@ -341,6 +362,47 @@ def _write_channel_metadata(
     return get_device_channel(device_external_id, channel_id)
 
 
+def set_channel_zone_links(device_external_id: str, channel_id: int, zone_ids: list[int]) -> dict[str, Any]:
+    ensure_default_channels(device_external_id)
+    ensure_default_zones(device_external_id)
+
+    cleaned = sorted({int(zone_id) for zone_id in zone_ids if int(zone_id) > 0})
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+
+        existing = conn.execute(
+            "SELECT 1 FROM channel_metadata WHERE device_id = ? AND channel_id = ?",
+            (device["id"], channel_id),
+        ).fetchone()
+        if existing is None:
+            raise RegistryNotFoundError("channel not found")
+
+        if cleaned:
+            placeholders = ",".join("?" for _ in cleaned)
+            valid_rows = conn.execute(
+                f"SELECT zone_id FROM zone_metadata WHERE device_id = ? AND zone_id IN ({placeholders})",
+                (device["id"], *cleaned),
+            ).fetchall()
+            valid_zone_ids = {int(row["zone_id"]) for row in valid_rows}
+            missing = [zone_id for zone_id in cleaned if zone_id not in valid_zone_ids]
+            if missing:
+                raise DomainModelError("zone_ids contain unknown zones for this device")
+
+        conn.execute(
+            """
+            UPDATE channel_metadata
+            SET linked_zone_ids_json = ?,
+                updated_at = ?
+            WHERE device_id = ? AND channel_id = ?
+            """,
+            (json.dumps(cleaned, separators=(",", ":")), now, device["id"], channel_id),
+        )
+        conn.commit()
+
+    return get_device_channel(device_external_id, channel_id)
+
+
 def set_channel_metadata(
     device_external_id: str,
     channel_id: int,
@@ -404,6 +466,65 @@ def upsert_channel_state(
             payload={"device_id": device_external_id, "channel_id": channel_id, "active": bool(active), "source": source},
         )
     return result
+
+
+def ingest_device_twin_snapshot(
+    device_external_id: str,
+    *,
+    source: str,
+    source_timestamp: str | None,
+    online: bool | None,
+    mqtt_connected: bool | None,
+    last_error: str | None,
+    zones: list[dict[str, Any]] | None,
+    channels: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    device_state = upsert_device_state(
+        device_external_id,
+        online=online,
+        mqtt_connected=mqtt_connected,
+        source=source,
+        source_timestamp=source_timestamp,
+        last_error=last_error,
+    )
+
+    zone_count = 0
+    for zone in zones or []:
+        zone_id = int(zone["zone_id"])
+        upsert_zone_state(
+            device_external_id,
+            zone_id,
+            current_temperature=zone.get("current_temperature_c"),
+            target_temperature=zone.get("target_temperature_c"),
+            demand=zone.get("demand"),
+            active=zone.get("active"),
+            fault=zone.get("fault"),
+            source=source,
+            source_timestamp=source_timestamp,
+        )
+        zone_count += 1
+
+    channel_count = 0
+    for channel in channels or []:
+        channel_id = int(channel["channel_id"])
+        upsert_channel_state(
+            device_external_id,
+            channel_id,
+            active=channel.get("active"),
+            fault=channel.get("fault"),
+            source=source,
+            source_timestamp=source_timestamp,
+        )
+        channel_count += 1
+
+    return {
+        "device_id": device_external_id,
+        "source": source,
+        "source_timestamp": source_timestamp,
+        "device_state": device_state,
+        "zone_updates": zone_count,
+        "channel_updates": channel_count,
+    }
 
 
 def _insert_notifications_for_event(conn: Any, event_id: int, event_type: str) -> None:

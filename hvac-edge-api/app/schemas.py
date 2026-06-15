@@ -186,12 +186,42 @@ class ChannelStateIn(BaseModel):
     fault: str | None = None
 
 
+class ChannelZoneLinksIn(BaseModel):
+    zone_ids: list[int] = Field(default_factory=list)
+
+
+class TelemetryZoneIn(BaseModel):
+    zone_id: int
+    current_temperature_c: float | None = None
+    target_temperature_c: float | None = None
+    demand: bool | None = None
+    active: bool | None = None
+    fault: str | None = None
+
+
+class TelemetryChannelIn(BaseModel):
+    channel_id: int
+    active: bool | None = None
+    fault: str | None = None
+
+
+class DeviceTwinIngestIn(BaseModel):
+    source: str = Field(default="device_ingest", min_length=1)
+    source_timestamp: str | None = None
+    online: bool | None = None
+    mqtt_connected: bool | None = None
+    last_error: str | None = None
+    zones: list[TelemetryZoneIn] = Field(default_factory=list)
+    channels: list[TelemetryChannelIn] = Field(default_factory=list)
+
+
 class ChannelOut(BaseModel):
     channel_uuid: str
     channel_id: int
     name: str
     icon: str | None = None
     sort_order: int
+    linked_zone_ids: list[int] = Field(default_factory=list)
     active: bool | None = None
     fault: str | None = None
     updated_at: str | None = None
