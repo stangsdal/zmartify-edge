@@ -24,6 +24,32 @@ def _client(monkeypatch, tmp_path: Path):
     return TestClient(app)
 
 
+def _seed_domain_site_device(client: TestClient, headers: dict[str, str], device_id: str) -> str:
+    domain = client.post("/domains", headers=headers, json={"slug": f"domain-{device_id[-4:]}", "name": "House"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=headers, json={"slug": f"site-{device_id[-4:]}", "name": "Main"})
+    assert site.status_code == 201
+    site_id = site.json()["id"]
+
+    create = client.post(
+        "/devices",
+        headers=headers,
+        json={
+            "device_id": device_id,
+            "display_name": "Gateway",
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "firmware_version": "0.1.2",
+        },
+    )
+    assert create.status_code == 201
+
+    assign = client.post(f"/devices/{device_id}/assign-site", headers=headers, json={"site_id": site_id})
+    assert assign.status_code == 200
+    return device_id
+
+
 def test_zone_metadata_and_mobile_shape(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
@@ -115,3 +141,88 @@ def test_mobile_setpoint_updates_twin_and_events(monkeypatch, tmp_path: Path):
     notifs = client.get("/mobile/notifications", headers=headers)
     assert notifs.status_code == 200
     assert isinstance(notifs.json(), list)
+
+
+def test_events_filtering_by_type_and_device(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-ffeedd")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
+
+    # Generate two setpoint-change events plus one metadata event.
+    sp1 = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=headers, json={"target_temperature_c": 20.0})
+    assert sp1.status_code == 200
+    sp2 = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=headers, json={"target_temperature_c": 21.0})
+    assert sp2.status_code == 200
+    rename = client.post(f"/devices/{device_id}/zones/1/rename", headers=headers, json={"name": "Hall"})
+    assert rename.status_code == 200
+
+    filtered = client.get("/events/recent", headers=headers, params={"event_type": "zone_setpoint_changed"})
+    assert filtered.status_code == 200
+    assert len(filtered.json()) >= 2
+    assert all(evt["event_type"] == "zone_setpoint_changed" for evt in filtered.json())
+
+    device_filtered = client.get(
+        f"/events/device/{device_id}",
+        headers=headers,
+        params={"event_type": "zone_setpoint_changed"},
+    )
+    assert device_filtered.status_code == 200
+    assert len(device_filtered.json()) >= 2
+    assert all(evt["event_type"] == "zone_setpoint_changed" for evt in device_filtered.json())
+
+
+def test_notification_read_and_read_all(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    emergency = {"Authorization": "Bearer emergency-token"}
+
+    created_user = client.post(
+        "/users",
+        headers=emergency,
+        json={
+            "username": "mobileviewer",
+            "display_name": "Mobile Viewer",
+            "password": "VeryStrongPass123!",
+            "roles": ["viewer"],
+        },
+    )
+    assert created_user.status_code == 201
+
+    login = client.post("/auth/login", json={"username": "mobileviewer", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    device_id = _seed_domain_site_device(client, emergency, "hvac-gateway-112233")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=emergency).json()[0]["zone_uuid"]
+
+    # Generate notification-eligible event types.
+    first = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=emergency, json={"target_temperature_c": 23.0})
+    assert first.status_code == 200
+    second = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=emergency, json={"target_temperature_c": 24.0})
+    assert second.status_code == 200
+
+    notifications = client.get("/mobile/notifications", headers=bearer)
+    assert notifications.status_code == 200
+    assert len(notifications.json()) >= 2
+
+    unread = client.get("/mobile/notifications", headers=bearer, params={"unread_only": True})
+    assert unread.status_code == 200
+    assert len(unread.json()) >= 2
+    first_notification_id = unread.json()[0]["notification_id"]
+
+    mark_one = client.post(f"/mobile/notifications/{first_notification_id}/read", headers=bearer)
+    assert mark_one.status_code == 200
+    assert mark_one.json()["read"] is True
+
+    unread_after_one = client.get("/mobile/notifications", headers=bearer, params={"unread_only": True})
+    assert unread_after_one.status_code == 200
+    assert len(unread_after_one.json()) >= 1
+
+    mark_all = client.post("/mobile/notifications/read-all", headers=bearer)
+    assert mark_all.status_code == 200
+    assert mark_all.json()["updated"] >= 1
+
+    unread_after_all = client.get("/mobile/notifications", headers=bearer, params={"unread_only": True})
+    assert unread_after_all.status_code == 200
+    assert unread_after_all.json() == []

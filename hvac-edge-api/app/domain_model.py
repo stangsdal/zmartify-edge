@@ -15,6 +15,7 @@ NOTIFICATION_EVENT_TYPES = {
     "controller_fault",
     "temperature_alarm",
     "setpoint_write_failed",
+    "zone_setpoint_changed",
 }
 
 
@@ -558,15 +559,35 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
     }
 
 
-def list_events(*, limit: int = 100, device_external_id: str | None = None) -> list[dict[str, Any]]:
+def list_events(
+    *,
+    limit: int = 100,
+    device_external_id: str | None = None,
+    event_type: str | None = None,
+    domain_id: int | None = None,
+    site_id: int | None = None,
+) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 500))
     with get_connection() as conn:
         params: list[Any] = []
-        where = ""
+        where_clauses: list[str] = []
         if device_external_id:
             dev = _resolve_device(conn, device_external_id)
-            where = "WHERE e.device_id = ?"
+            where_clauses.append("e.device_id = ?")
             params.append(dev["id"])
+        if event_type:
+            where_clauses.append("e.event_type = ?")
+            params.append(event_type)
+        if domain_id is not None:
+            where_clauses.append("e.domain_id = ?")
+            params.append(domain_id)
+        if site_id is not None:
+            where_clauses.append("e.site_id = ?")
+            params.append(site_id)
+
+        where = ""
+        if where_clauses:
+            where = "WHERE " + " AND ".join(where_clauses)
 
         rows = conn.execute(
             f"""
@@ -629,3 +650,47 @@ def list_notifications_for_user(user_id: int, *, limit: int = 100) -> list[dict[
             }
         )
     return result
+
+
+def mark_notification_read(notification_uuid: str, *, user_id: int, read: bool = True) -> dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT n.id
+            FROM notifications n
+            WHERE n.uuid = ? AND n.user_id = ?
+            """,
+            (notification_uuid, user_id),
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFoundError("notification not found")
+
+        conn.execute(
+            """
+            UPDATE notifications
+            SET read = ?
+            WHERE id = ?
+            """,
+            (1 if read else 0, row["id"]),
+        )
+        conn.commit()
+
+    notifications = list_notifications_for_user(user_id, limit=500)
+    for notification in notifications:
+        if notification["notification_id"] == notification_uuid:
+            return notification
+    raise RegistryNotFoundError("notification not found")
+
+
+def mark_all_notifications_read(*, user_id: int) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE notifications
+            SET read = 1
+            WHERE user_id = ? AND read = 0
+            """,
+            (user_id,),
+        )
+        conn.commit()
+    return int(cur.rowcount or 0)

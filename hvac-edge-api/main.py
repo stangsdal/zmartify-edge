@@ -46,6 +46,8 @@ from app.domain_model import (
     list_mobile_sites,
     list_notifications_for_user,
     log_event,
+    mark_all_notifications_read,
+    mark_notification_read,
     rename_zone,
     resolve_zone_ref,
     set_zone_metadata,
@@ -874,6 +876,7 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
         device_id, zone_id = resolve_zone_ref(zone_ref)
+        context = get_device_onboarding_context(device_id)
         zone = upsert_zone_state(
             device_id,
             zone_id,
@@ -882,6 +885,10 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
         )
         log_event(
             "zone_setpoint_changed",
+            domain_id=context.get("domain_id"),
+            site_id=context.get("site_id"),
+            device_pk_id=context["id"],
+            zone_id=zone_id,
             payload={
                 "device_id": device_id,
                 "zone_id": zone_id,
@@ -903,41 +910,89 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
 
 
 @app.get("/events", response_model=list[EventOut])
-def events_list(request: Request, limit: int = 100) -> list[dict]:
+def events_list(
+    request: Request,
+    limit: int = 100,
+    event_type: str | None = None,
+    domain_id: int | None = None,
+    site_id: int | None = None,
+) -> list[dict]:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return list_events(limit=limit)
+    return list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)
 
 
 @app.get("/events/recent", response_model=list[EventOut])
-def events_recent(request: Request, limit: int = 50) -> list[dict]:
+def events_recent(
+    request: Request,
+    limit: int = 50,
+    event_type: str | None = None,
+    domain_id: int | None = None,
+    site_id: int | None = None,
+) -> list[dict]:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return list_events(limit=limit)
+    return list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)
 
 
 @app.get("/events/device/{device_id}", response_model=list[EventOut])
-def events_for_device(device_id: str, request: Request, limit: int = 100) -> list[dict]:
+def events_for_device(
+    device_id: str,
+    request: Request,
+    limit: int = 100,
+    event_type: str | None = None,
+) -> list[dict]:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
-        return list_events(limit=limit, device_external_id=device_id)
+        return list_events(limit=limit, device_external_id=device_id, event_type=event_type)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.get("/mobile/events")
-def mobile_events(request: Request, limit: int = 50) -> dict:
+def mobile_events(
+    request: Request,
+    limit: int = 50,
+    event_type: str | None = None,
+    domain_id: int | None = None,
+    site_id: int | None = None,
+) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return {"events": list_events(limit=limit)}
+    return {"events": list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)}
 
 
 @app.get("/mobile/notifications", response_model=list[NotificationOut])
-def mobile_notifications(request: Request, limit: int = 100) -> list[dict]:
+def mobile_notifications(request: Request, limit: int = 100, unread_only: bool = False) -> list[dict]:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     auth_user = getattr(request.state, "auth_user", None)
     if auth_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
     if auth_user.user_id is None:
         return []
-    return list_notifications_for_user(auth_user.user_id, limit=limit)
+    notifications = list_notifications_for_user(auth_user.user_id, limit=limit)
+    if unread_only:
+        return [item for item in notifications if not item["read"]]
+    return notifications
+
+
+@app.post("/mobile/notifications/read-all")
+def mobile_mark_all_notifications_read(request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None or auth_user.user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    updated_count = mark_all_notifications_read(user_id=auth_user.user_id)
+    return {"updated": updated_count}
+
+
+@app.post("/mobile/notifications/{notification_id}/read", response_model=NotificationOut)
+def mobile_mark_notification_read(notification_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None or auth_user.user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    try:
+        return mark_notification_read(notification_id, user_id=auth_user.user_id, read=True)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
