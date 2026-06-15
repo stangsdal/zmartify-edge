@@ -8,6 +8,7 @@ import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
 
 interface RoomWithRef extends MobileZone {
   zone_ref: string;
+  device_id: string;
 }
 
 export function RoomsPage() {
@@ -16,27 +17,16 @@ export function RoomsPage() {
   const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
 
-  const parseRoomRef = (room: RoomWithRef): { deviceId: string | null; zoneId: number | null } => {
-    const parts = room.zone_ref.split(':');
-    const deviceId = parts.length >= 2 ? parts[0] : null;
-    const zoneId = Number.isFinite(room.zone_id) ? room.zone_id : parts.length >= 2 ? Number.parseInt(parts[1], 10) : NaN;
-    return {
-      deviceId,
-      zoneId: Number.isFinite(zoneId) ? zoneId : null,
-    };
-  };
-
   const handleRename = async (room: RoomWithRef) => {
     const nextName = window.prompt('New room name', room.name);
     if (!nextName) return;
     const trimmed = nextName.trim();
     if (!trimmed || trimmed === room.name) return;
 
-    const parsed = parseRoomRef(room);
-    if (!parsed.deviceId || parsed.zoneId == null) return;
+    if (!room.device_id || room.zone_id == null) return;
 
     try {
-      const renamed = await mobileApi.renameDeviceZone(parsed.deviceId, parsed.zoneId, trimmed);
+      const renamed = await mobileApi.renameDeviceZone(room.device_id, room.zone_id, trimmed);
       setRooms((prev) => prev.map((item) => (item.zone_ref === room.zone_ref ? { ...item, name: renamed.name } : item)));
     } catch (error) {
       window.alert(String(error));
@@ -60,6 +50,7 @@ export function RoomsPage() {
       const nextRooms: RoomWithRef[] = devices.flatMap((device) =>
         (device.zones || []).map((zone) => ({
           ...zone,
+          device_id: device.device_id,
           zone_ref: zone.zone_uuid || `${device.device_id}:${zone.zone_id}`,
         }))
       );
