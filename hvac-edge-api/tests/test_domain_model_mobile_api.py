@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from app.db import get_connection
 
 
 def _client(monkeypatch, tmp_path: Path):
@@ -412,6 +413,62 @@ def test_mobile_api_hides_internal_database_ids(monkeypatch, tmp_path: Path):
     assert "id" not in sample
     assert "domain_id" not in sample
     assert "site_id" not in sample
+
+
+def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-hist01")
+    zones = client.get(f"/devices/{device_id}/zones", headers=headers)
+    assert zones.status_code == 200
+    zone_ref = zones.json()[0]["zone_uuid"]
+
+    first_ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 20.5, "target_temperature_c": 21.0, "demand": True}],
+        },
+    )
+    assert first_ingest.status_code == 200
+
+    second_ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 20.7, "target_temperature_c": 22.0, "demand": False}],
+        },
+    )
+    assert second_ingest.status_code == 200
+
+    setpoint = client.post(
+        f"/mobile/zones/{zone_ref}/setpoint",
+        headers=headers,
+        json={"target_temperature_c": 22.5},
+    )
+    assert setpoint.status_code == 200
+
+    with get_connection() as conn:
+        device_row = conn.execute("SELECT id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        assert device_row is not None
+        device_pk = int(device_row["id"])
+
+        temp_count = conn.execute("SELECT COUNT(*) AS c FROM temperature_history WHERE device_id = ?", (device_pk,)).fetchone()["c"]
+        setpoint_count = conn.execute("SELECT COUNT(*) AS c FROM setpoint_history WHERE device_id = ?", (device_pk,)).fetchone()["c"]
+        demand_count = conn.execute("SELECT COUNT(*) AS c FROM demand_history WHERE device_id = ?", (device_pk,)).fetchone()["c"]
+        health_count = conn.execute("SELECT COUNT(*) AS c FROM device_health_history WHERE device_id = ?", (device_pk,)).fetchone()["c"]
+
+    assert temp_count >= 2
+    assert setpoint_count >= 1
+    assert demand_count >= 2
+    assert health_count >= 1
 
 
 def test_device_admin_token_can_ingest_for_own_device_only(monkeypatch, tmp_path: Path):

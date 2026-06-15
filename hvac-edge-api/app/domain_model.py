@@ -4,7 +4,7 @@ import json
 import hashlib
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.db import get_connection
@@ -74,6 +74,29 @@ def _ingest_min_interval_ms() -> int:
         return max(0, int(raw))
     except ValueError:
         return 0
+
+
+def _history_retention_days() -> int:
+    raw = os.getenv("HVAC_EDGE_HISTORY_RETENTION_DAYS", "30").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 30
+
+
+def _prune_history(conn: Any, *, device_pk_id: int | None = None) -> None:
+    cutoff = (datetime.now(UTC) - timedelta(days=_history_retention_days())).replace(microsecond=0).isoformat()
+    if device_pk_id is None:
+        conn.execute("DELETE FROM temperature_history WHERE created_at < ?", (cutoff,))
+        conn.execute("DELETE FROM setpoint_history WHERE created_at < ?", (cutoff,))
+        conn.execute("DELETE FROM demand_history WHERE created_at < ?", (cutoff,))
+        conn.execute("DELETE FROM device_health_history WHERE created_at < ?", (cutoff,))
+        return
+
+    conn.execute("DELETE FROM temperature_history WHERE device_id = ? AND created_at < ?", (device_pk_id, cutoff))
+    conn.execute("DELETE FROM setpoint_history WHERE device_id = ? AND created_at < ?", (device_pk_id, cutoff))
+    conn.execute("DELETE FROM demand_history WHERE device_id = ? AND created_at < ?", (device_pk_id, cutoff))
+    conn.execute("DELETE FROM device_health_history WHERE device_id = ? AND created_at < ?", (device_pk_id, cutoff))
 
 
 def _parse_int_list_json(raw: str | None) -> list[int]:
@@ -804,6 +827,24 @@ def upsert_device_state(
             (now if online else None, device["id"]),
         )
 
+        conn.execute(
+            """
+            INSERT INTO device_health_history(uuid, device_id, online, mqtt_connected, last_error, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _new_uuid(),
+                device["id"],
+                None if online is None else int(bool(online)),
+                None if mqtt_connected is None else int(bool(mqtt_connected)),
+                last_error,
+                source,
+                now,
+            ),
+        )
+
+        _prune_history(conn, device_pk_id=device["id"])
+
         state_row = conn.execute(
             "SELECT device_id, online, mqtt_connected, last_seen_at, source_timestamp, updated_at FROM device_state WHERE device_id = ?",
             (device["id"],),
@@ -870,7 +911,7 @@ def upsert_zone_state(
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, target_temperature FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, target_temperature, demand FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
 
@@ -910,6 +951,28 @@ def upsert_zone_state(
                 """,
                 (_new_uuid(), device["id"], zone_id, current_temperature, target_temperature, now),
             )
+
+        if target_temperature is not None and (row is None or row["target_temperature"] != target_temperature):
+            conn.execute(
+                """
+                INSERT INTO setpoint_history(uuid, device_id, zone_id, target_temperature, source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (_new_uuid(), device["id"], zone_id, target_temperature, source, now),
+            )
+
+        if demand is not None:
+            previous_demand = None if row is None else row["demand"]
+            if previous_demand is None or int(bool(demand)) != int(previous_demand):
+                conn.execute(
+                    """
+                    INSERT INTO demand_history(uuid, device_id, zone_id, demand, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (_new_uuid(), device["id"], zone_id, int(bool(demand)), source, now),
+                )
+
+        _prune_history(conn, device_pk_id=device["id"])
 
         if row is not None:
             if current_temperature is not None and row["current_temperature"] != current_temperature:
