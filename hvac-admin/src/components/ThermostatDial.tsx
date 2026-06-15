@@ -79,7 +79,7 @@ export function ThermostatDial({
             className="h-2 w-2 rounded-full"
             style={{ backgroundColor: heating ? '#FF6A2B' : '#8A94A6' }}
           />
-          {heating ? 'Valve Open' : 'Valve Closed'}
+          {heating ? 'Heat ON' : 'Heat OFF'}
         </span>
       </div>
 
