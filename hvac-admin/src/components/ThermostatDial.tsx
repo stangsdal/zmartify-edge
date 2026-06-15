@@ -18,23 +18,32 @@ export function ThermostatDial({
   roomName,
   statusLabel,
   heating = false,
-  min = 12,
-  max = 30,
+  min = 5,
+  max = 35,
   step = 0.5,
   onChange,
 }: ThermostatDialProps) {
   const ratio = useMemo(() => (value - min) / (max - min), [value, min, max]);
   const clampedRatio = Math.max(0, Math.min(1, ratio));
-  const angle = 270 * clampedRatio - 135;
   const ringRadius = 128;
   const ringCircumference = 2 * Math.PI * ringRadius;
   const measuredTemp = typeof currentTemperature === 'number' ? currentTemperature : value;
+  const clampedMeasuredTemp = Math.max(min, Math.min(max, measuredTemp));
   const tempDelta = Math.abs(value - measuredTemp);
-  const deltaRatio = Math.min(tempDelta / 6, 1);
+  const setpointRatio = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const measuredRatio = Math.max(0, Math.min(1, (clampedMeasuredTemp - min) / (max - min)));
+  const deltaRatio = Math.abs(setpointRatio - measuredRatio);
   const deltaArcLength = ringCircumference * deltaRatio;
+  const deltaArcOffset = ringCircumference * Math.min(setpointRatio, measuredRatio);
   const primaryColor = heating ? '#FF6A2B' : '#67FBFF';
   const secondaryColor = heating ? '#ffb08f' : 'rgba(255,255,255,0.65)';
   const deltaColor = value >= measuredTemp ? '#FF8A4B' : '#67FBFF';
+  const markerTemps = [5, 10, 15, 20, 25, 30, 35];
+
+  const tempToAngle = (temp: number): number => {
+    const normalized = (temp - 20) / 15;
+    return -90 + normalized * 150;
+  };
 
   return (
     <div className="relative mx-auto w-full max-w-[360px] overflow-hidden rounded-[2rem] border border-white/10 hero-glow bg-[radial-gradient(circle_at_top,rgba(103,251,255,0.16),transparent_38%),linear-gradient(180deg,rgba(21,28,44,0.92),rgba(21,28,44,0.78))] p-5 text-white shadow-2xl">
@@ -45,38 +54,55 @@ export function ThermostatDial({
         <span>{heating ? 'Heating' : statusLabel || 'Idle'}</span>
       </div>
 
+      <div className="relative mt-3 flex justify-end">
+        <span
+          className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]"
+          style={{
+            color: heating ? '#FF6A2B' : '#8A94A6',
+            backgroundColor: heating ? 'rgba(255,106,43,0.15)' : 'rgba(138,148,166,0.15)',
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: heating ? '#FF6A2B' : '#8A94A6' }}
+          />
+          {heating ? 'Valve Open' : 'Valve Closed'}
+        </span>
+      </div>
+
       <div className="relative mt-4 flex items-center justify-center">
         <svg viewBox="0 0 320 320" className="h-[268px] w-[268px]">
-          <circle cx="160" cy="160" r={ringRadius} stroke="rgba(255,255,255,0.18)" strokeWidth="8" fill="none" />
+          <circle cx="160" cy="160" r={ringRadius} stroke="rgba(255,255,255,0.18)" strokeWidth="6" fill="none" />
           <circle
             cx="160"
             cy="160"
             r={ringRadius}
             stroke={deltaColor}
-            strokeWidth="8"
+            strokeWidth="6"
             fill="none"
             strokeDasharray={`${ringCircumference}`}
-            strokeDashoffset={`${ringCircumference - deltaArcLength}`}
+            strokeDashoffset={`${ringCircumference - deltaArcLength + deltaArcOffset}`}
             strokeLinecap="round"
             transform="rotate(-90 160 160)"
             opacity={deltaArcLength > 0 ? 1 : 0}
           />
-          <line
-            x1="160"
-            y1="160"
-            x2={160 + 110 * Math.cos((angle * Math.PI) / 180)}
-            y2={160 + 110 * Math.sin((angle * Math.PI) / 180)}
-            stroke={primaryColor}
-            strokeWidth="4"
-            strokeLinecap="round"
-            opacity={0.85}
-          />
-          <circle
-            cx={160 + 110 * Math.cos((angle * Math.PI) / 180)}
-            cy={160 + 110 * Math.sin((angle * Math.PI) / 180)}
-            r="7"
-            fill={primaryColor}
-          />
+          {markerTemps.map((markerTemp) => {
+            const angle = tempToAngle(markerTemp);
+            const cos = Math.cos((angle * Math.PI) / 180);
+            const sin = Math.sin((angle * Math.PI) / 180);
+            return (
+              <line
+                key={markerTemp}
+                x1={160 + 114 * cos}
+                y1={160 + 114 * sin}
+                x2={160 + 126 * cos}
+                y2={160 + 126 * sin}
+                stroke={markerTemp === 20 ? primaryColor : 'rgba(255,255,255,0.55)'}
+                strokeWidth={markerTemp === 20 ? 2.5 : 2}
+                strokeLinecap="round"
+              />
+            );
+          })}
         </svg>
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
