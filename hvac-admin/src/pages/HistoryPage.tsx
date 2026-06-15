@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonItem, IonLabel, IonPage, IonSelect, IonSelectOption } from '@ionic/react';
+import { useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { HistoryChart } from '../components/HistoryChart';
@@ -8,6 +9,7 @@ import { historyApi, HistoryWindow } from '../api/history';
 import { DeviceHistory, ZoneHistory } from '../types/api';
 
 export function HistoryPage() {
+  const location = useLocation();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [siteId, setSiteId] = useState('');
   const [deviceId, setDeviceId] = useState('');
@@ -17,30 +19,65 @@ export function HistoryPage() {
   const [window, setWindow] = useState<HistoryWindow>('24h');
   const [deviceHistory, setDeviceHistory] = useState<DeviceHistory | null>(null);
   const [zoneHistory, setZoneHistory] = useState<ZoneHistory | null>(null);
+  const initialZoneRef = useMemo(() => new URLSearchParams(location.search).get('zoneRef') || '', [location.search]);
+
+  useEffect(() => {
+    setZoneRef(initialZoneRef);
+  }, [initialZoneRef]);
 
   useEffect(() => {
     const loadSites = async () => {
       const res = await mobileApi.listSites();
       setSites(res.sites || []);
-      if (res.sites?.length) setSiteId(res.sites[0].site_id);
+      if (!res.sites?.length) return;
+
+      if (!initialZoneRef) {
+        setSiteId(res.sites[0].site_id);
+        return;
+      }
+
+      for (const site of res.sites) {
+        try {
+          const detail = await mobileApi.getSite(site.site_id);
+          for (const device of detail.devices) {
+            const deviceDetail = await mobileApi.getDevice(device.device_id);
+            const matchingZone = (deviceDetail.zones || []).find((zone) => {
+              const ref = zone.zone_uuid || `${device.device_id}:${zone.zone_id}`;
+              return ref === initialZoneRef;
+            });
+            if (matchingZone) {
+              setSiteId(site.site_id);
+              setDeviceId(device.device_id);
+              return;
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      setSiteId(res.sites[0].site_id);
     };
     loadSites().catch(console.error);
-  }, []);
+  }, [initialZoneRef]);
 
   useEffect(() => {
     if (!siteId) return;
     const loadDevices = async () => {
       const site = await mobileApi.getSite(siteId);
       setDevices(site.devices.map((d) => ({ device_id: d.device_id, display_name: d.display_name })));
-      if (site.devices.length) setDeviceId(site.devices[0].device_id);
-      else {
+      if (site.devices.length) {
+        if (!deviceId || !site.devices.some((device) => device.device_id === deviceId)) {
+          setDeviceId(site.devices[0].device_id);
+        }
+      } else {
         setDeviceId('');
         setZones([]);
         setZoneRef('');
       }
     };
     loadDevices().catch(console.error);
-  }, [siteId]);
+  }, [siteId, deviceId]);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -53,14 +90,16 @@ export function HistoryPage() {
       }));
       setZones(nextZones);
       if (nextZones.length) {
-        const preferred = nextZones.find((z) => z.zone_uuid) || nextZones[0];
+        const preferred = initialZoneRef
+          ? nextZones.find((zone) => (zone.zone_uuid || `${deviceId}:${zone.zone_id}`) === initialZoneRef) || nextZones[0]
+          : nextZones[0];
         setZoneRef(preferred.zone_uuid || `${deviceId}:${preferred.zone_id}`);
       } else {
         setZoneRef('');
       }
     };
     loadZones().catch(console.error);
-  }, [deviceId]);
+  }, [deviceId, initialZoneRef]);
 
   useEffect(() => {
     if (!deviceId) return;

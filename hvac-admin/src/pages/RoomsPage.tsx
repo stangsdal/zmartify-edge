@@ -62,6 +62,7 @@ export function RoomsPage() {
                 key={room.zone_ref}
                 zone={room}
                 onOpen={() => history.push(`/app/rooms/${encodeURIComponent(room.zone_ref)}`)}
+                onHistory={() => history.push(`/app/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
               />
             ))}
             {!sortedRooms.length ? <p className="text-sm text-muted">No rooms found for this property.</p> : null}
