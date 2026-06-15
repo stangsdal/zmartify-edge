@@ -38,7 +38,7 @@ export function LoginPage() {
       try {
         await authApi.me();
         if (!canceled) {
-          history.replace(`${appBase}/dashboard`);
+          history.replace(`${appBase}/home`);
         }
       } catch {
         // Stale token: keep user on login page and let them sign in again.
@@ -60,7 +60,7 @@ export function LoginPage() {
       apiClient.setAuthToken(data.access_token);
       setMessage('Login successful');
       setTimeout(() => {
-        history.push(`${appBase}/dashboard`);
+        history.push(`${appBase}/home`);
       }, 300);
     } catch (e) {
       setMessage(String(e));

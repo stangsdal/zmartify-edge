@@ -1,0 +1,72 @@
+import { useEffect, useMemo, useState } from 'react';
+import { IonButton, IonContent, IonPage } from '@ionic/react';
+import { AppHeader } from '../components/AppHeader';
+import { AlertCard } from '../components/AlertCard';
+import { notificationsApi } from '../api/notifications';
+
+function priorityFromEventType(eventType: string): 'critical' | 'warning' | 'info' {
+  if (eventType.includes('fault') || eventType.includes('failed') || eventType.includes('offline')) return 'critical';
+  if (eventType.includes('alarm') || eventType.includes('setpoint')) return 'warning';
+  return 'info';
+}
+
+export function AlertsPage() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [unreadOnly, setUnreadOnly] = useState(false);
+
+  const load = async () => {
+    const data = await notificationsApi.list({ limit: 200, unread_only: unreadOnly });
+    setRows(data);
+  };
+
+  useEffect(() => {
+    load().catch(console.error);
+  }, [unreadOnly]);
+
+  const unreadCount = useMemo(() => rows.filter((r) => !r.read).length, [rows]);
+
+  return (
+    <IonPage>
+      <AppHeader title="Alerts" subtitle="Actionable system issues" />
+      <IonContent className="ion-padding">
+        <div className="space-y-4 pb-8">
+          <div className="rounded-2xl app-surface p-4 shadow-soft flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted">Unread Alerts</p>
+              <p className="text-2xl font-bold text-brand-primary">{unreadCount}</p>
+            </div>
+            <div className="flex gap-2">
+              <IonButton size="small" fill="outline" onClick={() => setUnreadOnly((v) => !v)}>
+                {unreadOnly ? 'Show All' : 'Unread'}
+              </IonButton>
+              <IonButton size="small" onClick={() => notificationsApi.markAllRead().then(load)}>
+                Mark all read
+              </IonButton>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {rows.map((row) => (
+              <div key={row.notification_id}>
+                <AlertCard
+                  title={row.event.event_type.replaceAll('_', ' ')}
+                  detail={row.event.payload?.device_id ? `Device ${row.event.payload.device_id}` : 'System event'}
+                  time={row.created_at}
+                  priority={priorityFromEventType(row.event.event_type)}
+                />
+                {!row.read ? (
+                  <div className="mt-2">
+                    <IonButton size="small" fill="outline" onClick={() => notificationsApi.markRead(row.notification_id).then(load)}>
+                      Mark read
+                    </IonButton>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            {!rows.length ? <p className="text-sm text-muted">No alerts found.</p> : null}
+          </div>
+        </div>
+      </IonContent>
+    </IonPage>
+  );
+}

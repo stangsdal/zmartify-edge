@@ -18,6 +18,15 @@ import App from './App';
 
 setupIonicReact();
 
+const storedTheme = localStorage.getItem('theme_mode');
+if (storedTheme === 'dark') {
+  document.body.classList.add('dark-mode');
+} else if (storedTheme === 'light') {
+  document.body.classList.remove('dark-mode');
+} else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  document.body.classList.add('dark-mode');
+}
+
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

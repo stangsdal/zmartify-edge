@@ -1,0 +1,39 @@
+import { motion } from 'framer-motion';
+import { HealthBadge } from './HealthBadge';
+import { TemperatureBadge } from './TemperatureBadge';
+import { MobileZone } from '../api/mobile';
+
+interface RoomCardProps {
+  zone: MobileZone;
+  onOpen: () => void;
+}
+
+function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | 'critical' | 'info' } {
+  if (!zone.online) return { label: 'Offline', tone: 'critical' };
+  if (zone.fault) return { label: 'Fault', tone: 'critical' };
+  if (zone.demand) return { label: 'Heating', tone: 'warn' };
+  return { label: 'Idle', tone: 'good' };
+}
+
+export function RoomCard({ zone, onOpen }: RoomCardProps) {
+  const state = zoneState(zone);
+  return (
+    <motion.button
+      whileTap={{ scale: 0.98 }}
+      whileHover={{ y: -2 }}
+      onClick={onOpen}
+      className="w-full text-left rounded-2xl p-4 app-surface shadow-soft border border-slate-100 min-h-[120px]"
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-base font-semibold">{zone.name}</p>
+          <p className="text-xs text-muted mt-1">Target {zone.target_temperature_c?.toFixed(1) ?? '--'}°C</p>
+        </div>
+        <HealthBadge label={state.label} tone={state.tone} />
+      </div>
+      <div className="mt-3">
+        <TemperatureBadge value={zone.current_temperature_c} />
+      </div>
+    </motion.button>
+  );
+}

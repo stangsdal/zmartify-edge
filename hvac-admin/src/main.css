@@ -1,30 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --ion-color-primary: #1976d2;
-  --ion-color-primary-rgb: 25, 118, 210;
+  --ion-color-primary: #301e96;
+  --ion-color-primary-rgb: 48, 30, 150;
   --ion-color-primary-contrast: #ffffff;
-  --ion-color-primary-contrast-rgb: 255, 255, 255;
-  --ion-color-primary-shade: #1565c0;
-  --ion-color-primary-tint: #1e88e5;
-  --ion-color-secondary: #0097a7;
-  --ion-color-danger: #d32f2f;
-  --ion-color-success: #388e3c;
-  --ion-color-warning: #fbc02d;
+  --ion-color-secondary: #67fbff;
+  --ion-background-color: #f1f2f2;
+  --ion-text-color: #111827;
+  --app-surface: #ffffff;
+  --app-muted: #5f6377;
 }
 
-html {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
-    Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+html,
+body,
+#root,
+ion-app {
+  height: 100%;
+}
+
+html,
+body {
+  font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-body {
   margin: 0;
   padding: 0;
+  background: radial-gradient(circle at 10% 10%, rgba(103, 251, 255, 0.15), transparent 40%),
+    linear-gradient(180deg, #f7f8fb 0%, #f1f2f2 100%);
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+body.dark-mode {
+  --ion-background-color: #121212;
+  --ion-text-color: #f6f7fb;
+  --app-surface: #1e1e1e;
+  --app-muted: #a8acbf;
+  background: radial-gradient(circle at 15% 12%, rgba(103, 251, 255, 0.09), transparent 38%),
+    linear-gradient(180deg, #121212 0%, #17171b 100%);
+  color: #f6f7fb;
+}
+
+.app-surface {
+  background: var(--app-surface);
+}
+
+.text-muted {
+  color: var(--app-muted);
+}
+
+.hero-glow {
+  box-shadow: 0 18px 40px rgba(48, 30, 150, 0.2);
 }
