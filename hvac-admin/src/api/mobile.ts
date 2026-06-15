@@ -67,12 +67,38 @@ export interface MobileEvent {
   payload?: Record<string, unknown>;
 }
 
+export interface MobileDeviceFreshness {
+  device_id: string;
+  device: {
+    online?: boolean | null;
+    mqtt_connected?: boolean | null;
+    updated_at?: string | null;
+    source_timestamp?: string | null;
+    freshness_age_ms?: number | null;
+  };
+  zones: Array<{
+    zone_id: number;
+    updated_at?: string | null;
+    source_timestamp?: string | null;
+    freshness_age_ms?: number | null;
+  }>;
+  channels: Array<{
+    channel_id: number;
+    updated_at?: string | null;
+    source_timestamp?: string | null;
+    freshness_age_ms?: number | null;
+  }>;
+}
+
 export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
   getSite: (siteId: string): Promise<MobileSiteDetail> => apiClient.get(`/mobile/sites/${siteId}`),
 
   getDevice: (deviceId: string): Promise<MobileDeviceDetail> => apiClient.get(`/mobile/devices/${deviceId}`),
+
+  getDeviceFreshness: (deviceId: string): Promise<MobileDeviceFreshness> =>
+    apiClient.get(`/mobile/devices/${deviceId}/freshness`),
 
   listEvents: (limit = 25): Promise<{ events: MobileEvent[] }> => apiClient.get(`/mobile/events?limit=${limit}`),
 
