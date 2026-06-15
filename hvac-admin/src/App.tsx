@@ -33,7 +33,7 @@ export function App() {
   const isPublicRoute = publicRoutePrefixes.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
   );
-  const isAdmin = roles.includes('owner') || roles.includes('admin');
+  const isAdmin = roles.includes('admin');
 
   useEffect(() => {
     let canceled = false;

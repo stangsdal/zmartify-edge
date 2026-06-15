@@ -248,7 +248,7 @@ def _mobile_site_scope_ids(request: Request) -> set[int] | None:
     auth_user = getattr(request.state, "auth_user", None)
     if auth_user is None or auth_user.user_id is None:
         return None
-    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
+    if ROLE_ADMIN in auth_user.roles:
         return None
     return set(list_user_site_access(auth_user.user_id))
 
@@ -1097,7 +1097,7 @@ def mobile_device_channels(device_id: str, request: Request) -> dict:
 
 @app.post("/mobile/zones/{zone_ref}/setpoint")
 def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         device_id, zone_id = resolve_zone_ref(zone_ref)
         context = get_device_onboarding_context(device_id)

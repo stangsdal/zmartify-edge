@@ -327,8 +327,6 @@ def authenticate_emergency_token(token: str) -> AuthenticatedUser | None:
 
 
 def require_any_role(user: AuthenticatedUser, allowed_roles: set[str]) -> None:
-    if ROLE_OWNER in user.roles:
-        return
     if not (user.roles & allowed_roles):
         raise AuthError("insufficient role permissions")
 

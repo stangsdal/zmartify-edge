@@ -504,6 +504,62 @@ def test_mobile_viewer_without_site_assignments_sees_no_properties(monkeypatch, 
     assert detail.status_code == 404
 
 
+def test_mobile_viewer_can_change_setpoint_within_scoped_site(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    emergency = {"Authorization": "Bearer emergency-token"}
+
+    domain = client.post("/domains", headers=emergency, json={"slug": "house-viewer-sp", "name": "House Viewer SP"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=emergency, json={"slug": "site-viewer-sp", "name": "Site Viewer SP"})
+    assert site.status_code == 201
+    site_id = site.json()["id"]
+
+    device_id = "hvac-gateway-vsp001"
+    create = client.post(
+        "/devices",
+        headers=emergency,
+        json={
+            "device_id": device_id,
+            "display_name": "Viewer Device",
+            "mac": "AA:00:00:00:00:01",
+            "firmware_version": "0.1.2",
+        },
+    )
+    assert create.status_code == 201
+    assign = client.post(f"/devices/{device_id}/assign-site", headers=emergency, json={"site_id": site_id})
+    assert assign.status_code == 200
+
+    user = client.post(
+        "/users",
+        headers=emergency,
+        json={
+            "username": "viewer-setpoint",
+            "display_name": "Viewer Setpoint",
+            "password": "VeryStrongPass123!",
+            "roles": ["viewer"],
+        },
+    )
+    assert user.status_code == 201
+    user_id = user.json()["id"]
+
+    scoped = client.post(f"/users/{user_id}/site-access", headers=emergency, json={"site_ids": [site_id]})
+    assert scoped.status_code == 200
+
+    login = client.post("/auth/login", json={"username": "viewer-setpoint", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    zones = client.get(f"/mobile/devices/{device_id}", headers=bearer)
+    assert zones.status_code == 200
+    zone_ref = zones.json()["zones"][0]["zone_uuid"]
+
+    setpoint = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=bearer, json={"target_temperature_c": 21.5})
+    assert setpoint.status_code == 200
+    assert setpoint.json()["zone"]["target_temperature_c"] == 21.5
+
+
 def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
