@@ -38,8 +38,10 @@ from app.device_onboarding import (
 )
 from app.domain_model import (
     DomainModelError,
+    get_device_channel,
     get_device_zone,
     get_mobile_site,
+    list_device_channels,
     list_device_zones,
     list_events,
     list_mobile_domains,
@@ -50,8 +52,10 @@ from app.domain_model import (
     mark_notification_read,
     rename_zone,
     resolve_zone_ref,
+    set_channel_metadata,
     set_zone_metadata,
     upsert_device_state,
+    upsert_channel_state,
     upsert_zone_state,
 )
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
@@ -88,6 +92,9 @@ from app.registry import (
     update_device_local_url,
 )
 from app.schemas import (
+    ChannelMetadataIn,
+    ChannelOut,
+    ChannelStateIn,
     DeviceAssignSite,
     DeviceClaimIn,
     DeviceClaimOut,
@@ -661,6 +668,63 @@ def api_set_device_zone_metadata(device_id: str, zone_id: int, payload: ZoneMeta
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@app.get("/devices/{device_id}/channels", response_model=list[ChannelOut])
+def api_device_channels(device_id: str, request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return list_device_channels(device_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.get("/devices/{device_id}/channels/{channel_id}", response_model=ChannelOut)
+def api_get_device_channel(device_id: str, channel_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return get_device_channel(device_id, channel_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/channels/{channel_id}/metadata", response_model=ChannelOut)
+def api_set_device_channel_metadata(device_id: str, channel_id: int, payload: ChannelMetadataIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        channel = set_channel_metadata(
+            device_id,
+            channel_id,
+            name=payload.name,
+            icon=payload.icon,
+            sort_order=payload.sort_order,
+        )
+        log_event(
+            "channel_metadata_updated",
+            payload={"device_id": device_id, "channel_id": channel_id, "metadata": payload.model_dump(exclude_none=True)},
+        )
+        return channel
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/channels/{channel_id}/state", response_model=ChannelOut)
+def api_set_device_channel_state(device_id: str, channel_id: int, payload: ChannelStateIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        return upsert_channel_state(
+            device_id,
+            channel_id,
+            active=payload.active,
+            fault=payload.fault,
+            source="admin_api",
+        )
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @app.post("/devices/{device_id}/assign-site", response_model=DeviceOut)
 def api_assign_site(device_id: str, payload: DeviceAssignSite, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
@@ -851,6 +915,7 @@ def mobile_device(device_id: str, request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
 
     zones = list_device_zones(device_id)
+    channels = list_device_channels(device_id)
     return {
         "device_id": row["device_id"],
         "display_name": row["display_name"],
@@ -859,6 +924,7 @@ def mobile_device(device_id: str, request: Request) -> dict:
         "integration_mode": row["integration_mode"],
         "site": {"site_id": row["site_id"], "site_name": row["site_name"]} if row["site_id"] else None,
         "zones": zones,
+        "channels": channels,
     }
 
 
@@ -867,6 +933,15 @@ def mobile_device_zones(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         return {"device_id": device_id, "zones": list_device_zones(device_id)}
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.get("/mobile/devices/{device_id}/channels")
+def mobile_device_channels(device_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return {"device_id": device_id, "channels": list_device_channels(device_id)}
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

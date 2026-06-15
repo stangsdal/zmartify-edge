@@ -173,6 +173,32 @@ class ZoneOut(BaseModel):
     online: bool
 
 
+class ChannelMetadataIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = None
+    icon: str | None = None
+    sort_order: int | None = None
+
+
+class ChannelStateIn(BaseModel):
+    active: bool | None = None
+    fault: str | None = None
+
+
+class ChannelOut(BaseModel):
+    channel_uuid: str
+    channel_id: int
+    name: str
+    icon: str | None = None
+    sort_order: int
+    active: bool | None = None
+    fault: str | None = None
+    updated_at: str | None = None
+    source_timestamp: str | None = None
+    online: bool
+
+
 class MobileSetpointIn(BaseModel):
     target_temperature_c: float
 

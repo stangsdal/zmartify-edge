@@ -93,6 +93,27 @@ def ensure_default_zones(device_external_id: str, zone_count: int = 3) -> None:
         conn.commit()
 
 
+def ensure_default_channels(device_external_id: str, channel_count: int = 16) -> None:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        existing = conn.execute(
+            "SELECT channel_id FROM channel_metadata WHERE device_id = ?",
+            (device["id"],),
+        ).fetchall()
+        have = {int(row["channel_id"]) for row in existing}
+        for channel_id in range(1, channel_count + 1):
+            if channel_id in have:
+                continue
+            conn.execute(
+                """
+                INSERT INTO channel_metadata(uuid, device_id, channel_id, name, sort_order)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (_new_uuid(), device["id"], channel_id, f"channel-{channel_id}", channel_id),
+            )
+        conn.commit()
+
+
 def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
     ensure_default_zones(device_external_id)
     with get_connection() as conn:
@@ -142,6 +163,51 @@ def get_device_zone(device_external_id: str, zone_id: int) -> dict[str, Any]:
         if int(zone["zone_id"]) == int(zone_id):
             return zone
     raise RegistryNotFoundError("zone not found")
+
+
+def list_device_channels(device_external_id: str) -> list[dict[str, Any]]:
+    ensure_default_channels(device_external_id)
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        rows = conn.execute(
+            """
+            SELECT cm.uuid AS channel_uuid, cm.channel_id, cm.name, cm.icon, cm.sort_order,
+                   cs.active, cs.fault, cs.source_timestamp, cs.updated_at,
+                   ds.online AS device_online
+            FROM channel_metadata cm
+            LEFT JOIN channel_state cs ON cs.device_id = cm.device_id AND cs.channel_id = cm.channel_id
+            LEFT JOIN device_state ds ON ds.device_id = cm.device_id
+            WHERE cm.device_id = ?
+            ORDER BY cm.sort_order ASC, cm.channel_id ASC
+            """,
+            (device["id"],),
+        ).fetchall()
+
+    channels: list[dict[str, Any]] = []
+    for row in rows:
+        channels.append(
+            {
+                "channel_uuid": row["channel_uuid"],
+                "channel_id": row["channel_id"],
+                "name": row["name"],
+                "icon": row["icon"],
+                "sort_order": row["sort_order"],
+                "active": None if row["active"] is None else bool(row["active"]),
+                "fault": row["fault"],
+                "updated_at": row["updated_at"],
+                "source_timestamp": row["source_timestamp"],
+                "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
+            }
+        )
+    return channels
+
+
+def get_device_channel(device_external_id: str, channel_id: int) -> dict[str, Any]:
+    channels = list_device_channels(device_external_id)
+    for channel in channels:
+        if int(channel["channel_id"]) == int(channel_id):
+            return channel
+    raise RegistryNotFoundError("channel not found")
 
 
 def _write_zone_metadata(
@@ -225,6 +291,119 @@ def set_zone_metadata(
         floor=floor,
         area_m2=area_m2,
     )
+
+
+def _write_channel_metadata(
+    device_external_id: str,
+    channel_id: int,
+    *,
+    name: str | None = None,
+    icon: str | None = None,
+    sort_order: int | None = None,
+) -> dict[str, Any]:
+    if channel_id < 1:
+        raise DomainModelError("channel_id must be >= 1")
+
+    ensure_default_channels(device_external_id)
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT id FROM channel_metadata WHERE device_id = ? AND channel_id = ?",
+            (device["id"], channel_id),
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFoundError("channel not found")
+
+        current = conn.execute(
+            "SELECT name, icon, sort_order FROM channel_metadata WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+        conn.execute(
+            """
+            UPDATE channel_metadata
+            SET name = ?,
+                icon = ?,
+                sort_order = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                name if name is not None else current["name"],
+                icon if icon is not None else current["icon"],
+                sort_order if sort_order is not None else current["sort_order"],
+                now,
+                row["id"],
+            ),
+        )
+        conn.commit()
+
+    return get_device_channel(device_external_id, channel_id)
+
+
+def set_channel_metadata(
+    device_external_id: str,
+    channel_id: int,
+    *,
+    name: str | None = None,
+    icon: str | None = None,
+    sort_order: int | None = None,
+) -> dict[str, Any]:
+    if name is not None and not name.strip():
+        raise DomainModelError("name cannot be blank")
+    return _write_channel_metadata(
+        device_external_id,
+        channel_id,
+        name=name.strip() if name is not None else None,
+        icon=icon,
+        sort_order=sort_order,
+    )
+
+
+def upsert_channel_state(
+    device_external_id: str,
+    channel_id: int,
+    *,
+    active: bool | None = None,
+    fault: str | None = None,
+    source: str = "rest",
+    source_timestamp: str | None = None,
+) -> dict[str, Any]:
+    ensure_default_channels(device_external_id)
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        conn.execute(
+            """
+            INSERT INTO channel_state(device_id, channel_id, active, fault, source_timestamp, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id, channel_id) DO UPDATE SET
+                active = excluded.active,
+                fault = excluded.fault,
+                source_timestamp = excluded.source_timestamp,
+                updated_at = excluded.updated_at
+            """,
+            (
+                device["id"],
+                channel_id,
+                None if active is None else int(bool(active)),
+                fault,
+                source_timestamp or now,
+                now,
+            ),
+        )
+        conn.commit()
+
+    result = get_device_channel(device_external_id, channel_id)
+    if active is not None:
+        log_event(
+            "channel_state_updated",
+            domain_id=device.get("domain_id"),
+            site_id=device.get("site_id"),
+            device_pk_id=device["id"],
+            payload={"device_id": device_external_id, "channel_id": channel_id, "active": bool(active), "source": source},
+        )
+    return result
 
 
 def _insert_notifications_for_event(conn: Any, event_id: int, event_type: str) -> None:

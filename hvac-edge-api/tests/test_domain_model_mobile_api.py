@@ -226,3 +226,41 @@ def test_notification_read_and_read_all(monkeypatch, tmp_path: Path):
     unread_after_all = client.get("/mobile/notifications", headers=bearer, params={"unread_only": True})
     assert unread_after_all.status_code == 200
     assert unread_after_all.json() == []
+
+
+def test_channel_metadata_state_and_mobile_shape(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-aa3311")
+
+    channels = client.get(f"/devices/{device_id}/channels", headers=headers)
+    assert channels.status_code == 200
+    assert len(channels.json()) >= 8
+
+    set_meta = client.post(
+        f"/devices/{device_id}/channels/1/metadata",
+        headers=headers,
+        json={"name": "Pump", "icon": "pump", "sort_order": 1},
+    )
+    assert set_meta.status_code == 200
+    assert set_meta.json()["name"] == "Pump"
+    assert set_meta.json()["icon"] == "pump"
+
+    set_state = client.post(
+        f"/devices/{device_id}/channels/1/state",
+        headers=headers,
+        json={"active": True, "fault": None},
+    )
+    assert set_state.status_code == 200
+    assert set_state.json()["active"] is True
+
+    mobile_channels = client.get(f"/mobile/devices/{device_id}/channels", headers=headers)
+    assert mobile_channels.status_code == 200
+    assert len(mobile_channels.json()["channels"]) >= 8
+    assert mobile_channels.json()["channels"][0]["name"] == "Pump"
+
+    mobile_device = client.get(f"/mobile/devices/{device_id}", headers=headers)
+    assert mobile_device.status_code == 200
+    assert "channels" in mobile_device.json()
+    assert len(mobile_device.json()["channels"]) >= 8
