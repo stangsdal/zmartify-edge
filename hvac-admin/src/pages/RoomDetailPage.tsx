@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { IonButton, IonContent, IonPage } from '@ionic/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { IonContent, IonPage } from '@ionic/react';
 import { useParams } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { ThermostatDial } from '../components/ThermostatDial';
@@ -16,7 +16,8 @@ export function RoomDetailPage() {
   const [target, setTarget] = useState(21);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const lastAppliedRef = useRef<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -29,7 +30,11 @@ export function RoomDetailPage() {
             const zref = z.zone_uuid || `${device.device_id}:${z.zone_id}`;
             if (zref === resolvedRef) {
               setZone(z);
-              setTarget(z.target_temperature_c ?? 21);
+              const nextTarget = z.target_temperature_c ?? 21;
+              setTarget(nextTarget);
+              lastAppliedRef.current = nextTarget;
+              setDirty(false);
+              setSaveError('');
               return;
             }
           }
@@ -47,20 +52,38 @@ export function RoomDetailPage() {
     return 'Comfortable';
   }, [zone]);
 
-  const applyTarget = async () => {
-    setSaving(true);
-    setSaveError('');
-    setSaveSuccess(false);
-    try {
-      await mobileApi.setZoneSetpoint(resolvedRef, target);
-      setZone((prev) => (prev ? { ...prev, target_temperature_c: target } : prev));
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (e) {
-      setSaveError(String(e));
-    } finally {
-      setSaving(false);
+  useEffect(() => {
+    if (!zone || !dirty) return;
+    if (lastAppliedRef.current === target) {
+      setDirty(false);
+      return;
     }
+
+    const timer = window.setTimeout(() => {
+      const applyTarget = async () => {
+        setSaving(true);
+        setSaveError('');
+        try {
+          await mobileApi.setZoneSetpoint(resolvedRef, target);
+          lastAppliedRef.current = target;
+          setZone((prev) => (prev ? { ...prev, target_temperature_c: target } : prev));
+          setDirty(false);
+        } catch (e) {
+          setSaveError(String(e));
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      void applyTarget();
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [dirty, resolvedRef, target, zone]);
+
+  const handleTargetChange = (nextTarget: number) => {
+    setTarget(nextTarget);
+    setDirty(true);
   };
 
   return (
@@ -75,12 +98,11 @@ export function RoomDetailPage() {
               roomName={zone?.name}
               statusLabel={statusText}
               heating={!!zone?.demand}
-              onChange={setTarget}
+              onChange={handleTargetChange}
             />
-            <IonButton expand="block" onClick={applyTarget} disabled={saving}>
-              {saving ? 'Saving...' : 'Apply Temperature'}
-            </IonButton>
-            {saveSuccess && <p className="text-center text-sm font-semibold mt-2" style={{ color: '#027a48' }}>Setpoint updated</p>}
+            <p className="mt-3 text-center text-xs uppercase tracking-[0.22em] text-muted">
+              {saving ? 'Applying automatically...' : dirty ? 'Will apply in a moment' : 'Setpoint saved'}
+            </p>
             {saveError && <p className="text-center text-sm mt-2 text-rose-600">{saveError}</p>}
           </section>
 

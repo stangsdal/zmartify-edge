@@ -70,31 +70,42 @@ export function ThermostatDial({
         </svg>
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
-          <p className="text-[4.2rem] font-semibold leading-none tracking-tight text-white drop-shadow-[0_4px_16px_rgba(0,0,0,0.28)]">
+          <p className="text-[4rem] font-semibold leading-none tracking-tight text-white drop-shadow-[0_4px_16px_rgba(0,0,0,0.28)]">
             {currentTemperature == null ? '--' : currentTemperature.toFixed(1)}
             <span className="align-top text-3xl font-medium text-white/90">°C</span>
           </p>
-          <p className="mt-3 text-sm text-white/75">Setpoint</p>
-          <p className="text-2xl font-semibold" style={{ color: secondaryColor }}>
+          <p className="mt-2 text-sm text-white/75">Setpoint</p>
+          <p className="text-[1.9rem] font-semibold leading-none" style={{ color: secondaryColor }}>
             {value.toFixed(1)}°C
           </p>
           <p className="mt-2 text-sm font-medium" style={{ color: primaryColor }}>
             {statusLabel || (heating ? 'Heating' : 'Idle')}
           </p>
-          <p className="mt-5 text-sm text-white/80">{roomName || ''}</p>
+          <p className="mt-4 text-sm text-white/80">{roomName || ''}</p>
         </div>
       </div>
 
-      <input
-        aria-label="Temperature dial"
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="relative mt-5 w-full accent-[color:var(--ion-color-secondary)]"
-      />
+      <div className="relative mt-5 h-10">
+        <div className="absolute left-0 right-0 top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-white/18" />
+        <div
+          className="absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-full"
+          style={{ width: `${ratio * 100}%`, backgroundColor: primaryColor }}
+        />
+        <div
+          className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/70 shadow-[0_0_0_8px_rgba(103,251,255,0.12)]"
+          style={{ left: `${ratio * 100}%`, backgroundColor: primaryColor }}
+        />
+        <input
+          aria-label="Temperature dial"
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        />
+      </div>
     </div>
   );
 }
