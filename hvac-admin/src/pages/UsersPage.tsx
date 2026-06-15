@@ -14,6 +14,8 @@ import {
   IonItem,
   IonLabel,
   IonList,
+  IonSelect,
+  IonSelectOption,
 } from '@ionic/react';
 import { usersApi } from '../api/users';
 import { domainApi } from '../api/domains';
@@ -21,13 +23,16 @@ import { siteApi } from '../api/sites';
 import { Domain, Site, User } from '../types/api';
 
 export function UsersPage() {
+  const roleOptions = ['owner', 'admin', 'installer', 'viewer'];
   const [users, setUsers] = useState<User[]>([]);
   const [siteOptions, setSiteOptions] = useState<Array<{ id: number; label: string }>>([]);
   const [error, setError] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [roles, setRoles] = useState('viewer');
+  const [roles, setRoles] = useState<string[]>(['viewer']);
+  const [roleEditUser, setRoleEditUser] = useState<User | null>(null);
+  const [roleEditSelected, setRoleEditSelected] = useState<string[]>([]);
   const [siteAccessUser, setSiteAccessUser] = useState<User | null>(null);
   const [siteAccessSelected, setSiteAccessSelected] = useState<number[]>([]);
   const [siteAccessLoading, setSiteAccessLoading] = useState(false);
@@ -71,31 +76,40 @@ export function UsersPage() {
         username,
         display_name: displayName,
         password,
-        roles: roles.split(',').map((r) => r.trim()).filter(Boolean),
+        roles,
       });
       setUsername('');
       setDisplayName('');
       setPassword('');
+      setRoles(['viewer']);
       await load();
     } catch (e) {
       setError(String(e));
     }
   };
 
-  const changeRoles = async (user: User) => {
-    const next = window.prompt('Enter roles (comma-separated)', user.roles.join(','));
-    if (next === null) {
+  const changeRoles = (user: User) => {
+    setRoleEditUser(user);
+    setRoleEditSelected(user.roles || []);
+  };
+
+  const saveRoles = async (selectedValues: Array<string | number>) => {
+    if (!roleEditUser) {
       return;
     }
     try {
-      const parsed = next
-        .split(',')
-        .map((r) => r.trim())
-        .filter(Boolean);
-      await usersApi.setRoles(user.id, parsed);
+      setSiteAccessLoading(true);
+      const parsed = selectedValues
+        .map((value) => String(value).trim())
+        .filter((value) => roleOptions.includes(value));
+      await usersApi.setRoles(roleEditUser.id, parsed);
       await load();
     } catch (e) {
       setError(String(e));
+    } finally {
+      setSiteAccessLoading(false);
+      setRoleEditUser(null);
+      setRoleEditSelected([]);
     }
   };
 
@@ -142,6 +156,37 @@ export function UsersPage() {
       </IonHeader>
       <IonContent className="ion-padding">
         <IonLoading isOpen={siteAccessLoading} message="Updating access..." />
+        <IonAlert
+          isOpen={roleEditUser !== null}
+          header={roleEditUser ? `Roles: ${roleEditUser.username}` : 'Roles'}
+          message="Toggle roles on/off for this user."
+          inputs={roleOptions.map((role) => ({
+            type: 'checkbox',
+            label: role,
+            value: role,
+            checked: roleEditSelected.includes(role),
+          }))}
+          buttons={[
+            {
+              text: 'Cancel',
+              role: 'cancel',
+              handler: () => {
+                setRoleEditUser(null);
+                setRoleEditSelected([]);
+              },
+            },
+            {
+              text: 'Save',
+              handler: (selected: Array<string | number>) => {
+                void saveRoles(selected || []);
+              },
+            },
+          ]}
+          onDidDismiss={() => {
+            setRoleEditUser(null);
+            setRoleEditSelected([]);
+          }}
+        />
         <IonAlert
           isOpen={siteAccessUser !== null}
           header={siteAccessUser ? `Site Access: ${siteAccessUser.username}` : 'Site Access'}
@@ -190,8 +235,19 @@ export function UsersPage() {
               <IonInput type="password" value={password} onIonChange={(e) => setPassword(e.detail.value || '')} />
             </IonItem>
             <IonItem>
-              <IonLabel position="stacked">Roles (comma-separated)</IonLabel>
-              <IonInput value={roles} onIonChange={(e) => setRoles(e.detail.value || '')} />
+              <IonLabel position="stacked">Roles</IonLabel>
+              <IonSelect
+                value={roles}
+                multiple={true}
+                onIonChange={(e) => setRoles((e.detail.value as string[]) || [])}
+                interface="popover"
+              >
+                {roleOptions.map((role) => (
+                  <IonSelectOption key={role} value={role}>
+                    {role}
+                  </IonSelectOption>
+                ))}
+              </IonSelect>
             </IonItem>
             <IonButton expand="block" className="ion-margin-top" onClick={create}>
               Create User
