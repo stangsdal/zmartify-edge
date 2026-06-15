@@ -3,7 +3,7 @@ import { IonContent, IonItem, IonLabel, IonPage, IonSelect, IonSelectOption } fr
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { HistoryChart } from '../components/HistoryChart';
-import { mobileApi, MobileSiteSummary } from '../api/mobile';
+import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
 import { historyApi, HistoryWindow } from '../api/history';
 import { DeviceHistory, ZoneHistory } from '../types/api';
 
@@ -12,6 +12,8 @@ export function HistoryPage() {
   const [siteId, setSiteId] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [devices, setDevices] = useState<Array<{ device_id: string; display_name: string }>>([]);
+  const [zones, setZones] = useState<Array<MobileZone & { device_id: string; label: string }>>([]);
+  const [zoneRef, setZoneRef] = useState('');
   const [window, setWindow] = useState<HistoryWindow>('24h');
   const [deviceHistory, setDeviceHistory] = useState<DeviceHistory | null>(null);
   const [zoneHistory, setZoneHistory] = useState<ZoneHistory | null>(null);
@@ -31,32 +33,57 @@ export function HistoryPage() {
       const site = await mobileApi.getSite(siteId);
       setDevices(site.devices.map((d) => ({ device_id: d.device_id, display_name: d.display_name })));
       if (site.devices.length) setDeviceId(site.devices[0].device_id);
+      else {
+        setDeviceId('');
+        setZones([]);
+        setZoneRef('');
+      }
     };
     loadDevices().catch(console.error);
   }, [siteId]);
 
   useEffect(() => {
     if (!deviceId) return;
+    const loadZones = async () => {
+      const detail = await mobileApi.getDevice(deviceId);
+      const nextZones = (detail.zones || []).map((zone) => ({
+        ...zone,
+        device_id: deviceId,
+        label: zone.name || `Room ${zone.zone_id}`,
+      }));
+      setZones(nextZones);
+      if (nextZones.length) {
+        const preferred = nextZones.find((z) => z.zone_uuid) || nextZones[0];
+        setZoneRef(preferred.zone_uuid || `${deviceId}:${preferred.zone_id}`);
+      } else {
+        setZoneRef('');
+      }
+    };
+    loadZones().catch(console.error);
+  }, [deviceId]);
+
+  useEffect(() => {
+    if (!deviceId) return;
     const loadHistory = async () => {
-      const [devHist, deviceDetail] = await Promise.all([
-        historyApi.getDeviceHistory(deviceId, window),
-        mobileApi.getDevice(deviceId),
-      ]);
+      const devHist = await historyApi.getDeviceHistory(deviceId, window);
       setDeviceHistory(devHist);
-      const firstZone = deviceDetail.zones?.[0];
-      if (!firstZone) {
+      if (!zoneRef) {
         setZoneHistory(null);
         return;
       }
-      const zoneRef = firstZone.zone_uuid || `${deviceId}:${firstZone.zone_id}`;
       setZoneHistory(await historyApi.getZoneHistory(zoneRef, window));
     };
     loadHistory().catch(console.error);
-  }, [deviceId, window]);
+  }, [deviceId, window, zoneRef]);
+
+  const selectedZone = zones.find((zone) => (zone.zone_uuid || `${zone.device_id}:${zone.zone_id}`) === zoneRef) || null;
 
   return (
     <IonPage>
-      <AppHeader title="History" subtitle="Temperature and system trends" />
+      <AppHeader
+        title="History"
+        subtitle={selectedZone ? `Room: ${selectedZone.label}` : 'Temperature and system trends'}
+      />
       <IonContent className="ion-padding">
         <div className="space-y-4 pb-8">
           <SiteSelector options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))} value={siteId} onChange={setSiteId} />
@@ -67,6 +94,20 @@ export function HistoryPage() {
               {devices.map((d) => (
                 <IonSelectOption key={d.device_id} value={d.device_id}>{d.display_name}</IonSelectOption>
               ))}
+            </IonSelect>
+          </IonItem>
+
+          <IonItem className="rounded-2xl overflow-hidden app-surface shadow-soft">
+            <IonLabel>Room</IonLabel>
+            <IonSelect value={zoneRef} onIonChange={(e) => setZoneRef(String(e.detail.value))} interface="popover" disabled={!zones.length}>
+              {zones.map((zone) => {
+                const ref = zone.zone_uuid || `${zone.device_id}:${zone.zone_id}`;
+                return (
+                  <IonSelectOption key={ref} value={ref}>
+                    {zone.label}
+                  </IonSelectOption>
+                );
+              })}
             </IonSelect>
           </IonItem>
 
@@ -82,9 +123,9 @@ export function HistoryPage() {
 
           <HistoryChart title="Device Online" points={deviceHistory?.online || []} color="#301E96" />
           <HistoryChart title="Device MQTT Connectivity" points={deviceHistory?.mqtt_connected || []} color="#67FBFF" />
-          <HistoryChart title="Room Temperature" points={zoneHistory?.temperature_current || []} color="#7D85FF" />
-          <HistoryChart title="Setpoint" points={zoneHistory?.setpoint || []} color="#301E96" />
-          <HistoryChart title="Heating Demand" points={zoneHistory?.demand || []} color="#67FBFF" />
+          <HistoryChart title={`Room Temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`} points={zoneHistory?.temperature_current || []} color="#7D85FF" />
+          <HistoryChart title={`Setpoint${selectedZone ? ` - ${selectedZone.label}` : ''}`} points={zoneHistory?.setpoint || []} color="#301E96" />
+          <HistoryChart title={`Heating Demand${selectedZone ? ` - ${selectedZone.label}` : ''}`} points={zoneHistory?.demand || []} color="#67FBFF" />
         </div>
       </IonContent>
     </IonPage>
