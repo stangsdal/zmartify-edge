@@ -1,0 +1,631 @@
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from app.db import get_connection
+from app.registry import RegistryNotFoundError
+
+NOTIFICATION_EVENT_TYPES = {
+    "device_offline",
+    "device_online",
+    "ota_failed",
+    "controller_fault",
+    "temperature_alarm",
+    "setpoint_write_failed",
+}
+
+
+class DomainModelError(ValueError):
+    """Domain model validation/lookup errors."""
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def _new_uuid() -> str:
+    return str(uuid.uuid4())
+
+
+def _row_to_dict(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {k: row[k] for k in row.keys()}
+
+
+def _resolve_device(conn: Any, device_external_id: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT d.id, d.uuid, d.device_id, d.display_name, d.site_id, d.last_seen_at,
+               s.uuid AS site_uuid, s.name AS site_name, s.domain_id,
+               dm.uuid AS domain_uuid, dm.slug AS domain_slug, dm.name AS domain_name
+        FROM devices d
+        LEFT JOIN sites s ON s.id = d.site_id
+        LEFT JOIN domains dm ON dm.id = s.domain_id
+        WHERE d.device_id = ?
+        """,
+        (device_external_id,),
+    ).fetchone()
+    result = _row_to_dict(row)
+    if result is None:
+        raise RegistryNotFoundError("device not found")
+    return result
+
+
+def _resolve_site(conn: Any, site_ref: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT s.id, s.uuid, s.name, s.slug, s.domain_id, d.uuid AS domain_uuid, d.name AS domain_name
+        FROM sites s
+        JOIN domains d ON d.id = s.domain_id
+        WHERE s.uuid = ? OR CAST(s.id AS TEXT) = ?
+        """,
+        (site_ref, site_ref),
+    ).fetchone()
+    result = _row_to_dict(row)
+    if result is None:
+        raise RegistryNotFoundError("site not found")
+    return result
+
+
+def ensure_default_zones(device_external_id: str, zone_count: int = 3) -> None:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        existing = conn.execute(
+            "SELECT zone_id FROM zone_metadata WHERE device_id = ?",
+            (device["id"],),
+        ).fetchall()
+        have = {int(row["zone_id"]) for row in existing}
+        for zone_id in range(1, zone_count + 1):
+            if zone_id in have:
+                continue
+            conn.execute(
+                """
+                INSERT INTO zone_metadata(uuid, device_id, zone_id, name, sort_order)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (_new_uuid(), device["id"], zone_id, f"zone-{zone_id}", zone_id),
+            )
+        conn.commit()
+
+
+def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
+    ensure_default_zones(device_external_id)
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        rows = conn.execute(
+            """
+            SELECT zm.uuid AS zone_uuid, zm.zone_id, zm.name, zm.icon, zm.sort_order, zm.floor, zm.area_m2,
+                   zs.current_temperature, zs.target_temperature, zs.demand, zs.active, zs.fault,
+                   zs.source_timestamp, zs.updated_at,
+                   ds.online AS device_online
+            FROM zone_metadata zm
+            LEFT JOIN zone_state zs ON zs.device_id = zm.device_id AND zs.zone_id = zm.zone_id
+            LEFT JOIN device_state ds ON ds.device_id = zm.device_id
+            WHERE zm.device_id = ?
+            ORDER BY zm.sort_order ASC, zm.zone_id ASC
+            """,
+            (device["id"],),
+        ).fetchall()
+
+    zones: list[dict[str, Any]] = []
+    for row in rows:
+        zones.append(
+            {
+                "zone_uuid": row["zone_uuid"],
+                "zone_id": row["zone_id"],
+                "name": row["name"],
+                "icon": row["icon"],
+                "sort_order": row["sort_order"],
+                "floor": row["floor"],
+                "area_m2": row["area_m2"],
+                "current_temperature_c": row["current_temperature"],
+                "target_temperature_c": row["target_temperature"],
+                "demand": None if row["demand"] is None else bool(row["demand"]),
+                "active": None if row["active"] is None else bool(row["active"]),
+                "fault": row["fault"],
+                "updated_at": row["updated_at"],
+                "source_timestamp": row["source_timestamp"],
+                "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
+            }
+        )
+    return zones
+
+
+def get_device_zone(device_external_id: str, zone_id: int) -> dict[str, Any]:
+    zones = list_device_zones(device_external_id)
+    for zone in zones:
+        if int(zone["zone_id"]) == int(zone_id):
+            return zone
+    raise RegistryNotFoundError("zone not found")
+
+
+def _write_zone_metadata(
+    device_external_id: str,
+    zone_id: int,
+    *,
+    name: str | None = None,
+    icon: str | None = None,
+    sort_order: int | None = None,
+    floor: str | None = None,
+    area_m2: float | None = None,
+) -> dict[str, Any]:
+    if zone_id < 1:
+        raise DomainModelError("zone_id must be >= 1")
+
+    ensure_default_zones(device_external_id)
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT id FROM zone_metadata WHERE device_id = ? AND zone_id = ?",
+            (device["id"], zone_id),
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFoundError("zone not found")
+
+        current = conn.execute(
+            "SELECT name, icon, sort_order, floor, area_m2 FROM zone_metadata WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+        conn.execute(
+            """
+            UPDATE zone_metadata
+            SET name = ?,
+                icon = ?,
+                sort_order = ?,
+                floor = ?,
+                area_m2 = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                name if name is not None else current["name"],
+                icon if icon is not None else current["icon"],
+                sort_order if sort_order is not None else current["sort_order"],
+                floor if floor is not None else current["floor"],
+                area_m2 if area_m2 is not None else current["area_m2"],
+                now,
+                row["id"],
+            ),
+        )
+        conn.commit()
+
+    return get_device_zone(device_external_id, zone_id)
+
+
+def rename_zone(device_external_id: str, zone_id: int, name: str) -> dict[str, Any]:
+    if not name.strip():
+        raise DomainModelError("name is required")
+    return _write_zone_metadata(device_external_id, zone_id, name=name.strip())
+
+
+def set_zone_metadata(
+    device_external_id: str,
+    zone_id: int,
+    *,
+    name: str | None = None,
+    icon: str | None = None,
+    sort_order: int | None = None,
+    floor: str | None = None,
+    area_m2: float | None = None,
+) -> dict[str, Any]:
+    if name is not None and not name.strip():
+        raise DomainModelError("name cannot be blank")
+    return _write_zone_metadata(
+        device_external_id,
+        zone_id,
+        name=name.strip() if name is not None else None,
+        icon=icon,
+        sort_order=sort_order,
+        floor=floor,
+        area_m2=area_m2,
+    )
+
+
+def _insert_notifications_for_event(conn: Any, event_id: int, event_type: str) -> None:
+    if event_type not in NOTIFICATION_EVENT_TYPES:
+        return
+    users = conn.execute("SELECT id FROM users WHERE enabled = 1").fetchall()
+    now = _now_iso()
+    for row in users:
+        conn.execute(
+            """
+            INSERT INTO notifications(uuid, user_id, event_id, read, created_at)
+            VALUES (?, ?, ?, 0, ?)
+            """,
+            (_new_uuid(), row["id"], event_id, now),
+        )
+
+
+def log_event(
+    event_type: str,
+    *,
+    domain_id: int | None = None,
+    site_id: int | None = None,
+    device_pk_id: int | None = None,
+    zone_id: int | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now = _now_iso()
+    payload_json = json.dumps(payload or {}, separators=(",", ":"), sort_keys=True)
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO event_log(uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (_new_uuid(), event_type, domain_id, site_id, device_pk_id, zone_id, payload_json, now),
+        )
+        _insert_notifications_for_event(conn, int(cur.lastrowid), event_type)
+        row = conn.execute(
+            "SELECT id, uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at FROM event_log WHERE id = ?",
+            (cur.lastrowid,),
+        ).fetchone()
+        conn.commit()
+    return _row_to_dict(row) or {}
+
+
+def upsert_device_state(
+    device_external_id: str,
+    *,
+    online: bool | None = None,
+    mqtt_connected: bool | None = None,
+    source: str = "rest",
+    source_timestamp: str | None = None,
+    last_error: str | None = None,
+) -> dict[str, Any]:
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        existing = conn.execute(
+            "SELECT online, mqtt_connected FROM device_state WHERE device_id = ?",
+            (device["id"],),
+        ).fetchone()
+        prev_online = None if existing is None else existing["online"]
+        prev_mqtt = None if existing is None else existing["mqtt_connected"]
+
+        conn.execute(
+            """
+            INSERT INTO device_state(device_id, online, mqtt_connected, last_seen_at, source_timestamp, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET
+                online = excluded.online,
+                mqtt_connected = excluded.mqtt_connected,
+                last_seen_at = excluded.last_seen_at,
+                source_timestamp = excluded.source_timestamp,
+                updated_at = excluded.updated_at
+            """,
+            (
+                device["id"],
+                None if online is None else int(bool(online)),
+                None if mqtt_connected is None else int(bool(mqtt_connected)),
+                now if online else None,
+                source_timestamp or now,
+                now,
+            ),
+        )
+
+        conn.execute(
+            "UPDATE devices SET last_seen_at = ? WHERE id = ?",
+            (now if online else None, device["id"]),
+        )
+
+        state_row = conn.execute(
+            "SELECT device_id, online, mqtt_connected, last_seen_at, source_timestamp, updated_at FROM device_state WHERE device_id = ?",
+            (device["id"],),
+        ).fetchone()
+
+        if online is not None and prev_online is not None and int(bool(online)) != int(prev_online):
+            log_payload = {"device_id": device_external_id, "online": bool(online), "source": source, "last_error": last_error}
+            conn.execute(
+                """
+                INSERT INTO event_log(uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (
+                    _new_uuid(),
+                    "device_online" if online else "device_offline",
+                    device.get("domain_id"),
+                    device.get("site_id"),
+                    device["id"],
+                    json.dumps(log_payload, separators=(",", ":"), sort_keys=True),
+                    now,
+                ),
+            )
+        if mqtt_connected is not None and prev_mqtt is not None and int(bool(mqtt_connected)) != int(prev_mqtt):
+            conn.execute(
+                """
+                INSERT INTO event_log(uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (
+                    _new_uuid(),
+                    "mqtt_connected" if mqtt_connected else "mqtt_disconnected",
+                    device.get("domain_id"),
+                    device.get("site_id"),
+                    device["id"],
+                    json.dumps({"device_id": device_external_id, "source": source, "last_error": last_error}, separators=(",", ":"), sort_keys=True),
+                    now,
+                ),
+            )
+
+        conn.commit()
+
+    result = _row_to_dict(state_row) or {}
+    if "online" in result and result["online"] is not None:
+        result["online"] = bool(result["online"])
+    if "mqtt_connected" in result and result["mqtt_connected"] is not None:
+        result["mqtt_connected"] = bool(result["mqtt_connected"])
+    return result
+
+
+def upsert_zone_state(
+    device_external_id: str,
+    zone_id: int,
+    *,
+    current_temperature: float | None = None,
+    target_temperature: float | None = None,
+    demand: bool | None = None,
+    active: bool | None = None,
+    fault: str | None = None,
+    source: str = "rest",
+    source_timestamp: str | None = None,
+) -> dict[str, Any]:
+    ensure_default_zones(device_external_id)
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT current_temperature, target_temperature FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            (device["id"], zone_id),
+        ).fetchone()
+
+        conn.execute(
+            """
+            INSERT INTO zone_state(device_id, zone_id, current_temperature, target_temperature, demand, active, fault, source_timestamp, updated_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id, zone_id) DO UPDATE SET
+                current_temperature = excluded.current_temperature,
+                target_temperature = excluded.target_temperature,
+                demand = excluded.demand,
+                active = excluded.active,
+                fault = excluded.fault,
+                source_timestamp = excluded.source_timestamp,
+                updated_at = excluded.updated_at,
+                source = excluded.source
+            """,
+            (
+                device["id"],
+                zone_id,
+                current_temperature,
+                target_temperature,
+                None if demand is None else int(bool(demand)),
+                None if active is None else int(bool(active)),
+                fault,
+                source_timestamp or now,
+                now,
+                source,
+            ),
+        )
+
+        if current_temperature is not None or target_temperature is not None:
+            conn.execute(
+                """
+                INSERT INTO temperature_history(uuid, device_id, zone_id, current_temperature, target_temperature, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (_new_uuid(), device["id"], zone_id, current_temperature, target_temperature, now),
+            )
+
+        if row is not None:
+            if current_temperature is not None and row["current_temperature"] != current_temperature:
+                conn.execute(
+                    """
+                    INSERT INTO event_log(uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at)
+                    VALUES (?, 'zone_temperature_changed', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _new_uuid(),
+                        device.get("domain_id"),
+                        device.get("site_id"),
+                        device["id"],
+                        zone_id,
+                        json.dumps({"device_id": device_external_id, "zone_id": zone_id, "current_temperature_c": current_temperature}, separators=(",", ":"), sort_keys=True),
+                        now,
+                    ),
+                )
+            if target_temperature is not None and row["target_temperature"] != target_temperature:
+                conn.execute(
+                    """
+                    INSERT INTO event_log(uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at)
+                    VALUES (?, 'zone_setpoint_changed', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _new_uuid(),
+                        device.get("domain_id"),
+                        device.get("site_id"),
+                        device["id"],
+                        zone_id,
+                        json.dumps({"device_id": device_external_id, "zone_id": zone_id, "target_temperature_c": target_temperature}, separators=(",", ":"), sort_keys=True),
+                        now,
+                    ),
+                )
+
+        conn.commit()
+
+    return get_device_zone(device_external_id, zone_id)
+
+
+def resolve_zone_ref(zone_ref: str) -> tuple[str, int]:
+    # Preferred public ref: zone_metadata.uuid
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT d.device_id, zm.zone_id
+            FROM zone_metadata zm
+            JOIN devices d ON d.id = zm.device_id
+            WHERE zm.uuid = ?
+            """,
+            (zone_ref,),
+        ).fetchone()
+        if row is not None:
+            return str(row["device_id"]), int(row["zone_id"])
+
+    # Compatibility: <device_id>:<zone_id>
+    if ":" in zone_ref:
+        dev, raw_zone = zone_ref.split(":", 1)
+        try:
+            zid = int(raw_zone)
+        except ValueError as exc:
+            raise DomainModelError("zone reference must be uuid or <device_id>:<zone_id>") from exc
+        return dev, zid
+
+    raise RegistryNotFoundError("zone not found")
+
+
+def list_mobile_domains() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.uuid, d.slug, d.name,
+                   COUNT(s.id) AS site_count,
+                   COUNT(dev.id) AS device_count
+            FROM domains d
+            LEFT JOIN sites s ON s.domain_id = d.id
+            LEFT JOIN devices dev ON dev.site_id = s.id
+            GROUP BY d.id
+            ORDER BY d.id
+            """
+        ).fetchall()
+    return [_row_to_dict(row) or {} for row in rows]
+
+
+def list_mobile_sites() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.uuid AS site_id, s.slug AS site_slug, s.name AS site_name,
+                   d.uuid AS domain_id, d.name AS domain_name, d.slug AS domain_slug,
+                   COUNT(dev.id) AS device_count
+            FROM sites s
+            JOIN domains d ON d.id = s.domain_id
+            LEFT JOIN devices dev ON dev.site_id = s.id
+            GROUP BY s.id
+            ORDER BY s.id
+            """
+        ).fetchall()
+    return [_row_to_dict(row) or {} for row in rows]
+
+
+def get_mobile_site(site_ref: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        site = _resolve_site(conn, site_ref)
+        rows = conn.execute(
+            """
+            SELECT d.device_id, d.uuid, d.display_name, d.firmware_version,
+                   ds.online, ds.mqtt_connected, ds.updated_at
+            FROM devices d
+            LEFT JOIN device_state ds ON ds.device_id = d.id
+            WHERE d.site_id = ?
+            ORDER BY d.id
+            """,
+            (site["id"],),
+        ).fetchall()
+    return {
+        "site_id": site["uuid"],
+        "site_name": site["name"],
+        "site_slug": site["slug"],
+        "domain": {
+            "domain_id": site["domain_uuid"],
+            "domain_name": site["domain_name"],
+        },
+        "devices": [
+            {
+                "device_id": row["device_id"],
+                "device_uuid": row["uuid"],
+                "display_name": row["display_name"],
+                "firmware_version": row["firmware_version"],
+                "online": bool(row["online"]) if row["online"] is not None else False,
+                "mqtt_connected": bool(row["mqtt_connected"]) if row["mqtt_connected"] is not None else False,
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ],
+    }
+
+
+def list_events(*, limit: int = 100, device_external_id: str | None = None) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 500))
+    with get_connection() as conn:
+        params: list[Any] = []
+        where = ""
+        if device_external_id:
+            dev = _resolve_device(conn, device_external_id)
+            where = "WHERE e.device_id = ?"
+            params.append(dev["id"])
+
+        rows = conn.execute(
+            f"""
+            SELECT e.id, e.uuid, e.event_type, e.domain_id, e.site_id, e.device_id, e.zone_id, e.payload_json, e.created_at,
+                   d.device_id AS device_external_id
+            FROM event_log e
+            LEFT JOIN devices d ON d.id = e.device_id
+            {where}
+            ORDER BY e.id DESC
+            LIMIT ?
+            """,
+            (*params, safe_limit),
+        ).fetchall()
+
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        event = _row_to_dict(row) or {}
+        try:
+            event["payload"] = json.loads(event.pop("payload_json") or "{}")
+        except json.JSONDecodeError:
+            event["payload"] = {}
+        events.append(event)
+    return events
+
+
+def list_notifications_for_user(user_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, 500))
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT n.id, n.uuid, n.read, n.created_at,
+                   e.uuid AS event_uuid, e.event_type, e.payload_json, e.created_at AS event_created_at
+            FROM notifications n
+            JOIN event_log e ON e.id = n.event_id
+            WHERE n.user_id = ?
+            ORDER BY n.id DESC
+            LIMIT ?
+            """,
+            (user_id, safe_limit),
+        ).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        payload = {}
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        result.append(
+            {
+                "notification_id": row["uuid"],
+                "read": bool(row["read"]),
+                "created_at": row["created_at"],
+                "event": {
+                    "event_id": row["event_uuid"],
+                    "event_type": row["event_type"],
+                    "payload": payload,
+                    "created_at": row["event_created_at"],
+                },
+            }
+        )
+    return result

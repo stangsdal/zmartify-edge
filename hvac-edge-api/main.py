@@ -36,6 +36,22 @@ from app.device_onboarding import (
     normalize_device_base_url,
     push_remote_onboarding_config,
 )
+from app.domain_model import (
+    DomainModelError,
+    get_device_zone,
+    get_mobile_site,
+    list_device_zones,
+    list_events,
+    list_mobile_domains,
+    list_mobile_sites,
+    list_notifications_for_user,
+    log_event,
+    rename_zone,
+    resolve_zone_ref,
+    set_zone_metadata,
+    upsert_device_state,
+    upsert_zone_state,
+)
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.registry import (
     RegistryConflictError,
@@ -80,13 +96,19 @@ from app.schemas import (
     DeviceOut,
     DevicePushConfigIn,
     DeviceRename,
+    EventOut,
     DomainCreate,
     DomainRename,
     DomainOut,
+    MobileSetpointIn,
     MqttClientCreate,
     MqttClientOut,
     MqttCredentialOut,
+    NotificationOut,
     SetupStatusOut,
+    ZoneMetadataIn,
+    ZoneOut,
+    ZoneRenameIn,
     UserCreateIn,
     UserOut,
     UserResetPasswordIn,
@@ -100,7 +122,7 @@ from app.schemas import (
 
 app = FastAPI(title="HVAC Edge API", version="0.1.0")
 
-_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile")
+_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
 
 
 def _create_spa_handler(dist_path: Path):
@@ -562,10 +584,78 @@ def api_device_onboarding_status(device_id: str, request: Request) -> dict:
         local_url = device.get("local_url")
         if not local_url:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
-        return get_remote_onboarding_status(local_url)
+        status_payload = get_remote_onboarding_status(local_url)
+        upsert_device_state(
+            device_id,
+            online=status_payload.get("state") == "online",
+            mqtt_connected=bool(status_payload.get("mqtt_connected")),
+            source="device_onboarding_status",
+            last_error=status_payload.get("last_error"),
+        )
+        return status_payload
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except DeviceOnboardingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/devices/{device_id}/zones", response_model=list[ZoneOut])
+def api_device_zones(device_id: str, request: Request) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return list_device_zones(device_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.get("/devices/{device_id}/zones/{zone_id}", response_model=ZoneOut)
+def api_get_device_zone(device_id: str, zone_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return get_device_zone(device_id, zone_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/zones/{zone_id}/rename", response_model=ZoneOut)
+def api_rename_device_zone(device_id: str, zone_id: int, payload: ZoneRenameIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        zone = rename_zone(device_id, zone_id, payload.name)
+        log_event(
+            "zone_metadata_updated",
+            payload={"device_id": device_id, "zone_id": zone_id, "name": payload.name},
+        )
+        return zone
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/zones/{zone_id}/metadata", response_model=ZoneOut)
+def api_set_device_zone_metadata(device_id: str, zone_id: int, payload: ZoneMetadataIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    try:
+        zone = set_zone_metadata(
+            device_id,
+            zone_id,
+            name=payload.name,
+            icon=payload.icon,
+            sort_order=payload.sort_order,
+            floor=payload.floor,
+            area_m2=payload.area_m2,
+        )
+        log_event(
+            "zone_metadata_updated",
+            payload={"device_id": device_id, "zone_id": zone_id, "metadata": payload.model_dump(exclude_none=True)},
+        )
+        return zone
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
@@ -689,28 +779,22 @@ def api_delete_mqtt_client(client_id: int, request: Request) -> Response:
 @app.get("/mobile/sites")
 def mobile_sites(request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT s.id AS site_id, s.name AS site_name, s.slug AS site_slug,
-                   d.id AS domain_id, d.name AS domain_name
-            FROM sites s
-            JOIN domains d ON d.id = s.domain_id
-            ORDER BY s.id
-            """
-        ).fetchall()
+    return {"sites": list_mobile_sites()}
 
-    return {
-        "sites": [
-            {
-                "site_id": row["site_id"],
-                "site_name": row["site_name"],
-                "site_slug": row["site_slug"],
-                "domain": {"domain_id": row["domain_id"], "domain_name": row["domain_name"]},
-            }
-            for row in rows
-        ]
-    }
+
+@app.get("/mobile/domains")
+def mobile_domains(request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    return {"domains": list_mobile_domains()}
+
+
+@app.get("/mobile/sites/{site_id}")
+def mobile_site_detail(site_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return get_mobile_site(site_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.get("/mobile/sites/{site_id}/devices")
@@ -746,39 +830,6 @@ def mobile_site_devices(site_id: int, request: Request) -> dict:
     return {"site_id": site["id"], "site_name": site["name"], "devices": devices}
 
 
-def _default_device_zones(device_id: str) -> list[dict]:
-    # Zone telemetry is not yet persisted in SQLite; provide stable app-facing placeholders.
-    return [
-        {
-            "zone_id": 1,
-            "name": "zone-1",
-            "current_temperature_c": None,
-            "target_temperature_c": None,
-            "demand": None,
-            "fault": None,
-            "device_id": device_id,
-        },
-        {
-            "zone_id": 2,
-            "name": "zone-2",
-            "current_temperature_c": None,
-            "target_temperature_c": None,
-            "demand": None,
-            "fault": None,
-            "device_id": device_id,
-        },
-        {
-            "zone_id": 3,
-            "name": "zone-3",
-            "current_temperature_c": None,
-            "target_temperature_c": None,
-            "demand": None,
-            "fault": None,
-            "device_id": device_id,
-        },
-    ]
-
-
 @app.get("/mobile/devices/{device_id}")
 def mobile_device(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
@@ -797,6 +848,7 @@ def mobile_device(device_id: str, request: Request) -> dict:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
 
+    zones = list_device_zones(device_id)
     return {
         "device_id": row["device_id"],
         "display_name": row["display_name"],
@@ -804,70 +856,88 @@ def mobile_device(device_id: str, request: Request) -> dict:
         "online": bool(row["last_seen_at"]),
         "integration_mode": row["integration_mode"],
         "site": {"site_id": row["site_id"], "site_name": row["site_name"]} if row["site_id"] else None,
-        "zones": _default_device_zones(row["device_id"]),
+        "zones": zones,
     }
 
 
 @app.get("/mobile/devices/{device_id}/zones")
 def mobile_device_zones(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    with get_connection() as conn:
-        exists = conn.execute("SELECT 1 FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-
-    if exists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
-
-    return {"device_id": device_id, "zones": _default_device_zones(device_id)}
+    try:
+        return {"device_id": device_id, "zones": list_device_zones(device_id)}
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@app.post("/mobile/devices/{device_id}/zones/{zone_id}/setpoint")
-def mobile_setpoint(device_id: str, zone_id: int, payload: dict, request: Request) -> dict:
+@app.post("/mobile/zones/{zone_ref}/setpoint")
+def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    target = payload.get("target_temperature_c")
-    if not isinstance(target, (int, float)):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_temperature_c must be numeric")
+    try:
+        device_id, zone_id = resolve_zone_ref(zone_ref)
+        zone = upsert_zone_state(
+            device_id,
+            zone_id,
+            target_temperature=float(payload.target_temperature_c),
+            source="mobile_api",
+        )
+        log_event(
+            "zone_setpoint_changed",
+            payload={
+                "device_id": device_id,
+                "zone_id": zone_id,
+                "target_temperature_c": float(payload.target_temperature_c),
+                "source": "mobile_api",
+            },
+        )
+        return {
+            "device_id": device_id,
+            "zone_id": zone_id,
+            "target_temperature_c": float(payload.target_temperature_c),
+            "command_state": "queued",
+            "zone": zone,
+        }
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    with get_connection() as conn:
-        exists = conn.execute("SELECT 1 FROM devices WHERE device_id = ?", (device_id,)).fetchone()
 
-    if exists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+@app.get("/events", response_model=list[EventOut])
+def events_list(request: Request, limit: int = 100) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    return list_events(limit=limit)
 
-    return {
-        "device_id": device_id,
-        "zone_id": zone_id,
-        "target_temperature_c": float(target),
-        "command_state": "queued",
-    }
+
+@app.get("/events/recent", response_model=list[EventOut])
+def events_recent(request: Request, limit: int = 50) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    return list_events(limit=limit)
+
+
+@app.get("/events/device/{device_id}", response_model=list[EventOut])
+def events_for_device(device_id: str, request: Request, limit: int = 100) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return list_events(limit=limit, device_external_id=device_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.get("/mobile/events")
 def mobile_events(request: Request, limit: int = 50) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    safe_limit = max(1, min(limit, 200))
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, generated_at, success, message
-            FROM acl_generation_log
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ).fetchall()
+    return {"events": list_events(limit=limit)}
 
-    return {
-        "events": [
-            {
-                "event_id": row["id"],
-                "timestamp": row["generated_at"],
-                "kind": "acl_generation",
-                "status": "ok" if row["success"] else "error",
-                "message": row["message"],
-            }
-            for row in rows
-        ]
-    }
+
+@app.get("/mobile/notifications", response_model=list[NotificationOut])
+def mobile_notifications(request: Request, limit: int = 100) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    if auth_user.user_id is None:
+        return []
+    return list_notifications_for_user(auth_user.user_id, limit=limit)
 
 
 @app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)

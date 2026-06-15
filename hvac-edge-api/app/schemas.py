@@ -139,6 +139,63 @@ class DeviceOnboardingStatusOut(BaseModel):
     last_error: str | None
 
 
+class ZoneRenameIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
+
+
+class ZoneMetadataIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = None
+    icon: str | None = None
+    sort_order: int | None = None
+    floor: str | None = None
+    area_m2: float | None = None
+
+
+class ZoneOut(BaseModel):
+    zone_uuid: str
+    zone_id: int
+    name: str
+    icon: str | None = None
+    sort_order: int
+    floor: str | None = None
+    area_m2: float | None = None
+    current_temperature_c: float | None = None
+    target_temperature_c: float | None = None
+    demand: bool | None = None
+    active: bool | None = None
+    fault: str | None = None
+    updated_at: str | None = None
+    source_timestamp: str | None = None
+    online: bool
+
+
+class MobileSetpointIn(BaseModel):
+    target_temperature_c: float
+
+
+class EventOut(BaseModel):
+    id: int
+    uuid: str
+    event_type: str
+    domain_id: int | None = None
+    site_id: int | None = None
+    device_id: int | None = None
+    zone_id: int | None = None
+    payload: dict = Field(default_factory=dict)
+    created_at: str
+
+
+class NotificationOut(BaseModel):
+    notification_id: str
+    read: bool
+    created_at: str
+    event: dict
+
+
 class MqttClientCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
