@@ -250,10 +250,7 @@ def _mobile_site_scope_ids(request: Request) -> set[int] | None:
         return None
     if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
         return None
-    scoped_site_ids = set(list_user_site_access(auth_user.user_id))
-    if not scoped_site_ids:
-        return None
-    return scoped_site_ids
+    return set(list_user_site_access(auth_user.user_id))
 
 
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:

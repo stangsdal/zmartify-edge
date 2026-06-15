@@ -465,6 +465,45 @@ def test_mobile_viewer_site_scope_restricts_visible_properties(monkeypatch, tmp_
     assert blocked.status_code == 404
 
 
+def test_mobile_viewer_without_site_assignments_sees_no_properties(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    emergency = {"Authorization": "Bearer emergency-token"}
+
+    domain = client.post("/domains", headers=emergency, json={"slug": "house-empty", "name": "House Empty"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=emergency, json={"slug": "site-empty", "name": "Site Empty"})
+    assert site.status_code == 201
+
+    user = client.post(
+        "/users",
+        headers=emergency,
+        json={
+            "username": "viewer-no-sites",
+            "display_name": "Viewer No Sites",
+            "password": "VeryStrongPass123!",
+            "roles": ["viewer"],
+        },
+    )
+    assert user.status_code == 201
+
+    login = client.post("/auth/login", json={"username": "viewer-no-sites", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    sites = client.get("/mobile/sites", headers=bearer)
+    assert sites.status_code == 200
+    assert sites.json()["sites"] == []
+
+    domains = client.get("/mobile/domains", headers=bearer)
+    assert domains.status_code == 200
+    assert domains.json()["domains"] == []
+
+    detail = client.get("/mobile/sites/site-empty", headers=bearer)
+    assert detail.status_code == 404
+
+
 def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
