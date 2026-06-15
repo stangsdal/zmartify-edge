@@ -67,7 +67,12 @@ from app.domain_model import (
     upsert_zone_state,
 )
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
-from app.mqtt_commands import MqttCommandError, publish_setpoint_command, should_forward_setpoint_commands
+from app.mqtt_commands import (
+    MqttCommandError,
+    publish_setpoint_command,
+    publish_zone_name_command,
+    should_forward_setpoint_commands,
+)
 from app.registry import (
     authenticate_device_admin_token,
     RegistryConflictError,
@@ -789,6 +794,12 @@ def api_get_device_zone(device_id: str, zone_id: int, request: Request) -> dict:
 def api_rename_device_zone(device_id: str, zone_id: int, payload: ZoneRenameIn, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
+        if should_forward_setpoint_commands():
+            try:
+                publish_zone_name_command(device_id, zone_id, payload.name)
+            except MqttCommandError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"zone name publish failed: {exc}") from exc
+
         zone = rename_zone(device_id, zone_id, payload.name)
         log_event(
             "zone_metadata_updated",
@@ -805,6 +816,12 @@ def api_rename_device_zone(device_id: str, zone_id: int, payload: ZoneRenameIn, 
 def api_set_device_zone_metadata(device_id: str, zone_id: int, payload: ZoneMetadataIn, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
+        if payload.name and should_forward_setpoint_commands():
+            try:
+                publish_zone_name_command(device_id, zone_id, payload.name)
+            except MqttCommandError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"zone name publish failed: {exc}") from exc
+
         zone = set_zone_metadata(
             device_id,
             zone_id,
@@ -1276,6 +1293,12 @@ def mobile_rename_zone(zone_ref: str, payload: ZoneRenameIn, request: Request) -
         if site_pk_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
         _enforce_mobile_site_scope(request, int(site_pk_id))
+
+        if should_forward_setpoint_commands():
+            try:
+                publish_zone_name_command(device_id, zone_id, payload.name)
+            except MqttCommandError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"zone name publish failed: {exc}") from exc
 
         zone = rename_zone(device_id, zone_id, payload.name)
         _publish_zone_state_update(device_id, zone)

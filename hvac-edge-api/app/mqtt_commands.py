@@ -40,15 +40,19 @@ def _mosquitto_pub_command() -> list[str]:
     return cmd
 
 
-def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c: float) -> None:
+def _device_mqtt_credentials(device_id: str) -> tuple[str, str]:
     creds = get_device_mqtt_credentials(device_id)
     username = str(creds.get("username") or "").strip()
     password = str(creds.get("password") or "").strip()
     if not username or not password:
         raise MqttCommandError("device mqtt credentials unavailable")
+    return username, password
 
-    topic = f"{_mqtt_base_topic()}/{device_id}/zone-{int(zone_id)}/target-temperature/set"
-    payload = f"{float(target_temperature_c):.1f}"
+
+def _publish_command(device_id: str, topic_suffix: str, payload: str) -> None:
+    username, password = _device_mqtt_credentials(device_id)
+
+    topic = f"{_mqtt_base_topic()}/{device_id}/{topic_suffix.lstrip('/')}"
 
     cmd = _mosquitto_pub_command()
     cmd.extend(
@@ -80,3 +84,14 @@ def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c:
 
     if result.returncode != 0:
         raise MqttCommandError(f"mosquitto_pub failed: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}")
+
+
+def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c: float) -> None:
+    _publish_command(device_id, f"zone-{int(zone_id)}/target-temperature/set", f"{float(target_temperature_c):.1f}")
+
+
+def publish_zone_name_command(device_id: str, zone_id: int, zone_name: str) -> None:
+    name = str(zone_name).strip()
+    if not name:
+        raise MqttCommandError("zone name is required")
+    _publish_command(device_id, f"zone-{int(zone_id)}/$name/set", name)
