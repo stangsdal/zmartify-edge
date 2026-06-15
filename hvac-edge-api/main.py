@@ -39,6 +39,7 @@ from app.device_onboarding import (
 from app.domain_model import (
     DomainModelError,
     get_device_channel,
+    get_device_freshness,
     get_device_zone,
     get_mobile_site,
     ingest_device_twin_snapshot,
@@ -99,7 +100,9 @@ from app.schemas import (
     ChannelOut,
     ChannelStateIn,
     ChannelZoneLinksIn,
+    DeviceFreshnessOut,
     DeviceTwinIngestIn,
+    DeviceTwinIngestResult,
     DeviceAssignSite,
     DeviceClaimIn,
     DeviceClaimOut,
@@ -757,7 +760,7 @@ def api_set_device_channel_zone_links(device_id: str, channel_id: int, payload: 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@app.post("/devices/{device_id}/ingest/twin")
+@app.post("/devices/{device_id}/ingest/twin", response_model=DeviceTwinIngestResult)
 def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request: Request) -> dict:
     device_token_device_id = getattr(request.state, "device_token_device_id", None)
     if device_token_device_id != device_id:
@@ -777,6 +780,15 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/mobile/devices/{device_id}/freshness", response_model=DeviceFreshnessOut)
+def mobile_device_freshness(device_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        return get_device_freshness(device_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.post("/devices/{device_id}/assign-site", response_model=DeviceOut)

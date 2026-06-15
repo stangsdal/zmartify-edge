@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -35,6 +37,43 @@ def _row_to_dict(row: Any) -> dict[str, Any] | None:
     if row is None:
         return None
     return {k: row[k] for k in row.keys()}
+
+
+def _parse_iso_datetime(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _age_ms(raw: str | None, now: datetime | None = None) -> int | None:
+    timestamp = _parse_iso_datetime(raw)
+    if timestamp is None:
+        return None
+    ref = now or datetime.now(UTC)
+    delta_ms = int((ref - timestamp).total_seconds() * 1000)
+    return max(0, delta_ms)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ingest_min_interval_ms() -> int:
+    raw = os.getenv("HVAC_EDGE_INGEST_MIN_INTERVAL_MS", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
 
 
 def _parse_int_list_json(raw: str | None) -> list[int]:
@@ -154,6 +193,7 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
         ).fetchall()
 
     zones: list[dict[str, Any]] = []
+    now = datetime.now(UTC)
     for row in rows:
         zones.append(
             {
@@ -171,6 +211,7 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
                 "fault": row["fault"],
                 "updated_at": row["updated_at"],
                 "source_timestamp": row["source_timestamp"],
+                "freshness_age_ms": _age_ms(row["updated_at"], now),
                 "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
             }
         )
@@ -205,6 +246,7 @@ def list_device_channels(device_external_id: str) -> list[dict[str, Any]]:
         ).fetchall()
 
     channels: list[dict[str, Any]] = []
+    now = datetime.now(UTC)
     for row in rows:
         channels.append(
             {
@@ -218,6 +260,7 @@ def list_device_channels(device_external_id: str) -> list[dict[str, Any]]:
                 "fault": row["fault"],
                 "updated_at": row["updated_at"],
                 "source_timestamp": row["source_timestamp"],
+                "freshness_age_ms": _age_ms(row["updated_at"], now),
                 "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
             }
         )
@@ -483,6 +526,84 @@ def ingest_device_twin_snapshot(
     zones: list[dict[str, Any]] | None,
     channels: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "source": source,
+                "source_timestamp": source_timestamp,
+                "online": online,
+                "mqtt_connected": mqtt_connected,
+                "last_error": last_error,
+                "zones": zones or [],
+                "channels": channels or [],
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    now_iso = _now_iso()
+
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        ingest_row = conn.execute(
+            "SELECT last_source, last_payload_hash, last_ingested_at FROM twin_ingest_state WHERE device_id = ?",
+            (device["id"],),
+        ).fetchone()
+
+        min_interval_ms = _ingest_min_interval_ms()
+        last_ingested_at = None if ingest_row is None else ingest_row["last_ingested_at"]
+        if min_interval_ms > 0 and last_ingested_at:
+            elapsed = _age_ms(last_ingested_at)
+            if elapsed is not None and elapsed < min_interval_ms:
+                conn.execute(
+                    """
+                    INSERT INTO twin_ingest_state(device_id, last_source, last_payload_hash, last_ingested_at, last_result)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(device_id) DO UPDATE SET
+                        last_source = excluded.last_source,
+                        last_payload_hash = excluded.last_payload_hash,
+                        last_ingested_at = excluded.last_ingested_at,
+                        last_result = excluded.last_result
+                    """,
+                    (device["id"], source, fingerprint, now_iso, "rate_limited"),
+                )
+                conn.commit()
+                return {
+                    "device_id": device_external_id,
+                    "source": source,
+                    "source_timestamp": source_timestamp,
+                    "zone_updates": 0,
+                    "channel_updates": 0,
+                    "applied": False,
+                    "skip_reason": "rate_limited",
+                }
+
+        dedup_enabled = _env_bool("HVAC_EDGE_INGEST_DEDUP_ENABLED", True)
+        if dedup_enabled and ingest_row is not None:
+            if ingest_row["last_source"] == source and ingest_row["last_payload_hash"] == fingerprint:
+                conn.execute(
+                    """
+                    INSERT INTO twin_ingest_state(device_id, last_source, last_payload_hash, last_ingested_at, last_result)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(device_id) DO UPDATE SET
+                        last_source = excluded.last_source,
+                        last_payload_hash = excluded.last_payload_hash,
+                        last_ingested_at = excluded.last_ingested_at,
+                        last_result = excluded.last_result
+                    """,
+                    (device["id"], source, fingerprint, now_iso, "deduplicated"),
+                )
+                conn.commit()
+                return {
+                    "device_id": device_external_id,
+                    "source": source,
+                    "source_timestamp": source_timestamp,
+                    "zone_updates": 0,
+                    "channel_updates": 0,
+                    "applied": False,
+                    "skip_reason": "deduplicated",
+                }
+
     device_state = upsert_device_state(
         device_external_id,
         online=online,
@@ -521,6 +642,23 @@ def ingest_device_twin_snapshot(
         )
         channel_count += 1
 
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        conn.execute(
+            """
+            INSERT INTO twin_ingest_state(device_id, last_source, last_payload_hash, last_ingested_at, last_applied_at, last_result)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET
+                last_source = excluded.last_source,
+                last_payload_hash = excluded.last_payload_hash,
+                last_ingested_at = excluded.last_ingested_at,
+                last_applied_at = excluded.last_applied_at,
+                last_result = excluded.last_result
+            """,
+            (device["id"], source, fingerprint, now_iso, now_iso, "applied"),
+        )
+        conn.commit()
+
     return {
         "device_id": device_external_id,
         "source": source,
@@ -528,6 +666,52 @@ def ingest_device_twin_snapshot(
         "device_state": device_state,
         "zone_updates": zone_count,
         "channel_updates": channel_count,
+        "applied": True,
+    }
+
+
+def get_device_freshness(device_external_id: str) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    zones = list_device_zones(device_external_id)
+    channels = list_device_channels(device_external_id)
+
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT updated_at, source_timestamp, online, mqtt_connected FROM device_state WHERE device_id = ?",
+            (device["id"],),
+        ).fetchone()
+
+    device_updated_at = None if row is None else row["updated_at"]
+    source_timestamp = None if row is None else row["source_timestamp"]
+
+    return {
+        "device_id": device_external_id,
+        "device": {
+            "online": None if row is None or row["online"] is None else bool(row["online"]),
+            "mqtt_connected": None if row is None or row["mqtt_connected"] is None else bool(row["mqtt_connected"]),
+            "updated_at": device_updated_at,
+            "source_timestamp": source_timestamp,
+            "freshness_age_ms": _age_ms(device_updated_at, now),
+        },
+        "zones": [
+            {
+                "zone_id": zone["zone_id"],
+                "updated_at": zone["updated_at"],
+                "source_timestamp": zone["source_timestamp"],
+                "freshness_age_ms": zone.get("freshness_age_ms"),
+            }
+            for zone in zones
+        ],
+        "channels": [
+            {
+                "channel_id": channel["channel_id"],
+                "updated_at": channel["updated_at"],
+                "source_timestamp": channel["source_timestamp"],
+                "freshness_age_ms": channel.get("freshness_age_ms"),
+            }
+            for channel in channels
+        ],
     }
 
 

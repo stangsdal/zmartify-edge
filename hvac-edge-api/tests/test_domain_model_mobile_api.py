@@ -299,6 +299,8 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     )
     assert ingest.status_code == 200
     body = ingest.json()
+    assert body["applied"] is True
+    assert body["skip_reason"] is None
     assert body["zone_updates"] == 2
     assert body["channel_updates"] == 2
 
@@ -315,6 +317,68 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     mobile = client.get(f"/mobile/devices/{device_id}", headers=headers)
     assert mobile.status_code == 200
     assert mobile.json()["channels"][0]["linked_zone_ids"] == [1, 2]
+
+
+def test_ingest_dedup_and_rate_limit(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HVAC_EDGE_INGEST_MIN_INTERVAL_MS", "999999")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-123abc")
+
+    first = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 21.0}],
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["applied"] is True
+    assert first.json()["skip_reason"] is None
+
+    second = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 21.0}],
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["applied"] is False
+    assert second.json()["skip_reason"] == "rate_limited"
+
+
+def test_mobile_device_freshness_endpoint(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-fresh01")
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 20.4, "target_temperature_c": 21.0}],
+            "channels": [{"channel_id": 1, "active": True}],
+        },
+    )
+    assert ingest.status_code == 200
+
+    freshness = client.get(f"/mobile/devices/{device_id}/freshness", headers=headers)
+    assert freshness.status_code == 200
+    body = freshness.json()
+    assert body["device_id"] == device_id
+    assert body["device"]["freshness_age_ms"] is not None
+    assert any(zone["zone_id"] == 1 and zone["freshness_age_ms"] is not None for zone in body["zones"])
+    assert any(channel["channel_id"] == 1 and channel["freshness_age_ms"] is not None for channel in body["channels"])
 
 
 def test_device_admin_token_can_ingest_for_own_device_only(monkeypatch, tmp_path: Path):

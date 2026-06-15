@@ -170,6 +170,7 @@ class ZoneOut(BaseModel):
     fault: str | None = None
     updated_at: str | None = None
     source_timestamp: str | None = None
+    freshness_age_ms: int | None = None
     online: bool
 
 
@@ -226,7 +227,48 @@ class ChannelOut(BaseModel):
     fault: str | None = None
     updated_at: str | None = None
     source_timestamp: str | None = None
+    freshness_age_ms: int | None = None
     online: bool
+
+
+class DeviceTwinIngestResult(BaseModel):
+    device_id: str
+    source: str
+    source_timestamp: str | None = None
+    zone_updates: int
+    channel_updates: int
+    device_state: dict | None = None
+    applied: bool = True
+    skip_reason: str | None = None
+
+
+class FreshnessDeviceOut(BaseModel):
+    online: bool | None = None
+    mqtt_connected: bool | None = None
+    updated_at: str | None = None
+    source_timestamp: str | None = None
+    freshness_age_ms: int | None = None
+
+
+class FreshnessZoneOut(BaseModel):
+    zone_id: int
+    updated_at: str | None = None
+    source_timestamp: str | None = None
+    freshness_age_ms: int | None = None
+
+
+class FreshnessChannelOut(BaseModel):
+    channel_id: int
+    updated_at: str | None = None
+    source_timestamp: str | None = None
+    freshness_age_ms: int | None = None
+
+
+class DeviceFreshnessOut(BaseModel):
+    device_id: str
+    device: FreshnessDeviceOut
+    zones: list[FreshnessZoneOut] = Field(default_factory=list)
+    channels: list[FreshnessChannelOut] = Field(default_factory=list)
 
 
 class MobileSetpointIn(BaseModel):
