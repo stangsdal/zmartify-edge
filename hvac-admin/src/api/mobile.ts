@@ -109,4 +109,7 @@ export const mobileApi = {
 
   renameDeviceZone: (deviceId: string, zoneId: number, name: string): Promise<MobileZone> =>
     apiClient.post(`/devices/${deviceId}/zones/${zoneId}/rename`, { name }),
+
+  renameZoneByRef: (zoneRef: string, name: string): Promise<MobileZone> =>
+    apiClient.post(`/mobile/zones/${encodeURIComponent(zoneRef)}/rename`, { name }),
 };

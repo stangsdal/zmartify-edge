@@ -8,7 +8,6 @@ import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
 
 interface RoomWithRef extends MobileZone {
   zone_ref: string;
-  device_id: string;
 }
 
 export function RoomsPage() {
@@ -23,10 +22,10 @@ export function RoomsPage() {
     const trimmed = nextName.trim();
     if (!trimmed || trimmed === room.name) return;
 
-    if (!room.device_id || room.zone_id == null) return;
+    if (!room.zone_ref) return;
 
     try {
-      const renamed = await mobileApi.renameDeviceZone(room.device_id, room.zone_id, trimmed);
+      const renamed = await mobileApi.renameZoneByRef(room.zone_ref, trimmed);
       setRooms((prev) => prev.map((item) => (item.zone_ref === room.zone_ref ? { ...item, name: renamed.name } : item)));
     } catch (error) {
       window.alert(String(error));
@@ -50,7 +49,6 @@ export function RoomsPage() {
       const nextRooms: RoomWithRef[] = devices.flatMap((device) =>
         (device.zones || []).map((zone) => ({
           ...zone,
-          device_id: device.device_id,
           zone_ref: zone.zone_uuid || `${device.device_id}:${zone.zone_id}`,
         }))
       );

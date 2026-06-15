@@ -1266,6 +1266,34 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@app.post("/mobile/zones/{zone_ref}/rename", response_model=ZoneOut)
+def mobile_rename_zone(zone_ref: str, payload: ZoneRenameIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        device_id, zone_id = resolve_zone_ref(zone_ref)
+        context = get_device_onboarding_context(device_id)
+        site_pk_id = context.get("site_id")
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+        _enforce_mobile_site_scope(request, int(site_pk_id))
+
+        zone = rename_zone(device_id, zone_id, payload.name)
+        _publish_zone_state_update(device_id, zone)
+        log_event(
+            "zone_metadata_updated",
+            domain_id=context.get("domain_id"),
+            site_id=context.get("site_id"),
+            device_pk_id=context["id"],
+            zone_id=zone_id,
+            payload={"device_id": device_id, "zone_id": zone_id, "name": payload.name, "source": "mobile_api"},
+        )
+        return zone
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @app.get("/mobile/zones/{zone_ref}/history")
 def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})

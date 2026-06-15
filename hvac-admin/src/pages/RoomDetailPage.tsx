@@ -14,7 +14,6 @@ export function RoomDetailPage() {
   const { zoneRef } = useParams<RouteParams>();
   const resolvedRef = decodeURIComponent(zoneRef);
   const [zone, setZone] = useState<MobileZone | null>(null);
-  const [zoneDeviceId, setZoneDeviceId] = useState<string | null>(null);
   const [target, setTarget] = useState(21);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -59,7 +58,6 @@ export function RoomDetailPage() {
             const zref = z.zone_uuid || `${device.device_id}:${z.zone_id}`;
             if (zref === resolvedRef) {
               if (cancelled) return;
-              setZoneDeviceId(device.device_id);
               applyIncomingZoneState(z);
               return;
             }
@@ -182,12 +180,7 @@ export function RoomDetailPage() {
       return;
     }
 
-    const fallbackParts = resolvedRef.split(':');
-    const fallbackDeviceId = fallbackParts.length >= 2 ? fallbackParts[0] : null;
-    const fallbackZoneId = fallbackParts.length >= 2 ? Number.parseInt(fallbackParts[1], 10) : null;
-    const deviceId = zoneDeviceId || fallbackDeviceId;
-    const zoneId = zone?.zone_id ?? (Number.isFinite(fallbackZoneId) ? fallbackZoneId : null);
-    if (!deviceId || zoneId == null) {
+    if (!resolvedRef) {
       setRenameError('Unable to resolve room identity for rename.');
       return;
     }
@@ -195,7 +188,7 @@ export function RoomDetailPage() {
     setRenaming(true);
     setRenameError('');
     try {
-      const renamed = await mobileApi.renameDeviceZone(deviceId, zoneId, nextName);
+      const renamed = await mobileApi.renameZoneByRef(resolvedRef, nextName);
       setZone((prev) => (prev ? { ...prev, name: renamed.name } : prev));
       setRenameValue(renamed.name);
     } catch (e) {
