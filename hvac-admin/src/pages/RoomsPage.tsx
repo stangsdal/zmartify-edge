@@ -16,6 +16,33 @@ export function RoomsPage() {
   const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
 
+  const parseRoomRef = (room: RoomWithRef): { deviceId: string | null; zoneId: number | null } => {
+    const parts = room.zone_ref.split(':');
+    const deviceId = parts.length >= 2 ? parts[0] : null;
+    const zoneId = Number.isFinite(room.zone_id) ? room.zone_id : parts.length >= 2 ? Number.parseInt(parts[1], 10) : NaN;
+    return {
+      deviceId,
+      zoneId: Number.isFinite(zoneId) ? zoneId : null,
+    };
+  };
+
+  const handleRename = async (room: RoomWithRef) => {
+    const nextName = window.prompt('New room name', room.name);
+    if (!nextName) return;
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === room.name) return;
+
+    const parsed = parseRoomRef(room);
+    if (!parsed.deviceId || parsed.zoneId == null) return;
+
+    try {
+      const renamed = await mobileApi.renameDeviceZone(parsed.deviceId, parsed.zoneId, trimmed);
+      setRooms((prev) => prev.map((item) => (item.zone_ref === room.zone_ref ? { ...item, name: renamed.name } : item)));
+    } catch (error) {
+      window.alert(String(error));
+    }
+  };
+
   useEffect(() => {
     const loadSites = async () => {
       const res = await mobileApi.listSites();
@@ -63,6 +90,9 @@ export function RoomsPage() {
                 zone={room}
                 onOpen={() => history.push(`/app/rooms/${encodeURIComponent(room.zone_ref)}`)}
                 onHistory={() => history.push(`/app/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
+                onRename={() => {
+                  void handleRename(room);
+                }}
               />
             ))}
             {!sortedRooms.length ? <p className="text-sm text-muted">No rooms found for this property.</p> : null}

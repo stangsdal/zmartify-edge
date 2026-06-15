@@ -8,6 +8,7 @@ interface RoomCardProps {
   zone: MobileZone;
   onOpen: () => void;
   onHistory: () => void;
+  onRename: () => void;
 }
 
 function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | 'critical' | 'info' } {
@@ -17,7 +18,7 @@ function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | '
   return { label: 'Idle', tone: 'good' };
 }
 
-export function RoomCard({ zone, onOpen, onHistory }: RoomCardProps) {
+export function RoomCard({ zone, onOpen, onHistory, onRename }: RoomCardProps) {
   const state = zoneState(zone);
   return (
     <motion.div
@@ -36,6 +37,9 @@ export function RoomCard({ zone, onOpen, onHistory }: RoomCardProps) {
         <TemperatureBadge value={zone.current_temperature_c} />
       </div>
       <div className="mt-4 flex justify-end gap-2">
+        <IonButton size="small" fill="outline" onClick={(e) => { e.stopPropagation(); onRename(); }}>
+          Rename
+        </IonButton>
         <IonButton size="small" fill="outline" onClick={(e) => { e.stopPropagation(); onHistory(); }}>
           History
         </IonButton>

@@ -25,20 +25,32 @@ export function ThermostatDial({
   step = 0.5,
   onChange,
 }: ThermostatDialProps) {
+  const clamp = (num: number, lower: number, upper: number): number => Math.max(lower, Math.min(upper, num));
+  const polarToCartesian = (centerX: number, centerY: number, radius: number, angleDeg: number) => {
+    const radians = (angleDeg * Math.PI) / 180;
+    return {
+      x: centerX + radius * Math.cos(radians),
+      y: centerY + radius * Math.sin(radians),
+    };
+  };
+  const describeArc = (startAngle: number, endAngle: number): string => {
+    const sweepAngle = endAngle - startAngle;
+    const largeArcFlag = Math.abs(sweepAngle) > 180 ? 1 : 0;
+    const sweepFlag = sweepAngle >= 0 ? 1 : 0;
+    const start = polarToCartesian(160, 160, ringRadius, startAngle);
+    const end = polarToCartesian(160, 160, ringRadius, endAngle);
+    return `M ${start.x} ${start.y} A ${ringRadius} ${ringRadius} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`;
+  };
+
   const ratio = useMemo(() => (value - min) / (max - min), [value, min, max]);
   const clampedRatio = Math.max(0, Math.min(1, ratio));
   const ringRadius = 128;
-  const ringCircumference = 2 * Math.PI * ringRadius;
   const measuredTemp = typeof currentTemperature === 'number' ? currentTemperature : value;
-  const clampedMeasuredTemp = Math.max(min, Math.min(max, measuredTemp));
-  const setpointRatio = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  const measuredRatio = Math.max(0, Math.min(1, (clampedMeasuredTemp - min) / (max - min)));
-  const deltaRatio = Math.abs(setpointRatio - measuredRatio);
-  const deltaArcLength = ringCircumference * deltaRatio;
-  const deltaArcOffset = ringCircumference * Math.min(setpointRatio, measuredRatio);
+  const clampedMeasuredTemp = clamp(measuredTemp, min, max);
+  const clampedSetpoint = clamp(value, min, max);
   const primaryColor = heating ? '#FF6A2B' : '#67FBFF';
   const secondaryColor = heating ? '#ffb08f' : 'rgba(255,255,255,0.65)';
-  const deltaColor = value >= measuredTemp ? '#FF8A4B' : '#67FBFF';
+  const deltaColor = clampedSetpoint >= clampedMeasuredTemp ? '#FF6A2B' : '#67FBFF';
   const markerTemps = [5, 10, 15, 20, 25, 30, 35];
   const modeMap: Record<number, string> = {
     0: 'MANUAL',
@@ -57,6 +69,16 @@ export function ThermostatDial({
     const normalized = (temp - 20) / 15;
     return -90 + normalized * 150;
   };
+
+  const scaleStartAngle = tempToAngle(min);
+  const scaleEndAngle = tempToAngle(max);
+  const bandStartTemp = Math.min(clampedSetpoint, clampedMeasuredTemp);
+  const bandEndTemp = Math.max(clampedSetpoint, clampedMeasuredTemp);
+  const bandStartAngle = tempToAngle(bandStartTemp);
+  const bandEndAngle = tempToAngle(bandEndTemp);
+  const fullScalePath = describeArc(scaleStartAngle, scaleEndAngle);
+  const bandPath = describeArc(bandStartAngle, bandEndAngle);
+  const showBand = Math.abs(bandEndTemp - bandStartTemp) > 0.05;
 
   return (
     <div className="relative mx-auto w-full max-w-[360px] overflow-hidden rounded-[2rem] border border-white/10 hero-glow bg-[radial-gradient(circle_at_top,rgba(103,251,255,0.16),transparent_38%),linear-gradient(180deg,rgba(21,28,44,0.92),rgba(21,28,44,0.78))] p-5 text-white shadow-2xl">
@@ -85,20 +107,8 @@ export function ThermostatDial({
 
       <div className="relative mt-4 flex items-center justify-center">
         <svg viewBox="0 0 320 320" className="h-[268px] w-[268px]">
-          <circle cx="160" cy="160" r={ringRadius} stroke="rgba(255,255,255,0.18)" strokeWidth="6" fill="none" />
-          <circle
-            cx="160"
-            cy="160"
-            r={ringRadius}
-            stroke={deltaColor}
-            strokeWidth="6"
-            fill="none"
-            strokeDasharray={`${ringCircumference}`}
-            strokeDashoffset={`${ringCircumference - deltaArcLength + deltaArcOffset}`}
-            strokeLinecap="round"
-            transform="rotate(-90 160 160)"
-            opacity={deltaArcLength > 0 ? 1 : 0}
-          />
+          <path d={fullScalePath} stroke="rgba(255,255,255,0.18)" strokeWidth="6" fill="none" strokeLinecap="round" />
+          <path d={bandPath} stroke={deltaColor} strokeWidth="6" fill="none" strokeLinecap="round" opacity={showBand ? 1 : 0} />
           {markerTemps.map((markerTemp) => {
             const angle = tempToAngle(markerTemp);
             const cos = Math.cos((angle * Math.PI) / 180);
