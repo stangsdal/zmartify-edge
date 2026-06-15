@@ -18,6 +18,7 @@ export function RoomDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [streamState, setStreamState] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const lastAppliedRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -88,6 +89,11 @@ export function RoomDetailPage() {
     const connect = () => {
       const endpoint = `${wsBase}/mobile/ws/zones/${encodeURIComponent(resolvedRef)}?token=${encodeURIComponent(token)}`;
       socket = new WebSocket(endpoint);
+      setStreamState('connecting');
+
+      socket.onopen = () => {
+        setStreamState('connected');
+      };
 
       socket.onmessage = (event) => {
         try {
@@ -101,6 +107,7 @@ export function RoomDetailPage() {
 
       socket.onclose = () => {
         if (stopped) return;
+        setStreamState('reconnecting');
         reconnectTimer = window.setTimeout(connect, 2000);
       };
 
@@ -168,6 +175,17 @@ export function RoomDetailPage() {
       <IonContent className="ion-padding">
         <div className="space-y-5 pb-8">
           <section className="rounded-3xl app-surface shadow-soft p-5">
+            <div className="mb-3 flex justify-end">
+              <span
+                className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]"
+                style={{
+                  color: streamState === 'connected' ? '#067647' : '#b54708',
+                  backgroundColor: streamState === 'connected' ? 'rgba(18,183,106,0.15)' : 'rgba(247,144,9,0.16)',
+                }}
+              >
+                {streamState === 'connected' ? 'Live' : streamState === 'connecting' ? 'Connecting' : 'Reconnecting'}
+              </span>
+            </div>
             <ThermostatDial
               value={target}
               currentTemperature={zone?.current_temperature_c ?? null}

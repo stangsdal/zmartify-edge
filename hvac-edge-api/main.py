@@ -67,6 +67,7 @@ from app.domain_model import (
     upsert_zone_state,
 )
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
+from app.mqtt_commands import MqttCommandError, publish_setpoint_command, should_forward_setpoint_commands
 from app.registry import (
     authenticate_device_admin_token,
     RegistryConflictError,
@@ -1225,6 +1226,13 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
         if site_pk_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
         _enforce_mobile_site_scope(request, int(site_pk_id))
+
+        if should_forward_setpoint_commands():
+            try:
+                publish_setpoint_command(device_id, zone_id, float(payload.target_temperature_c))
+            except MqttCommandError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setpoint publish failed: {exc}") from exc
+
         zone = upsert_zone_state(
             device_id,
             zone_id,

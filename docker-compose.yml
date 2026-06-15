@@ -37,6 +37,7 @@ services:
       - HVAC_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
       - HVAC_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
       - HVAC_EDGE_DRY_RUN_ACL_WRITE=0
+      - HVAC_EDGE_FORWARD_SETPOINT_TO_MQTT=1
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
