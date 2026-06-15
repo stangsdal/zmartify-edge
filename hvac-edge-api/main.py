@@ -20,6 +20,7 @@ from app.auth import (
     get_user,
     is_initialized,
     list_audit_logs,
+    list_user_site_access,
     list_users,
     login,
     logout_token,
@@ -27,6 +28,7 @@ from app.auth import (
     reset_user_password,
     set_user_enabled,
     set_user_roles,
+    set_user_site_access,
 )
 from app.db import get_connection, get_db_path, initialize_database
 from app.device_onboarding import (
@@ -132,6 +134,7 @@ from app.schemas import (
     UserOut,
     UserResetPasswordIn,
     UserRoleUpdateIn,
+    UserSiteAccessUpdateIn,
     AuthLoginIn,
     AuthLoginOut,
     AuditLogOut,
@@ -236,6 +239,34 @@ def _mobile_event_projection(event: dict) -> dict:
         "zone_id": event.get("zone_id"),
         "payload": payload,
     }
+
+
+def _mobile_site_scope_ids(request: Request) -> set[int] | None:
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None or auth_user.user_id is None:
+        return None
+    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
+        return None
+    scoped_site_ids = set(list_user_site_access(auth_user.user_id))
+    if not scoped_site_ids:
+        return None
+    return scoped_site_ids
+
+
+def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
+    scoped_site_ids = _mobile_site_scope_ids(request)
+    if scoped_site_ids is None:
+        return
+    if site_pk_id not in scoped_site_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+
+
+def _resolve_device_site_pk_id(device_id: str) -> int | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    return int(row["site_id"]) if row["site_id"] is not None else None
 
 
 @app.middleware("http")
@@ -825,6 +856,10 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
 @app.get("/mobile/devices/{device_id}/freshness", response_model=DeviceFreshnessOut)
 def mobile_device_freshness(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    site_pk_id = _resolve_device_site_pk_id(device_id)
+    if site_pk_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    _enforce_mobile_site_scope(request, site_pk_id)
     try:
         return get_device_freshness(device_id)
     except RegistryNotFoundError as exc:
@@ -951,18 +986,20 @@ def api_delete_mqtt_client(client_id: int, request: Request) -> Response:
 @app.get("/mobile/sites")
 def mobile_sites(request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return {"sites": list_mobile_sites()}
+    return {"sites": list_mobile_sites(site_ids=_mobile_site_scope_ids(request))}
 
 
 @app.get("/mobile/domains")
 def mobile_domains(request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return {"domains": list_mobile_domains()}
+    return {"domains": list_mobile_domains(site_ids=_mobile_site_scope_ids(request))}
 
 
 @app.get("/mobile/sites/{site_id}")
 def mobile_site_detail(site_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    resolved_site_id = _resolve_site_filter_id(site_id)
+    _enforce_mobile_site_scope(request, resolved_site_id)
     try:
         return get_mobile_site(site_id)
     except RegistryNotFoundError as exc:
@@ -972,6 +1009,8 @@ def mobile_site_detail(site_id: str, request: Request) -> dict:
 @app.get("/mobile/sites/{site_id}/devices")
 def mobile_site_devices(site_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    resolved_site_id = _resolve_site_filter_id(site_id)
+    _enforce_mobile_site_scope(request, resolved_site_id)
     try:
         site = get_mobile_site(site_id)
     except RegistryNotFoundError as exc:
@@ -995,6 +1034,10 @@ def mobile_site_devices(site_id: str, request: Request) -> dict:
 @app.get("/mobile/devices/{device_id}")
 def mobile_device(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    site_pk_id = _resolve_device_site_pk_id(device_id)
+    if site_pk_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    _enforce_mobile_site_scope(request, site_pk_id)
     with get_connection() as conn:
         row = conn.execute(
             """
@@ -1029,6 +1072,10 @@ def mobile_device(device_id: str, request: Request) -> dict:
 @app.get("/mobile/devices/{device_id}/zones")
 def mobile_device_zones(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    site_pk_id = _resolve_device_site_pk_id(device_id)
+    if site_pk_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    _enforce_mobile_site_scope(request, site_pk_id)
     try:
         return {"device_id": device_id, "zones": list_device_zones(device_id)}
     except RegistryNotFoundError as exc:
@@ -1038,6 +1085,10 @@ def mobile_device_zones(device_id: str, request: Request) -> dict:
 @app.get("/mobile/devices/{device_id}/channels")
 def mobile_device_channels(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    site_pk_id = _resolve_device_site_pk_id(device_id)
+    if site_pk_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+    _enforce_mobile_site_scope(request, site_pk_id)
     try:
         return {"device_id": device_id, "channels": list_device_channels(device_id)}
     except RegistryNotFoundError as exc:
@@ -1050,6 +1101,10 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
     try:
         device_id, zone_id = resolve_zone_ref(zone_ref)
         context = get_device_onboarding_context(device_id)
+        site_pk_id = context.get("site_id")
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+        _enforce_mobile_site_scope(request, int(site_pk_id))
         zone = upsert_zone_state(
             device_id,
             zone_id,
@@ -1086,6 +1141,11 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
 def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
+        device_id, _zone_id = resolve_zone_ref(zone_ref)
+        site_pk_id = _resolve_device_site_pk_id(device_id)
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+        _enforce_mobile_site_scope(request, site_pk_id)
         return get_zone_history(zone_ref, window=window)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -1097,6 +1157,10 @@ def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") ->
 def mobile_device_history(device_id: str, request: Request, window: str = "24h") -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
+        site_pk_id = _resolve_device_site_pk_id(device_id)
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+        _enforce_mobile_site_scope(request, site_pk_id)
         return get_device_history(device_id, window=window)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -1151,9 +1215,18 @@ def mobile_events(
     site_id: str | None = None,
 ) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    scoped_site_ids = _mobile_site_scope_ids(request)
     resolved_domain_id = _resolve_domain_filter_id(domain_id)
     resolved_site_id = _resolve_site_filter_id(site_id)
-    events = list_events(limit=limit, event_type=event_type, domain_id=resolved_domain_id, site_id=resolved_site_id)
+    if scoped_site_ids is not None and resolved_site_id is not None and resolved_site_id not in scoped_site_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+    events = list_events(
+        limit=limit,
+        event_type=event_type,
+        domain_id=resolved_domain_id,
+        site_id=resolved_site_id,
+        allowed_site_ids=scoped_site_ids,
+    )
     return {"events": [_mobile_event_projection(event) for event in events]}
 
 
@@ -1301,6 +1374,27 @@ def api_delete_user(user_id: int, request: Request) -> Response:
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/users/{user_id}/site-access")
+def api_get_user_site_access(user_id: int, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    try:
+        site_ids = list_user_site_access(user_id)
+        return {"user_id": user_id, "site_ids": site_ids}
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/users/{user_id}/site-access")
+def api_set_user_site_access(user_id: int, payload: UserSiteAccessUpdateIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    actor = request.state.auth_user
+    try:
+        site_ids = set_user_site_access(actor_user_id=actor.user_id, user_id=user_id, site_ids=payload.site_ids)
+        return {"user_id": user_id, "site_ids": site_ids}
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @app.get("/admin/audit-log", response_model=list[AuditLogOut])

@@ -1158,8 +1158,18 @@ def resolve_zone_ref(zone_ref: str) -> tuple[str, int]:
     raise RegistryNotFoundError("zone not found")
 
 
-def list_mobile_domains() -> list[dict[str, Any]]:
+def list_mobile_domains(*, site_ids: set[int] | None = None) -> list[dict[str, Any]]:
+    if site_ids is not None and not site_ids:
+        return []
+
     with get_connection() as conn:
+        where_clause = ""
+        params: list[Any] = []
+        if site_ids is not None:
+            placeholders = ",".join("?" for _ in sorted(site_ids))
+            where_clause = f"WHERE s.id IN ({placeholders})"
+            params.extend(sorted(site_ids))
+
         rows = conn.execute(
             """
                  SELECT COALESCE(d.uuid, d.slug) AS domain_id, d.slug AS domain_slug, d.name AS domain_name,
@@ -1168,15 +1178,28 @@ def list_mobile_domains() -> list[dict[str, Any]]:
             FROM domains d
             LEFT JOIN sites s ON s.domain_id = d.id
             LEFT JOIN devices dev ON dev.site_id = s.id
+            {where_clause}
             GROUP BY d.id
             ORDER BY d.id
             """
+            .format(where_clause=where_clause),
+            params,
         ).fetchall()
     return [_row_to_dict(row) or {} for row in rows]
 
 
-def list_mobile_sites() -> list[dict[str, Any]]:
+def list_mobile_sites(*, site_ids: set[int] | None = None) -> list[dict[str, Any]]:
+    if site_ids is not None and not site_ids:
+        return []
+
     with get_connection() as conn:
+        where_clause = ""
+        params: list[Any] = []
+        if site_ids is not None:
+            placeholders = ",".join("?" for _ in sorted(site_ids))
+            where_clause = f"WHERE s.id IN ({placeholders})"
+            params.extend(sorted(site_ids))
+
         rows = conn.execute(
             """
                  SELECT COALESCE(s.uuid, s.slug) AS site_id, s.slug AS site_slug, s.name AS site_name,
@@ -1185,9 +1208,12 @@ def list_mobile_sites() -> list[dict[str, Any]]:
             FROM sites s
             JOIN domains d ON d.id = s.domain_id
             LEFT JOIN devices dev ON dev.site_id = s.id
+            {where_clause}
             GROUP BY s.id
             ORDER BY s.id
             """
+            .format(where_clause=where_clause),
+            params,
         ).fetchall()
     return [_row_to_dict(row) or {} for row in rows]
 
@@ -1236,7 +1262,11 @@ def list_events(
     event_type: str | None = None,
     domain_id: int | None = None,
     site_id: int | None = None,
+    allowed_site_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
+    if allowed_site_ids is not None and not allowed_site_ids:
+        return []
+
     safe_limit = max(1, min(limit, 500))
     with get_connection() as conn:
         params: list[Any] = []
@@ -1254,6 +1284,10 @@ def list_events(
         if site_id is not None:
             where_clauses.append("e.site_id = ?")
             params.append(site_id)
+        if allowed_site_ids is not None:
+            placeholders = ",".join("?" for _ in sorted(allowed_site_ids))
+            where_clauses.append(f"e.site_id IN ({placeholders})")
+            params.extend(sorted(allowed_site_ids))
 
         where = ""
         if where_clauses:

@@ -366,6 +366,10 @@ class UserResetPasswordIn(BaseModel):
     password: str = Field(min_length=12)
 
 
+class UserSiteAccessUpdateIn(BaseModel):
+    site_ids: list[int] = Field(default_factory=list)
+
+
 class UserOut(BaseModel):
     id: int
     uuid: str | None = None

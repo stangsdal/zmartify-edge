@@ -415,6 +415,56 @@ def test_mobile_api_hides_internal_database_ids(monkeypatch, tmp_path: Path):
     assert "site_id" not in sample
 
 
+def test_mobile_viewer_site_scope_restricts_visible_properties(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    emergency = {"Authorization": "Bearer emergency-token"}
+
+    domain = client.post("/domains", headers=emergency, json={"slug": "scope-house", "name": "Scope House"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site_a = client.post(f"/domains/{domain_id}/sites", headers=emergency, json={"slug": "site-a", "name": "Site A"})
+    assert site_a.status_code == 201
+    site_a_id = site_a.json()["id"]
+
+    site_b = client.post(f"/domains/{domain_id}/sites", headers=emergency, json={"slug": "site-b", "name": "Site B"})
+    assert site_b.status_code == 201
+    site_b_id = site_b.json()["id"]
+
+    user = client.post(
+        "/users",
+        headers=emergency,
+        json={
+            "username": "peter",
+            "display_name": "Peter Viewer",
+            "password": "VeryStrongPass123!",
+            "roles": ["viewer"],
+        },
+    )
+    assert user.status_code == 201
+    user_id = user.json()["id"]
+
+    set_scope = client.post(
+        f"/users/{user_id}/site-access",
+        headers=emergency,
+        json={"site_ids": [site_b_id]},
+    )
+    assert set_scope.status_code == 200
+    assert set_scope.json()["site_ids"] == [site_b_id]
+
+    login = client.post("/auth/login", json={"username": "peter", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    mobile_sites = client.get("/mobile/sites", headers=bearer)
+    assert mobile_sites.status_code == 200
+    assert len(mobile_sites.json()["sites"]) == 1
+    assert mobile_sites.json()["sites"][0]["site_slug"] == "site-b"
+
+    blocked = client.get("/mobile/sites/site-a", headers=bearer)
+    assert blocked.status_code == 404
+
+
 def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}

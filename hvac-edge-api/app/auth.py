@@ -481,6 +481,49 @@ def set_user_roles(*, actor_user_id: int | None, user_id: int, roles: list[str])
     return get_user(user_id)
 
 
+def list_user_site_access(user_id: int) -> list[int]:
+    with get_connection() as conn:
+        exists = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if exists is None:
+            raise AuthError("user not found")
+        rows = conn.execute(
+            "SELECT site_id FROM user_site_access WHERE user_id = ? ORDER BY site_id",
+            (user_id,),
+        ).fetchall()
+        return [int(row["site_id"]) for row in rows]
+
+
+def set_user_site_access(*, actor_user_id: int | None, user_id: int, site_ids: list[int]) -> list[int]:
+    normalized_ids = sorted({int(site_id) for site_id in site_ids if int(site_id) > 0})
+    with get_connection() as conn:
+        exists = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if exists is None:
+            raise AuthError("user not found")
+
+        if normalized_ids:
+            placeholders = ",".join("?" for _ in normalized_ids)
+            rows = conn.execute(
+                f"SELECT id FROM sites WHERE id IN ({placeholders})",
+                tuple(normalized_ids),
+            ).fetchall()
+            existing_site_ids = {int(row["id"]) for row in rows}
+            missing = [site_id for site_id in normalized_ids if site_id not in existing_site_ids]
+            if missing:
+                raise AuthError(f"site not found: {missing[0]}")
+
+        conn.execute("DELETE FROM user_site_access WHERE user_id = ?", (user_id,))
+        for site_id in normalized_ids:
+            conn.execute(
+                "INSERT INTO user_site_access(user_id, site_id) VALUES (?, ?)",
+                (user_id, site_id),
+            )
+
+        _audit(conn, actor_user_id, "user_site_access_set", "user", str(user_id), {"site_ids": normalized_ids})
+        conn.commit()
+
+    return normalized_ids
+
+
 def delete_user(*, actor_user_id: int | None, user_id: int) -> None:
     with get_connection() as conn:
         cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
