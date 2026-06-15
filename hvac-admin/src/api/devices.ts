@@ -1,10 +1,13 @@
 import { apiClient } from './client';
-import { Device, DeviceClaimRequest, DeviceDiscovery } from '../types/api';
+import { Device, DeviceClaimRequest, DeviceDiscovery, DeviceFreshness } from '../types/api';
 
 export const deviceApi = {
   list: () => apiClient.get('/devices'),
   
   get: (deviceId: string) => apiClient.get(`/mobile/devices/${deviceId}`),
+
+  getFreshness: (deviceId: string): Promise<DeviceFreshness> =>
+    apiClient.get(`/mobile/devices/${deviceId}/freshness`),
   
   create: (
     deviceId: string,

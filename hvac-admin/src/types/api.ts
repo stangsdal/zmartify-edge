@@ -20,6 +20,8 @@ export interface Device {
   site_id?: number;
   local_url?: string;
   online?: boolean;
+  mqtt_connected?: boolean;
+  freshness_age_ms?: number | null;
   zones?: Zone[];
 }
 
@@ -56,10 +58,34 @@ export interface DeviceClaimRequest {
 }
 
 export interface Zone {
-  zone_id: string;
+  zone_id: string | number;
   name: string;
   target_temperature_c?: number;
   current_temperature_c?: number;
+  freshness_age_ms?: number | null;
+}
+
+export interface DeviceFreshness {
+  device_id: string;
+  device: {
+    online?: boolean | null;
+    mqtt_connected?: boolean | null;
+    updated_at?: string | null;
+    source_timestamp?: string | null;
+    freshness_age_ms?: number | null;
+  };
+  zones: Array<{
+    zone_id: number;
+    updated_at?: string | null;
+    source_timestamp?: string | null;
+    freshness_age_ms?: number | null;
+  }>;
+  channels: Array<{
+    channel_id: number;
+    updated_at?: string | null;
+    source_timestamp?: string | null;
+    freshness_age_ms?: number | null;
+  }>;
 }
 
 export interface MqttClient {

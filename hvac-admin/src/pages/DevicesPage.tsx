@@ -44,6 +44,22 @@ function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
 
   return (
     <div style={{ marginTop: '8px' }}>
+      <div
+        style={{
+          padding: '10px 12px',
+          marginBottom: '10px',
+          borderRadius: '8px',
+          border: `1px solid ${zoneState.freshness.color}`,
+          background: '#fff',
+        }}
+      >
+        <strong>Device Health</strong>
+        <p style={{ margin: '4px 0' }}>Online: {zoneState.online ? 'Yes' : 'No'}</p>
+        <p style={{ margin: '4px 0' }}>MQTT: {zoneState.mqtt_connected ? 'Connected' : 'Disconnected'}</p>
+        <p style={{ margin: '4px 0', color: zoneState.freshness.color, fontWeight: 600 }}>
+          Twin Freshness: {zoneState.freshness.label}
+        </p>
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <strong>Zones ({zoneState.zones.length})</strong>
         <IonButton size="small" fill="outline" onClick={refetch}>
