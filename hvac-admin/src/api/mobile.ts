@@ -106,4 +106,7 @@ export const mobileApi = {
     apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {
       target_temperature_c: targetTemperatureC,
     }),
+
+  renameDeviceZone: (deviceId: string, zoneId: number, name: string): Promise<MobileZone> =>
+    apiClient.post(`/devices/${deviceId}/zones/${zoneId}/rename`, { name }),
 };

@@ -14,10 +14,14 @@ export function RoomDetailPage() {
   const { zoneRef } = useParams<RouteParams>();
   const resolvedRef = decodeURIComponent(zoneRef);
   const [zone, setZone] = useState<MobileZone | null>(null);
+  const [zoneDeviceId, setZoneDeviceId] = useState<string | null>(null);
   const [target, setTarget] = useState(21);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState('');
   const [streamState, setStreamState] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const lastAppliedRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
@@ -33,6 +37,7 @@ export function RoomDetailPage() {
 
   const applyIncomingZoneState = (nextZone: MobileZone) => {
     setZone(nextZone);
+    setRenameValue(nextZone.name || '');
     const nextTarget = nextZone.target_temperature_c ?? 21;
     if (!dirtyRef.current && !savingRef.current) {
       setTarget(nextTarget);
@@ -54,6 +59,7 @@ export function RoomDetailPage() {
             const zref = z.zone_uuid || `${device.device_id}:${z.zone_id}`;
             if (zref === resolvedRef) {
               if (cancelled) return;
+              setZoneDeviceId(device.device_id);
               applyIncomingZoneState(z);
               return;
             }
@@ -169,6 +175,36 @@ export function RoomDetailPage() {
     setDirty(true);
   };
 
+  const handleRename = async () => {
+    const nextName = renameValue.trim();
+    if (!nextName) {
+      setRenameError('Room name cannot be empty.');
+      return;
+    }
+
+    const fallbackParts = resolvedRef.split(':');
+    const fallbackDeviceId = fallbackParts.length >= 2 ? fallbackParts[0] : null;
+    const fallbackZoneId = fallbackParts.length >= 2 ? Number.parseInt(fallbackParts[1], 10) : null;
+    const deviceId = zoneDeviceId || fallbackDeviceId;
+    const zoneId = zone?.zone_id ?? (Number.isFinite(fallbackZoneId) ? fallbackZoneId : null);
+    if (!deviceId || zoneId == null) {
+      setRenameError('Unable to resolve room identity for rename.');
+      return;
+    }
+
+    setRenaming(true);
+    setRenameError('');
+    try {
+      const renamed = await mobileApi.renameDeviceZone(deviceId, zoneId, nextName);
+      setZone((prev) => (prev ? { ...prev, name: renamed.name } : prev));
+      setRenameValue(renamed.name);
+    } catch (e) {
+      setRenameError(String(e));
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   return (
     <IonPage>
       <AppHeader title={zone?.name || 'Room'} subtitle="Thermostat Control" />
@@ -206,6 +242,33 @@ export function RoomDetailPage() {
             <p className="text-base font-medium">{statusText}</p>
             <p className="text-sm text-muted">Last Update</p>
             <p className="text-base">{zone?.freshness_age_ms == null ? 'Unknown' : `${Math.floor(zone.freshness_age_ms / 1000)}s ago`}</p>
+          </section>
+
+          <section className="rounded-2xl app-surface shadow-soft p-4 space-y-3">
+            <p className="text-sm text-muted">Room Name</p>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-sm"
+                value={renameValue}
+                onChange={(event) => {
+                  setRenameValue(event.target.value);
+                  setRenameError('');
+                }}
+                placeholder="Enter room name"
+                maxLength={64}
+              />
+              <button
+                type="button"
+                className="rounded-xl bg-brand-primary text-white px-4 py-2 text-sm font-medium disabled:opacity-60"
+                onClick={() => {
+                  void handleRename();
+                }}
+                disabled={renaming || !renameValue.trim() || renameValue.trim() === (zone?.name || '').trim()}
+              >
+                {renaming ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+            {renameError ? <p className="text-sm text-rose-600">{renameError}</p> : null}
           </section>
         </div>
       </IonContent>
