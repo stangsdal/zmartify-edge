@@ -646,6 +646,11 @@ def ingest_device_twin_snapshot(
     zone_count = 0
     for zone in zones or []:
         zone_id = int(zone["zone_id"])
+        zone_name = zone.get("name")
+        if zone_name is not None:
+            normalized_name = str(zone_name).strip()
+            if normalized_name:
+                set_zone_metadata(device_external_id, zone_id, name=normalized_name)
         upsert_zone_state(
             device_external_id,
             zone_id,

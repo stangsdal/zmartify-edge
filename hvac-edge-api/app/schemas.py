@@ -196,6 +196,7 @@ class ChannelZoneLinksIn(BaseModel):
 
 class TelemetryZoneIn(BaseModel):
     zone_id: int
+    name: str | None = None
     current_temperature_c: float | None = None
     target_temperature_c: float | None = None
     demand: bool | None = None

@@ -8,6 +8,7 @@ interface ZoneCardProps {
 }
 
 export function ZoneCard({ zone, onSetpointChange }: ZoneCardProps) {
+  const displayName = (zone.name || '').trim() || `Zone ${zone.zone_id}`;
   const currentTemp = zone.current_temperature_c || 0;
   const targetTemp = zone.target_temperature_c || 21;
   const freshness = freshnessFromAgeMs(zone.freshness_age_ms);
@@ -15,8 +16,7 @@ export function ZoneCard({ zone, onSetpointChange }: ZoneCardProps) {
   return (
     <IonCard>
       <IonCardContent>
-        <h3>{zone.name}</h3>
-        <p>Zone ID: {zone.zone_id}</p>
+        <h3>{displayName}</h3>
         <p>Current: {currentTemp.toFixed(1)}°C</p>
         <p>Target: {targetTemp.toFixed(1)}°C</p>
         <p style={{ color: freshness.color, fontWeight: 600 }}>Freshness: {freshness.label}</p>

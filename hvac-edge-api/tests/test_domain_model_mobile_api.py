@@ -289,7 +289,13 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
             "online": True,
             "mqtt_connected": True,
             "zones": [
-                {"zone_id": 1, "current_temperature_c": 21.2, "target_temperature_c": 22.0, "active": True},
+                {
+                    "zone_id": 1,
+                    "name": "Living Room [1,2]",
+                    "current_temperature_c": 21.2,
+                    "target_temperature_c": 22.0,
+                    "active": True,
+                },
                 {"zone_id": 2, "current_temperature_c": 20.1, "target_temperature_c": 21.0, "active": False},
             ],
             "channels": [
@@ -309,6 +315,7 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     assert zone1.status_code == 200
     assert zone1.json()["current_temperature_c"] == 21.2
     assert zone1.json()["target_temperature_c"] == 22.0
+    assert zone1.json()["name"] == "Living Room [1,2]"
 
     channel1 = client.get(f"/devices/{device_id}/channels/1", headers=headers)
     assert channel1.status_code == 200
@@ -442,10 +449,9 @@ def test_mobile_viewer_site_scope_restricts_visible_properties(monkeypatch, tmp_
         },
     )
     assert user.status_code == 201
-    user_id = user.json()["id"]
 
     set_scope = client.post(
-        f"/users/{user_id}/site-access",
+        f"/users/{user.json()['id']}/site-scope",
         headers=emergency,
         json={"site_ids": [site_b_id]},
     )
