@@ -3,6 +3,7 @@ import { IonButton, IonContent, IonItem, IonLabel, IonList, IonPage, IonSelect, 
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { authApi } from '../api/auth';
+import { apiClient } from '../api/client';
 import { mobileApi } from '../api/mobile';
 
 export function SettingsPage() {
@@ -25,13 +26,16 @@ export function SettingsPage() {
   }, []);
 
   const logout = async () => {
+    // Always clear local session first so logout works even if backend call fails.
+    apiClient.clearAuthToken();
     try {
       await authApi.logout();
     } catch {
       // ignore
     }
-    localStorage.removeItem('admin_api_token');
     history.replace('/app/login');
+    // Force route change in case Ionic router state is stale.
+    window.location.assign('/app/login');
   };
 
   return (
