@@ -69,7 +69,14 @@ export function RoomDetailPage() {
       <IonContent className="ion-padding">
         <div className="space-y-5 pb-8">
           <section className="rounded-3xl app-surface shadow-soft p-5">
-            <ThermostatDial value={target} onChange={setTarget} />
+            <ThermostatDial
+              value={target}
+              currentTemperature={zone?.current_temperature_c ?? null}
+              roomName={zone?.name}
+              statusLabel={statusText}
+              heating={!!zone?.demand}
+              onChange={setTarget}
+            />
             <IonButton expand="block" onClick={applyTarget} disabled={saving}>
               {saving ? 'Saving...' : 'Apply Temperature'}
             </IonButton>
@@ -78,10 +85,6 @@ export function RoomDetailPage() {
           </section>
 
           <section className="rounded-2xl app-surface shadow-soft p-4 space-y-2">
-            <p className="text-sm text-muted">Current Temperature</p>
-            <p className="text-3xl font-bold text-brand-primary">{zone?.current_temperature_c?.toFixed(1) ?? '--'}°C</p>
-            <p className="text-sm text-muted">Target Temperature</p>
-            <p className="text-xl font-semibold">{target.toFixed(1)}°C</p>
             <p className="text-sm text-muted">Status</p>
             <p className="text-base font-medium">{statusText}</p>
             <p className="text-sm text-muted">Last Update</p>
