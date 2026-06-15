@@ -16,6 +16,7 @@ import {
   peopleOutline,
   keyOutline,
   documentTextOutline,
+  notificationsOutline,
   personCircleOutline,
   logOutOutline,
 } from 'ionicons/icons';
@@ -31,6 +32,7 @@ import { SystemPage } from './pages/SystemPage';
 import { UsersPage } from './pages/UsersPage';
 import { RolesPage } from './pages/RolesPage';
 import { AuditLogPage } from './pages/AuditLogPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { authApi } from './api/auth';
@@ -71,6 +73,7 @@ export function App() {
         <Route exact path={`${appBase}/users`} component={UsersPage} />
         <Route exact path={`${appBase}/roles`} component={RolesPage} />
         <Route exact path={`${appBase}/audit-log`} component={AuditLogPage} />
+        <Route exact path={`${appBase}/notifications`} component={NotificationsPage} />
         <Route exact path={`${appBase}/profile`} component={ProfilePage} />
         <Route exact path="/" render={() => <Redirect to={`${appBase}/dashboard`} />} />
         <Route exact path={appBase} render={() => <Redirect to={`${appBase}/dashboard`} />} />
@@ -120,6 +123,11 @@ export function App() {
         <IonTabButton tab="audit" href={`${appBase}/audit-log`}>
           <IonIcon icon={documentTextOutline} />
           Audit
+        </IonTabButton>
+
+        <IonTabButton tab="notifications" href={`${appBase}/notifications`}>
+          <IonIcon icon={notificationsOutline} />
+          Alerts
         </IonTabButton>
 
         <IonTabButton tab="profile" href={`${appBase}/profile`}>
