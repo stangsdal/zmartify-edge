@@ -1,4 +1,4 @@
-import { Route } from 'react-router-dom';
+import { Redirect, Route, useLocation } from 'react-router-dom';
 import {
   IonTabs,
   IonTabBar,
@@ -33,14 +33,26 @@ import { RolesPage } from './pages/RolesPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { authApi } from './api/auth';
 
 export function App() {
   const history = useHistory();
+  const location = useLocation();
+  const appBase = '/app';
+  const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`];
+  const isPublicRoute = publicRoutePrefixes.some(
+    (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
+  );
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      // Best effort server-side session/token cleanup.
+      await authApi.logout();
+    } catch {
+      // Ignore logout API failures (expired/missing token). Local logout still applies.
+    }
     localStorage.removeItem('admin_api_token');
-    localStorage.removeItem('api_base_url');
-    history.push('/login');
+    history.replace(`${appBase}/login`);
   };
 
   return (
@@ -48,77 +60,78 @@ export function App() {
       <OfflineIndicator />
       <IonTabs>
       <IonRouterOutlet>
-        <Route exact path="/login" component={LoginPage} />
-        <Route exact path="/dashboard" component={DashboardPage} />
-        <Route exact path="/domains" component={DomainsPage} />
-        <Route exact path="/sites" component={SitesPage} />
-        <Route exact path="/devices" component={DevicesPage} />
-        <Route exact path="/devices/add" component={AddDevicePage} />
-        <Route exact path="/mqtt-clients" component={MqttClientsPage} />
-        <Route exact path="/system" component={SystemPage} />
-        <Route exact path="/users" component={UsersPage} />
-        <Route exact path="/roles" component={RolesPage} />
-        <Route exact path="/audit-log" component={AuditLogPage} />
-        <Route exact path="/profile" component={ProfilePage} />
-        <Route path="*" render={() => <DashboardPage />} />
+        <Route exact path={`${appBase}/login`} component={LoginPage} />
+        <Route exact path={`${appBase}/dashboard`} component={DashboardPage} />
+        <Route exact path={`${appBase}/domains`} component={DomainsPage} />
+        <Route exact path={`${appBase}/sites`} component={SitesPage} />
+        <Route exact path={`${appBase}/devices`} component={DevicesPage} />
+        <Route exact path={`${appBase}/devices/add`} component={AddDevicePage} />
+        <Route exact path={`${appBase}/mqtt-clients`} component={MqttClientsPage} />
+        <Route exact path={`${appBase}/system`} component={SystemPage} />
+        <Route exact path={`${appBase}/users`} component={UsersPage} />
+        <Route exact path={`${appBase}/roles`} component={RolesPage} />
+        <Route exact path={`${appBase}/audit-log`} component={AuditLogPage} />
+        <Route exact path={`${appBase}/profile`} component={ProfilePage} />
+        <Route exact path="/" render={() => <Redirect to={`${appBase}/dashboard`} />} />
+        <Route exact path={appBase} render={() => <Redirect to={`${appBase}/dashboard`} />} />
       </IonRouterOutlet>
 
-      <IonTabBar slot="bottom">
-        <IonTabButton tab="dashboard" href="/dashboard">
+      {!isPublicRoute && <IonTabBar slot="bottom">
+        <IonTabButton tab="dashboard" href={`${appBase}/dashboard`}>
           <IonIcon icon={homeOutline} />
           Dashboard
         </IonTabButton>
 
-        <IonTabButton tab="domains" href="/domains">
+        <IonTabButton tab="domains" href={`${appBase}/domains`}>
           <IonIcon icon={folderOutline} />
           Domains
         </IonTabButton>
 
-        <IonTabButton tab="sites" href="/sites">
+        <IonTabButton tab="sites" href={`${appBase}/sites`}>
           <IonIcon icon={gridOutline} />
           Sites
         </IonTabButton>
 
-        <IonTabButton tab="devices" href="/devices">
+        <IonTabButton tab="devices" href={`${appBase}/devices`}>
           <IonIcon icon={phonePortraitOutline} />
           Devices
         </IonTabButton>
 
-        <IonTabButton tab="mqtt" href="/mqtt-clients">
+        <IonTabButton tab="mqtt" href={`${appBase}/mqtt-clients`}>
           <IonIcon icon={wifiOutline} />
           MQTT
         </IonTabButton>
 
-        <IonTabButton tab="system" href="/system">
+        <IonTabButton tab="system" href={`${appBase}/system`}>
           <IonIcon icon={settingsOutline} />
           System
         </IonTabButton>
 
-        <IonTabButton tab="users" href="/users">
+        <IonTabButton tab="users" href={`${appBase}/users`}>
           <IonIcon icon={peopleOutline} />
           Users
         </IonTabButton>
 
-        <IonTabButton tab="roles" href="/roles">
+        <IonTabButton tab="roles" href={`${appBase}/roles`}>
           <IonIcon icon={keyOutline} />
           Roles
         </IonTabButton>
 
-        <IonTabButton tab="audit" href="/audit-log">
+        <IonTabButton tab="audit" href={`${appBase}/audit-log`}>
           <IonIcon icon={documentTextOutline} />
           Audit
         </IonTabButton>
 
-        <IonTabButton tab="profile" href="/profile">
+        <IonTabButton tab="profile" href={`${appBase}/profile`}>
           <IonIcon icon={personCircleOutline} />
           Profile
         </IonTabButton>
 
-        <IonTabButton onClick={handleLogout}>
+        <IonTabButton tab="logout" href={`${appBase}/login`} onClick={handleLogout}>
           <IonIcon icon={logOutOutline} />
           Logout
         </IonTabButton>
-      </IonTabBar>
+      </IonTabBar>}
     </IonTabs>
     </>
   );

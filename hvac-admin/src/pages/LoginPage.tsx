@@ -15,6 +15,7 @@ import { apiClient } from '../api/client';
 import { authApi } from '../api/auth';
 
 export function LoginPage() {
+  const appBase = '/app';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [baseUrl, setBaseUrl] = useState(
@@ -24,10 +25,32 @@ export function LoginPage() {
   const history = useHistory();
 
   useEffect(() => {
+    let canceled = false;
+
     const stored = localStorage.getItem('admin_api_token');
-    if (stored) {
-      history.push('/dashboard');
+    if (!stored) {
+      return () => {
+        canceled = true;
+      };
     }
+
+    const verifyToken = async () => {
+      try {
+        await authApi.me();
+        if (!canceled) {
+          history.replace(`${appBase}/dashboard`);
+        }
+      } catch {
+        // Stale token: keep user on login page and let them sign in again.
+        apiClient.clearAuthToken();
+      }
+    };
+
+    verifyToken();
+
+    return () => {
+      canceled = true;
+    };
   }, [history]);
 
   const handleLogin = async () => {
@@ -37,7 +60,7 @@ export function LoginPage() {
       apiClient.setAuthToken(data.access_token);
       setMessage('Login successful');
       setTimeout(() => {
-        history.push('/dashboard');
+        history.push(`${appBase}/dashboard`);
       }, 300);
     } catch (e) {
       setMessage(String(e));
