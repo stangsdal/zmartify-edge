@@ -3,6 +3,7 @@ import { IonContent, IonPage } from '@ionic/react';
 import { useParams } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { ThermostatDial } from '../components/ThermostatDial';
+import { apiClient } from '../api/client';
 import { mobileApi, MobileZone } from '../api/mobile';
 
 interface RouteParams {
@@ -18,6 +19,26 @@ export function RoomDetailPage() {
   const [saveError, setSaveError] = useState('');
   const [dirty, setDirty] = useState(false);
   const lastAppliedRef = useRef<number | null>(null);
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
+
+  const applyIncomingZoneState = (nextZone: MobileZone) => {
+    setZone(nextZone);
+    const nextTarget = nextZone.target_temperature_c ?? 21;
+    if (!dirtyRef.current && !savingRef.current) {
+      setTarget(nextTarget);
+      lastAppliedRef.current = nextTarget;
+    }
+    setSaveError('');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -32,13 +53,7 @@ export function RoomDetailPage() {
             const zref = z.zone_uuid || `${device.device_id}:${z.zone_id}`;
             if (zref === resolvedRef) {
               if (cancelled) return;
-              setZone(z);
-              const nextTarget = z.target_temperature_c ?? 21;
-              if (!dirty && !saving) {
-                setTarget(nextTarget);
-                lastAppliedRef.current = nextTarget;
-              }
-              setSaveError('');
+              applyIncomingZoneState(z);
               return;
             }
           }
@@ -49,13 +64,61 @@ export function RoomDetailPage() {
     load().catch(console.error);
     const intervalId = window.setInterval(() => {
       load().catch(console.error);
-    }, 5000);
+    }, 60000);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [dirty, resolvedRef, saving]);
+  }, [resolvedRef]);
+
+  useEffect(() => {
+    const token = apiClient.getAuthToken();
+    if (!token) return;
+
+    const rawBase = localStorage.getItem('api_base_url') || window.location.origin;
+    const wsBase = rawBase.startsWith('https://')
+      ? rawBase.replace('https://', 'wss://')
+      : rawBase.replace('http://', 'ws://');
+
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let stopped = false;
+
+    const connect = () => {
+      const endpoint = `${wsBase}/mobile/ws/zones/${encodeURIComponent(resolvedRef)}?token=${encodeURIComponent(token)}`;
+      socket = new WebSocket(endpoint);
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type !== 'zone_update' || !payload.zone) return;
+          applyIncomingZoneState(payload.zone as MobileZone);
+        } catch {
+          // Ignore malformed websocket messages.
+        }
+      };
+
+      socket.onclose = () => {
+        if (stopped) return;
+        reconnectTimer = window.setTimeout(connect, 2000);
+      };
+
+      socket.onerror = () => {
+        socket?.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      stopped = true;
+      if (reconnectTimer != null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      socket?.close();
+    };
+  }, [resolvedRef]);
 
   const statusText = useMemo(() => {
     if (!zone) return 'Loading room status...';

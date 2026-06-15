@@ -506,6 +506,12 @@ def upsert_channel_state(
     now = _now_iso()
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT active, fault FROM channel_state WHERE device_id = ? AND channel_id = ?",
+            (device["id"], channel_id),
+        ).fetchone()
+        persisted_active = row["active"] if active is None and row is not None else (None if active is None else int(bool(active)))
+        persisted_fault = row["fault"] if fault is None and row is not None else fault
         conn.execute(
             """
             INSERT INTO channel_state(device_id, channel_id, active, fault, source_timestamp, updated_at)
@@ -519,8 +525,8 @@ def upsert_channel_state(
             (
                 device["id"],
                 channel_id,
-                None if active is None else int(bool(active)),
-                fault,
+                persisted_active,
+                persisted_fault,
                 source_timestamp or now,
                 now,
             ),
@@ -1029,9 +1035,15 @@ def upsert_zone_state(
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, target_temperature, demand FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, target_temperature, demand, active, fault FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
+
+        persisted_current_temperature = row["current_temperature"] if current_temperature is None and row is not None else current_temperature
+        persisted_target_temperature = row["target_temperature"] if target_temperature is None and row is not None else target_temperature
+        persisted_demand = row["demand"] if demand is None and row is not None else (None if demand is None else int(bool(demand)))
+        persisted_active = row["active"] if active is None and row is not None else (None if active is None else int(bool(active)))
+        persisted_fault = row["fault"] if fault is None and row is not None else fault
 
         conn.execute(
             """
@@ -1050,11 +1062,11 @@ def upsert_zone_state(
             (
                 device["id"],
                 zone_id,
-                current_temperature,
-                target_temperature,
-                None if demand is None else int(bool(demand)),
-                None if active is None else int(bool(active)),
-                fault,
+                persisted_current_temperature,
+                persisted_target_temperature,
+                persisted_demand,
+                persisted_active,
+                persisted_fault,
                 source_timestamp or now,
                 now,
                 source,

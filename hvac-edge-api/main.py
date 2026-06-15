@@ -1,7 +1,8 @@
+import asyncio
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -148,6 +149,53 @@ _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/us
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
 
 
+class ZoneStreamHub:
+    def __init__(self) -> None:
+        self._subscriptions: dict[str, set[WebSocket]] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    async def subscribe(self, zone_ref: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._subscriptions.setdefault(zone_ref, set()).add(websocket)
+
+    async def unsubscribe(self, zone_ref: str, websocket: WebSocket) -> None:
+        listeners = self._subscriptions.get(zone_ref)
+        if not listeners:
+            return
+        listeners.discard(websocket)
+        if not listeners:
+            self._subscriptions.pop(zone_ref, None)
+
+    async def publish(self, zone_ref: str, zone_payload: dict) -> None:
+        listeners = list(self._subscriptions.get(zone_ref, set()))
+        if not listeners:
+            return
+        message = {"type": "zone_update", "zone_ref": zone_ref, "zone": zone_payload}
+        stale: list[WebSocket] = []
+        for websocket in listeners:
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                stale.append(websocket)
+        if stale:
+            active = self._subscriptions.get(zone_ref, set())
+            for websocket in stale:
+                active.discard(websocket)
+            if not active:
+                self._subscriptions.pop(zone_ref, None)
+
+    def publish_from_sync(self, zone_ref: str, zone_payload: dict) -> None:
+        if self._loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(self.publish(zone_ref, zone_payload), self._loop)
+
+
+zone_stream_hub = ZoneStreamHub()
+
+
 def _extract_device_ingest_device_id(path: str) -> str | None:
     parts = path.strip("/").split("/")
     if len(parts) == 4 and parts[0] == "devices" and parts[2] == "ingest" and parts[3] == "twin":
@@ -253,6 +301,23 @@ def _mobile_site_scope_ids(request: Request) -> set[int] | None:
     return set(list_user_site_access(auth_user.user_id))
 
 
+def _mobile_site_scope_ids_for_user(auth_user) -> set[int] | None:
+    if auth_user is None or auth_user.user_id is None:
+        return None
+    if ROLE_ADMIN in auth_user.roles:
+        return None
+    return set(list_user_site_access(auth_user.user_id))
+
+
+def _publish_zone_state_update(device_id: str, zone: dict) -> None:
+    zone_ref = zone.get("zone_uuid")
+    if zone_ref:
+        zone_stream_hub.publish_from_sync(str(zone_ref), zone)
+    zone_id = zone.get("zone_id")
+    if zone_id is not None:
+        zone_stream_hub.publish_from_sync(f"{device_id}:{int(zone_id)}", zone)
+
+
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
     scoped_site_ids = _mobile_site_scope_ids(request)
     if scoped_site_ids is None:
@@ -296,9 +361,10 @@ async def admin_token_middleware(request: Request, call_next):
 
 
 @app.on_event("startup")
-def startup_event() -> None:
+async def startup_event() -> None:
     initialize_database()
     ensure_bootstrap_owner()
+    zone_stream_hub.set_loop(asyncio.get_running_loop())
 
 
 def _require_roles(request: Request, allowed_roles: set[str]) -> None:
@@ -837,7 +903,7 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
     if device_token_device_id != device_id:
         _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
-        return ingest_device_twin_snapshot(
+        result = ingest_device_twin_snapshot(
             device_id,
             source=payload.source,
             source_timestamp=payload.source_timestamp,
@@ -847,10 +913,64 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
             zones=[item.model_dump(exclude_none=True) for item in payload.zones],
             channels=[item.model_dump(exclude_none=True) for item in payload.channels],
         )
+        if result.get("applied"):
+            for zone in list_device_zones(device_id):
+                _publish_zone_state_update(device_id, zone)
+        return result
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.websocket("/mobile/ws/zones/{zone_ref}")
+async def mobile_zone_stream(websocket: WebSocket, zone_ref: str) -> None:
+    token = (websocket.query_params.get("token") or "").strip()
+    if not token:
+        await websocket.close(code=4401, reason="missing bearer token")
+        return
+
+    try:
+        auth_user = authenticate_bearer_token(token)
+    except AuthError:
+        auth_user = authenticate_emergency_token(token)
+        if auth_user is None:
+            await websocket.close(code=4403, reason="invalid bearer token")
+            return
+
+    try:
+        require_any_role(auth_user, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    except AuthError:
+        await websocket.close(code=4403, reason="insufficient role permissions")
+        return
+
+    try:
+        device_id, zone_id = resolve_zone_ref(zone_ref)
+        site_pk_id = _resolve_device_site_pk_id(device_id)
+        if site_pk_id is None:
+            await websocket.close(code=4404, reason="device not found")
+            return
+        scoped_site_ids = _mobile_site_scope_ids_for_user(auth_user)
+        if scoped_site_ids is not None and site_pk_id not in scoped_site_ids:
+            await websocket.close(code=4404, reason="site not found")
+            return
+        zone = get_device_zone(device_id, zone_id)
+    except (RegistryNotFoundError, DomainModelError):
+        await websocket.close(code=4404, reason="zone not found")
+        return
+
+    await zone_stream_hub.subscribe(zone_ref, websocket)
+    await websocket.send_json({"type": "zone_update", "zone_ref": zone_ref, "zone": zone})
+
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message.strip().lower() == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await zone_stream_hub.unsubscribe(zone_ref, websocket)
 
 
 @app.get("/mobile/devices/{device_id}/freshness", response_model=DeviceFreshnessOut)
@@ -1111,6 +1231,7 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             target_temperature=float(payload.target_temperature_c),
             source="mobile_api",
         )
+        _publish_zone_state_update(device_id, zone)
         log_event(
             "zone_setpoint_changed",
             domain_id=context.get("domain_id"),
