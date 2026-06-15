@@ -1,6 +1,11 @@
 import { apiClient } from './client';
 import { AuditLogEntry, User } from '../types/api';
 
+export interface UserSiteAccess {
+  user_id: number;
+  site_ids: number[];
+}
+
 export const usersApi = {
   list: (): Promise<User[]> => apiClient.get('/users'),
 
@@ -23,6 +28,11 @@ export const usersApi = {
 
   setRoles: (id: number, roles: string[]): Promise<User> =>
     apiClient.post(`/users/${id}/roles`, { roles }),
+
+  getSiteAccess: (id: number): Promise<UserSiteAccess> => apiClient.get(`/users/${id}/site-access`),
+
+  setSiteAccess: (id: number, siteIds: number[]): Promise<UserSiteAccess> =>
+    apiClient.post(`/users/${id}/site-access`, { site_ids: siteIds }),
 
   delete: (id: number): Promise<null> => apiClient.delete(`/users/${id}`),
 

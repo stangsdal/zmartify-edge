@@ -54,6 +54,45 @@ export function UsersPage() {
     }
   };
 
+  const changeRoles = async (user: User) => {
+    const next = window.prompt('Enter roles (comma-separated)', user.roles.join(','));
+    if (next === null) {
+      return;
+    }
+    try {
+      const parsed = next
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean);
+      await usersApi.setRoles(user.id, parsed);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const changeSiteAccess = async (user: User) => {
+    try {
+      const current = await usersApi.getSiteAccess(user.id);
+      const hint = current.site_ids.length ? current.site_ids.join(',') : '';
+      const next = window.prompt('Allowed site IDs (comma-separated numeric IDs). Leave blank for unrestricted.', hint);
+      if (next === null) {
+        return;
+      }
+      const parsed = next
+        .split(',')
+        .map((raw) => raw.trim())
+        .filter(Boolean)
+        .map((raw) => Number(raw))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .map((value) => Math.trunc(value));
+      await usersApi.setSiteAccess(user.id, parsed);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   return (
     <IonPage>
       <IonHeader>
@@ -97,6 +136,12 @@ export function UsersPage() {
                 <p>Status: {u.enabled ? 'Enabled' : 'Disabled'}</p>
                 <p>Last Login: {u.last_login_at || 'Never'}</p>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <IonButton size="small" onClick={() => changeRoles(u)}>
+                    Change Roles
+                  </IonButton>
+                  <IonButton size="small" onClick={() => changeSiteAccess(u)}>
+                    Site Access
+                  </IonButton>
                   {u.enabled ? (
                     <IonButton size="small" color="warning" onClick={async () => { await usersApi.disable(u.id); await load(); }}>
                       Disable
