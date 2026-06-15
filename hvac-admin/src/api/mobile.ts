@@ -75,7 +75,7 @@ export const mobileApi = {
   listEvents: (limit = 25): Promise<{ events: MobileEvent[] }> => apiClient.get(`/mobile/events?limit=${limit}`),
 
   setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<any> =>
-    apiClient.post(`/mobile/zones/${encodeURIComponent(zoneRef)}/setpoint`, {
+    apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {
       target_temperature_c: targetTemperatureC,
     }),
 };

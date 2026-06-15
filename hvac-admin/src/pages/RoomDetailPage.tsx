@@ -15,6 +15,8 @@ export function RoomDetailPage() {
   const [zone, setZone] = useState<MobileZone | null>(null);
   const [target, setTarget] = useState(21);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -47,9 +49,15 @@ export function RoomDetailPage() {
 
   const applyTarget = async () => {
     setSaving(true);
+    setSaveError('');
+    setSaveSuccess(false);
     try {
       await mobileApi.setZoneSetpoint(resolvedRef, target);
       setZone((prev) => (prev ? { ...prev, target_temperature_c: target } : prev));
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (e) {
+      setSaveError(String(e));
     } finally {
       setSaving(false);
     }
@@ -65,6 +73,8 @@ export function RoomDetailPage() {
             <IonButton expand="block" onClick={applyTarget} disabled={saving}>
               {saving ? 'Saving...' : 'Apply Temperature'}
             </IonButton>
+            {saveSuccess && <p className="text-center text-sm font-semibold mt-2" style={{ color: '#027a48' }}>Setpoint updated</p>}
+            {saveError && <p className="text-center text-sm mt-2 text-rose-600">{saveError}</p>}
           </section>
 
           <section className="rounded-2xl app-surface shadow-soft p-4 space-y-2">
