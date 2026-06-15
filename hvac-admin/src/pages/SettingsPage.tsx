@@ -11,6 +11,7 @@ export function SettingsPage() {
   const [darkMode, setDarkMode] = useState<boolean>(() => localStorage.getItem('theme_mode') === 'dark');
   const [sites, setSites] = useState<Array<{ site_id: string; site_name: string }>>([]);
   const [activeSite, setActiveSite] = useState('');
+  const [profileLabel, setProfileLabel] = useState('Unknown');
 
   useEffect(() => {
     document.body.classList.toggle('dark-mode', darkMode);
@@ -23,6 +24,13 @@ export function SettingsPage() {
       setSites(options);
       if (options.length) setActiveSite(options[0].site_id);
     }).catch(console.error);
+
+    authApi.me().then((me) => {
+      const roleText = (me.roles || []).join(', ');
+      setProfileLabel(roleText ? `${me.display_name} (${roleText})` : me.display_name || me.username || 'Unknown');
+    }).catch(() => {
+      setProfileLabel('Unknown');
+    });
   }, []);
 
   const logout = async () => {
@@ -47,7 +55,7 @@ export function SettingsPage() {
             <IonList>
               <IonItem>
                 <IonLabel>Profile</IonLabel>
-                <span className="text-sm text-muted">Admin</span>
+                <span className="text-sm text-muted">{profileLabel}</span>
               </IonItem>
               <IonItem>
                 <IonLabel>Notifications</IonLabel>
