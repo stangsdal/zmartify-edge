@@ -35,6 +35,8 @@ export interface MobileZone {
   zone_uuid?: string;
   zone_id: number;
   name: string;
+  mode?: number | null;
+  thermostat_mode?: number | null;
   current_temperature_c?: number;
   target_temperature_c?: number;
   demand?: boolean;

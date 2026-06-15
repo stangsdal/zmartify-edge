@@ -6,6 +6,7 @@ interface ThermostatDialProps {
   roomName?: string;
   statusLabel?: string;
   heating?: boolean;
+  thermostatMode?: number | null;
   min?: number;
   max?: number;
   step?: number;
@@ -18,6 +19,7 @@ export function ThermostatDial({
   roomName,
   statusLabel,
   heating = false,
+  thermostatMode = null,
   min = 5,
   max = 35,
   step = 0.5,
@@ -29,7 +31,6 @@ export function ThermostatDial({
   const ringCircumference = 2 * Math.PI * ringRadius;
   const measuredTemp = typeof currentTemperature === 'number' ? currentTemperature : value;
   const clampedMeasuredTemp = Math.max(min, Math.min(max, measuredTemp));
-  const tempDelta = Math.abs(value - measuredTemp);
   const setpointRatio = Math.max(0, Math.min(1, (value - min) / (max - min)));
   const measuredRatio = Math.max(0, Math.min(1, (clampedMeasuredTemp - min) / (max - min)));
   const deltaRatio = Math.abs(setpointRatio - measuredRatio);
@@ -39,6 +40,18 @@ export function ThermostatDial({
   const secondaryColor = heating ? '#ffb08f' : 'rgba(255,255,255,0.65)';
   const deltaColor = value >= measuredTemp ? '#FF8A4B' : '#67FBFF';
   const markerTemps = [5, 10, 15, 20, 25, 30, 35];
+  const modeMap: Record<number, string> = {
+    0: 'MANUAL',
+    1: 'STANDBY',
+    2: 'ECO',
+    3: 'COMFORT',
+  };
+  const modeLabel =
+    typeof thermostatMode === 'number' && thermostatMode in modeMap
+      ? modeMap[thermostatMode]
+      : heating
+        ? 'COMFORT'
+        : 'MANUAL';
 
   const tempToAngle = (temp: number): number => {
     const normalized = (temp - 20) / 15;
@@ -91,16 +104,27 @@ export function ThermostatDial({
             const cos = Math.cos((angle * Math.PI) / 180);
             const sin = Math.sin((angle * Math.PI) / 180);
             return (
-              <line
-                key={markerTemp}
-                x1={160 + 114 * cos}
-                y1={160 + 114 * sin}
-                x2={160 + 126 * cos}
-                y2={160 + 126 * sin}
-                stroke={markerTemp === 20 ? primaryColor : 'rgba(255,255,255,0.55)'}
-                strokeWidth={markerTemp === 20 ? 2.5 : 2}
-                strokeLinecap="round"
-              />
+              <g key={markerTemp}>
+                <line
+                  x1={160 + 114 * cos}
+                  y1={160 + 114 * sin}
+                  x2={160 + 126 * cos}
+                  y2={160 + 126 * sin}
+                  stroke={markerTemp === 20 ? primaryColor : 'rgba(255,255,255,0.55)'}
+                  strokeWidth={markerTemp === 20 ? 2.5 : 2}
+                  strokeLinecap="round"
+                />
+                <text
+                  x={160 + 143 * cos}
+                  y={160 + 143 * sin + 4}
+                  fill={markerTemp === 20 ? primaryColor : 'rgba(255,255,255,0.72)'}
+                  fontSize="11"
+                  fontWeight={markerTemp === 20 ? '700' : '500'}
+                  textAnchor="middle"
+                >
+                  {markerTemp}
+                </text>
+              </g>
             );
           })}
         </svg>
@@ -115,7 +139,7 @@ export function ThermostatDial({
             {value.toFixed(1)}°C
           </p>
           <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em]" style={{ color: deltaColor }}>
-            Delta {tempDelta.toFixed(1)}°C
+            Mode {modeLabel}
           </p>
         </div>
       </div>

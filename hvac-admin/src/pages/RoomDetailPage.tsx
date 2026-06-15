@@ -192,6 +192,7 @@ export function RoomDetailPage() {
               roomName={zone?.name}
               statusLabel={statusText}
               heating={!!zone?.demand}
+              thermostatMode={zone?.thermostat_mode ?? zone?.mode ?? null}
               onChange={handleTargetChange}
             />
             <p className="mt-3 text-center text-xs uppercase tracking-[0.22em] text-muted">
