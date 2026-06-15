@@ -461,30 +461,57 @@ def api_claim_device(payload: DeviceClaimIn, request: Request) -> dict:
         device_id = identity["device_id"]
         display_name = payload.display_name or identity["device_id"]
 
-        device = create_device(
-            device_id=device_id,
-            display_name=display_name,
-            mac=identity.get("mac"),
-            firmware_version=identity.get("firmware_version"),
-        )
+        try:
+            device = create_device(
+                device_id=device_id,
+                display_name=display_name,
+                mac=identity.get("mac"),
+                firmware_version=identity.get("firmware_version"),
+            )
+            is_reclaim = False
+        except RegistryConflictError:
+            # Existing device re-claim: only owner/admin can rotate creds and overwrite remote config.
+            _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+            is_reclaim = True
+            device = get_device(device_id)
+
         device = assign_device_site(device_id, payload.site_id)
         device = update_device_local_url(device_id, normalize_device_base_url(payload.base_url))
         ensure_device_admin_token(device_id)
 
+        if is_reclaim:
+            credentials = get_device_mqtt_credentials(device_id)
+            rotate_mqtt_client_password(int(credentials["mqtt_client_id"]))
+
+        if not is_reclaim and not payload.claim_token:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="claim_token is required when claiming an unregistered device")
+
         push_payload = _build_device_push_payload(request, device_id, payload.claim_token)
-        push_remote_onboarding_config(payload.base_url, push_payload)
+        try:
+            push_remote_onboarding_config(payload.base_url, push_payload)
+        except DeviceOnboardingError as exc:
+            if not is_reclaim or "timed out" not in str(exc).lower():
+                raise
+            # Some devices apply config successfully but respond slowly after MQTT restart.
+            recovery_status = get_remote_onboarding_status(payload.base_url)
+            if recovery_status.get("state") not in {"claimed", "mqtt_configured", "online"}:
+                raise
+
         onboarding_status = get_remote_onboarding_status(payload.base_url)
 
         audit_action(
             actor_user_id=request.state.auth_user.user_id,
-            action="claim_device",
+            action="reclaim_device" if is_reclaim else "claim_device",
             resource_type="device",
             resource_id=device_id,
-            metadata={"site_id": payload.site_id, "domain_id": payload.domain_id, "base_url": device.get("local_url")},
+            metadata={
+                "site_id": payload.site_id,
+                "domain_id": payload.domain_id,
+                "base_url": device.get("local_url"),
+                "reclaim": is_reclaim,
+            },
         )
         return {"device": device, "onboarding_status": onboarding_status}
-    except RegistryConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except RegistryOperationError as exc:

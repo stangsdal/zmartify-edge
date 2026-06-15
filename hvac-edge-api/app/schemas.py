@@ -113,7 +113,7 @@ class DeviceClaimIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     base_url: str = Field(min_length=1)
-    claim_token: str = Field(min_length=1)
+    claim_token: str | None = None
     domain_id: int
     site_id: int
     display_name: str | None = None

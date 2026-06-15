@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from urllib import error, request
 
 
@@ -26,13 +27,15 @@ def _request_json(method: str, url: str, payload: dict | None = None) -> dict:
 
     req = request.Request(url, data=data, headers=headers, method=method)
     try:
-        with request.urlopen(req, timeout=5) as response:
+        with request.urlopen(req, timeout=10) as response:
             body = response.read().decode("utf-8")
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise DeviceOnboardingError(f"device request failed: {exc.code} {detail}") from exc
     except error.URLError as exc:
         raise DeviceOnboardingError(f"device request failed: {exc.reason}") from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise DeviceOnboardingError("device request failed: timed out") from exc
 
     try:
         return json.loads(body)
@@ -43,8 +46,21 @@ def _request_json(method: str, url: str, payload: dict | None = None) -> dict:
 def discover_remote_device(base_url: str) -> dict:
     normalized = normalize_device_base_url(base_url)
     identity = _request_json("GET", f"{normalized}/identity")
-    claim = _request_json("GET", f"{normalized}/claim-token")
     status = _request_json("GET", f"{normalized}/onboarding/status")
+    try:
+        claim = _request_json("GET", f"{normalized}/claim-token")
+    except DeviceOnboardingError as exc:
+        # Claimed devices intentionally reject claim-token requests with 409.
+        if status.get("state") == "unclaimed":
+            raise
+        if "device request failed: 409" not in str(exc):
+            raise
+        claim = {
+            "device_id": identity.get("device_id", ""),
+            "claim_token": "",
+            "expires_in_s": 0,
+            "error": "device already claimed",
+        }
     return {
         "base_url": normalized,
         "identity": identity,

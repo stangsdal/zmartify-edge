@@ -19,7 +19,7 @@ import { useHistory } from 'react-router-dom';
 import { deviceApi } from '../api/devices';
 import { domainApi } from '../api/domains';
 import { siteApi } from '../api/sites';
-import { DeviceDiscovery, Domain, Site } from '../types/api';
+import { DeviceClaimRequest, DeviceDiscovery, Domain, Site } from '../types/api';
 
 export function AddDevicePage() {
   const history = useHistory();
@@ -82,20 +82,23 @@ export function AddDevicePage() {
   };
 
   const handleClaim = async () => {
-    if (!discovery || !selectedDomainId || !selectedSiteId || !claimToken.trim()) {
-      setError('Discovery, claim token, domain, and site are required');
+    if (!discovery || !selectedDomainId || !selectedSiteId) {
+      setError('Discovery, domain, and site are required');
       return;
     }
 
     try {
       setLoading(true);
-      const result = await deviceApi.claim({
+      const payload: DeviceClaimRequest = {
         base_url: baseUrl,
-        claim_token: claimToken,
         domain_id: selectedDomainId,
         site_id: selectedSiteId,
         display_name: displayName,
-      });
+      };
+      if (claimToken.trim()) {
+        payload.claim_token = claimToken.trim();
+      }
+      const result = await deviceApi.claim(payload);
       setClaimResult(result);
       setError('');
     } catch (e) {

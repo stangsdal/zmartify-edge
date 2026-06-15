@@ -49,7 +49,7 @@ export interface DeviceDiscovery {
 
 export interface DeviceClaimRequest {
   base_url: string;
-  claim_token: string;
+  claim_token?: string;
   domain_id: number;
   site_id: number;
   display_name?: string;

@@ -109,3 +109,174 @@ def test_discover_and_claim_device(monkeypatch, tmp_path: Path):
     )
     assert push.status_code == 200
     assert push.json()["state"] == "online"
+
+
+def test_reclaim_existing_device_rotates_credentials(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    import main
+
+    push_calls: list[dict] = []
+    rotate_calls: list[int] = []
+
+    def fake_discover(_base_url: str) -> dict:
+        return {
+            "base_url": "http://192.168.10.60",
+            "identity": {
+                "device_id": "hvac-gateway-aabbccddeeff",
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "firmware_version": "1.2.3",
+                "hardware": "waveshare-esp32-s3-rs485-can",
+                "capabilities": ["ahc9000", "mqtt", "homie-v5", "ota", "rs485"],
+            },
+            "claim": {"device_id": "hvac-gateway-aabbccddeeff", "claim_token": "123456", "expires_in_s": 600},
+            "status": {"state": "unclaimed", "device_id": "hvac-gateway-aabbccddeeff", "edge_url": None, "mqtt_configured": False, "mqtt_connected": False, "last_error": None},
+        }
+
+    def fake_push(_base_url: str, payload: dict) -> dict:
+        push_calls.append(payload)
+        assert payload["device_admin_token"]
+        return {"ok": True, "state": "mqtt_configured"}
+
+    def fake_status(_base_url: str) -> dict:
+        return {
+            "state": "online",
+            "device_id": "hvac-gateway-aabbccddeeff",
+            "edge_url": "http://testserver",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        }
+
+    def fake_rotate(client_id: int) -> dict:
+        rotate_calls.append(client_id)
+        return {
+            "mqtt_client_id": client_id,
+            "username": "device_hvac-gateway-aabbccddeeff",
+            "password": "rotated-password",
+            "password_one_time": True,
+        }
+
+    monkeypatch.setattr(main, "discover_remote_device", fake_discover)
+    monkeypatch.setattr(main, "push_remote_onboarding_config", fake_push)
+    monkeypatch.setattr(main, "get_remote_onboarding_status", fake_status)
+    monkeypatch.setattr(main, "rotate_mqtt_client_password", fake_rotate)
+
+    domain = client.post("/domains", headers=headers, json={"slug": "house", "name": "House"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=headers, json={"slug": "main", "name": "Main"})
+    assert site.status_code == 201
+    site_id = site.json()["id"]
+
+    first_claim = client.post(
+        "/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "192.168.10.60",
+            "claim_token": "123456",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Boiler Room Gateway",
+        },
+    )
+    assert first_claim.status_code == 201
+
+    second_claim = client.post(
+        "/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "192.168.10.60",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Boiler Room Gateway",
+        },
+    )
+    assert second_claim.status_code == 201
+    assert second_claim.json()["onboarding_status"]["state"] == "online"
+
+    assert len(push_calls) == 2
+    assert "claim_token" in push_calls[0]
+    assert "claim_token" not in push_calls[1]
+    assert len(rotate_calls) == 1
+
+
+def test_reclaim_timeout_uses_status_recovery(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    import main
+    from app.device_onboarding import DeviceOnboardingError
+
+    push_calls = 0
+
+    def fake_discover(_base_url: str) -> dict:
+        return {
+            "base_url": "http://192.168.10.60",
+            "identity": {
+                "device_id": "hvac-gateway-aabbccddeeff",
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "firmware_version": "1.2.3",
+                "hardware": "waveshare-esp32-s3-rs485-can",
+                "capabilities": ["ahc9000", "mqtt", "homie-v5", "ota", "rs485"],
+            },
+            "claim": {"device_id": "hvac-gateway-aabbccddeeff", "claim_token": "123456", "expires_in_s": 600},
+            "status": {"state": "unclaimed", "device_id": "hvac-gateway-aabbccddeeff", "edge_url": None, "mqtt_configured": False, "mqtt_connected": False, "last_error": None},
+        }
+
+    def fake_push(_base_url: str, _payload: dict) -> dict:
+        nonlocal push_calls
+        push_calls += 1
+        if push_calls == 2:
+            raise DeviceOnboardingError("device request failed: timed out")
+        return {"ok": True, "state": "mqtt_configured"}
+
+    def fake_status(_base_url: str) -> dict:
+        return {
+            "state": "online",
+            "device_id": "hvac-gateway-aabbccddeeff",
+            "edge_url": "http://testserver",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        }
+
+    monkeypatch.setattr(main, "discover_remote_device", fake_discover)
+    monkeypatch.setattr(main, "push_remote_onboarding_config", fake_push)
+    monkeypatch.setattr(main, "get_remote_onboarding_status", fake_status)
+
+    domain = client.post("/domains", headers=headers, json={"slug": "house", "name": "House"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=headers, json={"slug": "main", "name": "Main"})
+    assert site.status_code == 201
+    site_id = site.json()["id"]
+
+    first_claim = client.post(
+        "/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "192.168.10.60",
+            "claim_token": "123456",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Boiler Room Gateway",
+        },
+    )
+    assert first_claim.status_code == 201
+
+    second_claim = client.post(
+        "/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "192.168.10.60",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Boiler Room Gateway",
+        },
+    )
+    assert second_claim.status_code == 201
+    assert second_claim.json()["onboarding_status"]["state"] == "online"
