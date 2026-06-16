@@ -8,6 +8,8 @@ interface HistoryChartProps {
   mode?: 'line' | 'step';
   binary?: boolean;
   chartType?: 'line' | 'area';
+  startMs?: number;
+  endMs?: number;
 }
 
 export function HistoryChart({
@@ -17,11 +19,36 @@ export function HistoryChart({
   mode = 'line',
   binary = false,
   chartType = 'line',
+  startMs,
+  endMs,
 }: HistoryChartProps) {
-  const data = points.map((p) => ({
-    time: new Date(p.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    value: p.value,
-  }));
+  const baseData = points
+    .map((p) => ({
+      ts: new Date(p.bucket_start).getTime(),
+      value: p.value,
+    }))
+    .filter((p) => Number.isFinite(p.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  const data = (() => {
+    if (baseData.length === 0) {
+      return baseData;
+    }
+
+    // For step charts, carry first/last known state to the full selected window.
+    if (mode !== 'step' || startMs == null || endMs == null) {
+      return baseData;
+    }
+
+    const next = [...baseData];
+    if (next[0].ts > startMs) {
+      next.unshift({ ts: startMs, value: next[0].value });
+    }
+    if (next[next.length - 1].ts < endMs) {
+      next.push({ ts: endMs, value: next[next.length - 1].value });
+    }
+    return next;
+  })();
 
   return (
     <div className="rounded-2xl p-4 app-surface shadow-soft border border-slate-100">
@@ -34,7 +61,15 @@ export function HistoryChart({
             {chartType === 'area' ? (
               <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />
-                <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                <XAxis
+                  type="number"
+                  dataKey="ts"
+                  domain={startMs != null && endMs != null ? [startMs, endMs] : ['dataMin', 'dataMax']}
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => new Date(Number(value)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                />
                 <YAxis
                   tick={{ fontSize: 11 }}
                   tickLine={false}
@@ -64,7 +99,15 @@ export function HistoryChart({
             ) : (
               <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />
-                <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                <XAxis
+                  type="number"
+                  dataKey="ts"
+                  domain={startMs != null && endMs != null ? [startMs, endMs] : ['dataMin', 'dataMax']}
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => new Date(Number(value)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                />
                 <YAxis
                   tick={{ fontSize: 11 }}
                   tickLine={false}

@@ -116,6 +116,17 @@ export function HistoryPage() {
   }, [deviceId, window, zoneRef]);
 
   const selectedZone = zones.find((zone) => (zone.zone_uuid || `${zone.device_id}:${zone.zone_id}`) === zoneRef) || null;
+  const timelineBounds = useMemo(() => {
+    const endMs = Date.now();
+    const windowMsMap: Record<HistoryWindow, number> = {
+      '1h': 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
+    };
+    const startMs = endMs - windowMsMap[window];
+    return { startMs, endMs };
+  }, [window]);
 
   return (
     <IonPage>
@@ -160,19 +171,35 @@ export function HistoryPage() {
             </IonSelect>
           </IonItem>
 
-          <HistoryChart title="Device Online" points={deviceHistory?.online || []} color="#301E96" />
-          <HistoryChart title="Device MQTT Connectivity" points={deviceHistory?.mqtt_connected || []} color="#67FBFF" />
+          <HistoryChart
+            title="Device Online"
+            points={deviceHistory?.online || []}
+            color="#301E96"
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
+          />
+          <HistoryChart
+            title="Device MQTT Connectivity"
+            points={deviceHistory?.mqtt_connected || []}
+            color="#67FBFF"
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
+          />
           <HistoryChart
             title={`Room Temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`}
             points={zoneHistory?.temperature_current || []}
             color="#7D85FF"
             mode="line"
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
           />
           <HistoryChart
             title={`Setpoint${selectedZone ? ` - ${selectedZone.label}` : ''}`}
             points={zoneHistory?.setpoint || []}
             color="#301E96"
             mode="step"
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
           />
           <HistoryChart
             title={`Heating Demand${selectedZone ? ` - ${selectedZone.label}` : ''}`}
@@ -181,6 +208,8 @@ export function HistoryPage() {
             chartType="area"
             mode="step"
             binary
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
           />
         </div>
       </IonContent>
