@@ -225,6 +225,7 @@ export function HistoryPage() {
             points={zoneHistory?.temperature_current || []}
             color="#7D85FF"
             mode="line"
+            smooth
             startMs={timelineBounds.startMs}
             endMs={timelineBounds.endMs}
           />

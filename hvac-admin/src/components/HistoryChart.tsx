@@ -6,6 +6,7 @@ interface HistoryChartProps {
   points: HistoryPoint[];
   color?: string;
   mode?: 'line' | 'step';
+  smooth?: boolean;
   binary?: boolean;
   chartType?: 'line' | 'area';
   startMs?: number;
@@ -17,6 +18,7 @@ export function HistoryChart({
   points,
   color = '#301E96',
   mode = 'line',
+  smooth = false,
   binary = false,
   chartType = 'line',
   startMs,
@@ -139,11 +141,12 @@ export function HistoryChart({
                   }}
                 />
                 <Line
-                  type={mode === 'step' ? 'stepAfter' : 'monotone'}
+                  type={mode === 'step' ? 'stepAfter' : smooth ? 'natural' : 'monotone'}
                   dataKey="value"
                   stroke={color}
                   dot={false}
                   strokeWidth={3}
+                  connectNulls
                 />
               </LineChart>
             )}
