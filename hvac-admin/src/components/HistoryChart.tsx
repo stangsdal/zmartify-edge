@@ -1,4 +1,4 @@
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area } from 'recharts';
 import { HistoryPoint } from '../types/api';
 
 interface HistoryChartProps {
@@ -7,7 +7,7 @@ interface HistoryChartProps {
   color?: string;
   mode?: 'line' | 'step';
   binary?: boolean;
-  chartType?: 'line' | 'bar';
+  chartType?: 'line' | 'area';
 }
 
 export function HistoryChart({
@@ -31,8 +31,8 @@ export function HistoryChart({
       ) : (
         <div className="h-52">
           <ResponsiveContainer width="100%" height="100%">
-            {chartType === 'bar' ? (
-              <BarChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
+            {chartType === 'area' ? (
+              <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />
                 <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                 <YAxis
@@ -51,8 +51,16 @@ export function HistoryChart({
                   }
                   return numeric >= 0.5 ? 'On' : 'Off';
                 }} />
-                <Bar dataKey="value" fill={color} radius={[3, 3, 0, 0]} />
-              </BarChart>
+                <Area
+                  type={mode === 'step' ? 'stepAfter' : 'monotone'}
+                  dataKey="value"
+                  stroke={color}
+                  fill={color}
+                  fillOpacity={0.28}
+                  dot={false}
+                  strokeWidth={2}
+                />
+              </AreaChart>
             ) : (
               <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />

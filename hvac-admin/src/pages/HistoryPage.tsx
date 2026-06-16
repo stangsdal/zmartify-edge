@@ -162,13 +162,24 @@ export function HistoryPage() {
 
           <HistoryChart title="Device Online" points={deviceHistory?.online || []} color="#301E96" />
           <HistoryChart title="Device MQTT Connectivity" points={deviceHistory?.mqtt_connected || []} color="#67FBFF" />
-          <HistoryChart title={`Room Temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`} points={zoneHistory?.temperature_current || []} color="#7D85FF" />
-          <HistoryChart title={`Setpoint${selectedZone ? ` - ${selectedZone.label}` : ''}`} points={zoneHistory?.setpoint || []} color="#301E96" />
+          <HistoryChart
+            title={`Room Temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`}
+            points={zoneHistory?.temperature_current || []}
+            color="#7D85FF"
+            mode="line"
+          />
+          <HistoryChart
+            title={`Setpoint${selectedZone ? ` - ${selectedZone.label}` : ''}`}
+            points={zoneHistory?.setpoint || []}
+            color="#301E96"
+            mode="step"
+          />
           <HistoryChart
             title={`Heating Demand${selectedZone ? ` - ${selectedZone.label}` : ''}`}
             points={zoneHistory?.demand || []}
             color="#67FBFF"
-            chartType="bar"
+            chartType="area"
+            mode="step"
             binary
           />
         </div>

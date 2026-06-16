@@ -801,6 +801,30 @@ def _aggregate_numeric_points(
     return result
 
 
+def _series_numeric_points(rows: list[Any], *, value_key: str, now: datetime, binary: bool = False) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        created_at = row["created_at"]
+        created = _parse_iso_datetime(created_at)
+        if created is None:
+            continue
+
+        value = row[value_key]
+        if value is None:
+            continue
+
+        point_value = float(value)
+        if binary:
+            point_value = 1.0 if point_value >= 0.5 else 0.0
+
+        result.append({
+            "bucket_start": created.isoformat(),
+            "value": round(point_value, 3),
+            "age_ms": _age_ms(created.isoformat(), now),
+        })
+    return result
+
+
 def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
     span, bucket_seconds = _history_window(window)
     now = datetime.now(UTC)
@@ -840,14 +864,7 @@ def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
     temperature_current = _aggregate_numeric_points(temp_rows, value_key="current_temperature", bucket_seconds=bucket_seconds, now=now)
     temperature_target = _aggregate_numeric_points(temp_rows, value_key="target_temperature", bucket_seconds=bucket_seconds, now=now)
     setpoint_points = _aggregate_numeric_points(setpoint_rows, value_key="target_temperature", bucket_seconds=bucket_seconds, now=now)
-    demand_points = _aggregate_numeric_points(
-        demand_rows,
-        value_key="demand",
-        bucket_seconds=bucket_seconds,
-        now=now,
-        strategy="last",
-        binary=True,
-    )
+    demand_points = _series_numeric_points(demand_rows, value_key="demand", now=now, binary=True)
 
     return {
         "device_id": device_external_id,
