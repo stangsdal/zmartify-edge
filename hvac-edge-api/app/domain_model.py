@@ -825,9 +825,10 @@ def _series_numeric_points(rows: list[Any], *, value_key: str, now: datetime, bi
     return result
 
 
-def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
+def get_zone_history(zone_ref: str, *, window: str = "24h", offset_ms: int = 0) -> dict[str, Any]:
     span, bucket_seconds = _history_window(window)
-    now = datetime.now(UTC)
+    base_now = datetime.now(UTC)
+    now = (base_now - timedelta(milliseconds=max(0, offset_ms))).replace(microsecond=0)
     cutoff = (now - span).replace(microsecond=0).isoformat()
     device_external_id, zone_id = resolve_zone_ref(zone_ref)
 
@@ -871,6 +872,9 @@ def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
         "zone_id": zone_id,
         "zone_ref": zone_ref,
         "window": window,
+        "offset_ms": max(0, offset_ms),
+        "window_start": cutoff,
+        "window_end": now.isoformat(),
         "bucket_seconds": bucket_seconds,
         "temperature_current": temperature_current,
         "temperature_target": temperature_target,
@@ -879,9 +883,10 @@ def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
     }
 
 
-def get_device_history(device_external_id: str, *, window: str = "24h") -> dict[str, Any]:
+def get_device_history(device_external_id: str, *, window: str = "24h", offset_ms: int = 0) -> dict[str, Any]:
     span, bucket_seconds = _history_window(window)
-    now = datetime.now(UTC)
+    base_now = datetime.now(UTC)
+    now = (base_now - timedelta(milliseconds=max(0, offset_ms))).replace(microsecond=0)
     cutoff_dt = (now - span).replace(microsecond=0)
     cutoff = cutoff_dt.isoformat()
 
@@ -935,6 +940,9 @@ def get_device_history(device_external_id: str, *, window: str = "24h") -> dict[
     return {
         "device_id": device_external_id,
         "window": window,
+        "offset_ms": max(0, offset_ms),
+        "window_start": cutoff,
+        "window_end": now.isoformat(),
         "bucket_seconds": bucket_seconds,
         "online": online_points,
         "mqtt_connected": mqtt_points,

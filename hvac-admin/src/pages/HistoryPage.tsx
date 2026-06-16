@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IonContent, IonItem, IonLabel, IonPage, IonSelect, IonSelectOption } from '@ionic/react';
+import { IonContent, IonItem, IonLabel, IonPage, IonSelect, IonSelectOption, IonButton } from '@ionic/react';
 import { useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
@@ -17,6 +17,7 @@ export function HistoryPage() {
   const [zones, setZones] = useState<Array<MobileZone & { device_id: string; label: string }>>([]);
   const [zoneRef, setZoneRef] = useState('');
   const [window, setWindow] = useState<HistoryWindow>('24h');
+  const [offsetMs, setOffsetMs] = useState(0);
   const [deviceHistory, setDeviceHistory] = useState<DeviceHistory | null>(null);
   const [zoneHistory, setZoneHistory] = useState<ZoneHistory | null>(null);
   const initialZoneRef = useMemo(() => new URLSearchParams(location.search).get('zoneRef') || '', [location.search]);
@@ -104,29 +105,48 @@ export function HistoryPage() {
   useEffect(() => {
     if (!deviceId) return;
     const loadHistory = async () => {
-      const devHist = await historyApi.getDeviceHistory(deviceId, window);
+      const devHist = await historyApi.getDeviceHistory(deviceId, window, offsetMs);
       setDeviceHistory(devHist);
       if (!zoneRef) {
         setZoneHistory(null);
         return;
       }
-      setZoneHistory(await historyApi.getZoneHistory(zoneRef, window));
+      setZoneHistory(await historyApi.getZoneHistory(zoneRef, window, offsetMs));
     };
     loadHistory().catch(console.error);
-  }, [deviceId, window, zoneRef]);
+  }, [deviceId, window, zoneRef, offsetMs]);
 
   const selectedZone = zones.find((zone) => (zone.zone_uuid || `${zone.device_id}:${zone.zone_id}`) === zoneRef) || null;
+
+  const windowMsMap: Record<HistoryWindow, number> = {
+    '1h': 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+  };
+
   const timelineBounds = useMemo(() => {
-    const endMs = Date.now();
-    const windowMsMap: Record<HistoryWindow, number> = {
-      '1h': 60 * 60 * 1000,
-      '24h': 24 * 60 * 60 * 1000,
-      '7d': 7 * 24 * 60 * 60 * 1000,
-      '30d': 30 * 24 * 60 * 60 * 1000,
-    };
-    const startMs = endMs - windowMsMap[window];
+    const windowMs = windowMsMap[window];
+    const endMs = Date.now() - offsetMs;
+    const startMs = endMs - windowMs;
     return { startMs, endMs };
-  }, [window]);
+  }, [window, offsetMs]);
+
+  const rangeLabel = useMemo(() => {
+    const fmt = (ms: number) => {
+      const d = new Date(ms);
+      const sameDay = new Date(timelineBounds.startMs).toDateString() === new Date(timelineBounds.endMs).toDateString();
+      if (sameDay) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+        d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+    return `${fmt(timelineBounds.startMs)} – ${fmt(timelineBounds.endMs)}`;
+  }, [timelineBounds]);
+
+  const isAtPresent = offsetMs === 0;
+  const stepMs = windowMsMap[window];
 
   return (
     <IonPage>
@@ -163,13 +183,28 @@ export function HistoryPage() {
 
           <IonItem className="rounded-2xl overflow-hidden app-surface shadow-soft">
             <IonLabel>Window</IonLabel>
-            <IonSelect value={window} onIonChange={(e) => setWindow(e.detail.value as HistoryWindow)} interface="popover">
+            <IonSelect value={window} onIonChange={(e) => { setWindow(e.detail.value as HistoryWindow); setOffsetMs(0); }} interface="popover">
               <IonSelectOption value="1h">1 Hour</IonSelectOption>
               <IonSelectOption value="24h">24 Hours</IonSelectOption>
               <IonSelectOption value="7d">7 Days</IonSelectOption>
               <IonSelectOption value="30d">30 Days</IonSelectOption>
             </IonSelect>
           </IonItem>
+
+          <div className="flex items-center justify-between rounded-2xl app-surface shadow-soft border border-slate-100 px-4 py-2 gap-2">
+            <IonButton fill="clear" size="small" onClick={() => setOffsetMs((prev) => prev + stepMs)}>
+              ◀
+            </IonButton>
+            <span className="text-xs text-muted flex-1 text-center select-none">{rangeLabel}</span>
+            <IonButton fill="clear" size="small" onClick={() => setOffsetMs((prev) => Math.max(0, prev - stepMs))} disabled={isAtPresent}>
+              ▶
+            </IonButton>
+            {!isAtPresent && (
+              <IonButton fill="outline" size="small" onClick={() => setOffsetMs(0)}>
+                Now
+              </IonButton>
+            )}
+          </div>
 
           <HistoryChart
             title="Device Online"

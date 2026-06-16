@@ -1318,7 +1318,7 @@ def mobile_rename_zone(zone_ref: str, payload: ZoneRenameIn, request: Request) -
 
 
 @app.get("/mobile/zones/{zone_ref}/history")
-def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") -> dict:
+def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h", offset_ms: int = 0) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         device_id, _zone_id = resolve_zone_ref(zone_ref)
@@ -1326,7 +1326,7 @@ def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") ->
         if site_pk_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
         _enforce_mobile_site_scope(request, site_pk_id)
-        return get_zone_history(zone_ref, window=window)
+        return get_zone_history(zone_ref, window=window, offset_ms=offset_ms)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
@@ -1334,14 +1334,14 @@ def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h") ->
 
 
 @app.get("/mobile/devices/{device_id}/history")
-def mobile_device_history(device_id: str, request: Request, window: str = "24h") -> dict:
+def mobile_device_history(device_id: str, request: Request, window: str = "24h", offset_ms: int = 0) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         site_pk_id = _resolve_device_site_pk_id(device_id)
         if site_pk_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
         _enforce_mobile_site_scope(request, site_pk_id)
-        return get_device_history(device_id, window=window)
+        return get_device_history(device_id, window=window, offset_ms=offset_ms)
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
