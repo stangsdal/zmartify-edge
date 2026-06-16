@@ -80,6 +80,7 @@ export function HistoryChart({
                   type="number"
                   dataKey="ts"
                   domain={startMs != null && endMs != null ? [startMs, endMs] : ['dataMin', 'dataMax']}
+                  allowDataOverflow
                   tick={{ fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
@@ -122,6 +123,7 @@ export function HistoryChart({
                   type="number"
                   dataKey="ts"
                   domain={startMs != null && endMs != null ? [startMs, endMs] : ['dataMin', 'dataMax']}
+                  allowDataOverflow
                   tick={{ fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
@@ -148,7 +150,7 @@ export function HistoryChart({
                   }}
                 />
                 <Line
-                  type={mode === 'step' ? 'stepAfter' : smooth ? 'natural' : 'monotone'}
+                  type={mode === 'step' ? 'stepAfter' : smooth ? 'monotone' : 'linear'}
                   dataKey="value"
                   stroke={color}
                   dot={false}

@@ -207,24 +207,6 @@ export function HistoryPage() {
           </div>
 
           <HistoryChart
-            title="Device Online"
-            points={deviceHistory?.online || []}
-            color="#301E96"
-            mode="step"
-            binaryLabels={['Offline', 'Online']}
-            startMs={timelineBounds.startMs}
-            endMs={timelineBounds.endMs}
-          />
-          <HistoryChart
-            title="Device MQTT Connectivity"
-            points={deviceHistory?.mqtt_connected || []}
-            color="#67FBFF"
-            mode="step"
-            binaryLabels={['Disconnected', 'Connected']}
-            startMs={timelineBounds.startMs}
-            endMs={timelineBounds.endMs}
-          />
-          <HistoryChart
             title={`Room Temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`}
             points={zoneHistory?.temperature_current || []}
             color="#7D85FF"
@@ -248,6 +230,24 @@ export function HistoryPage() {
             chartType="area"
             mode="step"
             binaryLabels={['Off', 'On']}
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
+          />
+          <HistoryChart
+            title="Device Online"
+            points={deviceHistory?.online || []}
+            color="#301E96"
+            mode="step"
+            binaryLabels={['Offline', 'Online']}
+            startMs={timelineBounds.startMs}
+            endMs={timelineBounds.endMs}
+          />
+          <HistoryChart
+            title="Device MQTT Connectivity"
+            points={deviceHistory?.mqtt_connected || []}
+            color="#67FBFF"
+            mode="step"
+            binaryLabels={['Offline', 'Online']}
             startMs={timelineBounds.startMs}
             endMs={timelineBounds.endMs}
           />

@@ -829,6 +829,7 @@ def get_zone_history(zone_ref: str, *, window: str = "24h", offset_ms: int = 0) 
     span, bucket_seconds = _history_window(window)
     base_now = datetime.now(UTC)
     now = (base_now - timedelta(milliseconds=max(0, offset_ms))).replace(microsecond=0)
+    now_iso = now.isoformat()
     cutoff = (now - span).replace(microsecond=0).isoformat()
     device_external_id, zone_id = resolve_zone_ref(zone_ref)
 
@@ -838,28 +839,28 @@ def get_zone_history(zone_ref: str, *, window: str = "24h", offset_ms: int = 0) 
             """
             SELECT current_temperature, target_temperature, created_at
             FROM temperature_history
-            WHERE device_id = ? AND zone_id = ? AND created_at >= ?
+            WHERE device_id = ? AND zone_id = ? AND created_at >= ? AND created_at <= ?
             ORDER BY created_at ASC
             """,
-            (device["id"], zone_id, cutoff),
+            (device["id"], zone_id, cutoff, now_iso),
         ).fetchall()
         setpoint_rows = conn.execute(
             """
             SELECT target_temperature, created_at
             FROM setpoint_history
-            WHERE device_id = ? AND zone_id = ? AND created_at >= ?
+            WHERE device_id = ? AND zone_id = ? AND created_at >= ? AND created_at <= ?
             ORDER BY created_at ASC
             """,
-            (device["id"], zone_id, cutoff),
+            (device["id"], zone_id, cutoff, now_iso),
         ).fetchall()
         demand_rows = conn.execute(
             """
             SELECT demand, created_at
             FROM demand_history
-            WHERE device_id = ? AND zone_id = ? AND created_at >= ?
+            WHERE device_id = ? AND zone_id = ? AND created_at >= ? AND created_at <= ?
             ORDER BY created_at ASC
             """,
-            (device["id"], zone_id, cutoff),
+            (device["id"], zone_id, cutoff, now_iso),
         ).fetchall()
 
     temperature_current = _aggregate_numeric_points(temp_rows, value_key="current_temperature", bucket_seconds=bucket_seconds, now=now)
@@ -887,6 +888,7 @@ def get_device_history(device_external_id: str, *, window: str = "24h", offset_m
     span, bucket_seconds = _history_window(window)
     base_now = datetime.now(UTC)
     now = (base_now - timedelta(milliseconds=max(0, offset_ms))).replace(microsecond=0)
+    now_iso = now.isoformat()
     cutoff_dt = (now - span).replace(microsecond=0)
     cutoff = cutoff_dt.isoformat()
 
@@ -925,10 +927,10 @@ def get_device_history(device_external_id: str, *, window: str = "24h", offset_m
             """
             SELECT online, mqtt_connected, created_at
             FROM device_health_history
-            WHERE device_id = ? AND created_at >= ?
+            WHERE device_id = ? AND created_at >= ? AND created_at <= ?
             ORDER BY created_at ASC
             """,
-            (device["id"], cutoff),
+            (device["id"], cutoff, now_iso),
         ).fetchall()
 
     online_points = _aggregate_numeric_points(health_rows, value_key="online", bucket_seconds=bucket_seconds, now=now)
