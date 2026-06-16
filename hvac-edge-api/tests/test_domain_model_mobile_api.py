@@ -617,7 +617,7 @@ def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):
         health_count = conn.execute("SELECT COUNT(*) AS c FROM device_health_history WHERE device_id = ?", (device_pk,)).fetchone()["c"]
 
     assert temp_count >= 2
-    assert setpoint_count >= 1
+    assert setpoint_count >= 3
     assert demand_count >= 2
     assert health_count >= 1
 
@@ -643,12 +643,25 @@ def test_mobile_history_endpoints(monkeypatch, tmp_path: Path):
     )
     assert ingest.status_code == 200
 
+    ingest2 = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 21.0, "target_temperature_c": 21.4, "demand": False}],
+        },
+    )
+    assert ingest2.status_code == 200
+
     zone_history = client.get(f"/mobile/zones/{zone_ref}/history", headers=headers, params={"window": "24h"})
     assert zone_history.status_code == 200
     zone_body = zone_history.json()
     assert zone_body["device_id"] == device_id
     assert zone_body["window"] == "24h"
     assert isinstance(zone_body["temperature_current"], list)
+    assert all(point["value"] in (0.0, 1.0) for point in zone_body["demand"])
 
     device_history = client.get(f"/mobile/devices/{device_id}/history", headers=headers, params={"window": "24h"})
     assert device_history.status_code == 200

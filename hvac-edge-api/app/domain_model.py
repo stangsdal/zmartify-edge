@@ -764,7 +764,15 @@ def _history_window(window: str) -> tuple[timedelta, int]:
     return _HISTORY_WINDOWS[window]
 
 
-def _aggregate_numeric_points(rows: list[Any], *, value_key: str, bucket_seconds: int, now: datetime) -> list[dict[str, Any]]:
+def _aggregate_numeric_points(
+    rows: list[Any],
+    *,
+    value_key: str,
+    bucket_seconds: int,
+    now: datetime,
+    strategy: str = "avg",
+    binary: bool = False,
+) -> list[dict[str, Any]]:
     grouped: dict[int, list[float]] = {}
     for row in rows:
         created = _parse_iso_datetime(row["created_at"])
@@ -780,9 +788,16 @@ def _aggregate_numeric_points(rows: list[Any], *, value_key: str, bucket_seconds
     result: list[dict[str, Any]] = []
     for bucket in sorted(grouped.keys()):
         values = grouped[bucket]
-        avg_value = sum(values) / len(values)
+        if strategy == "last":
+            bucket_value = values[-1]
+        else:
+            bucket_value = sum(values) / len(values)
+
+        if binary:
+            bucket_value = 1.0 if bucket_value >= 0.5 else 0.0
+
         bucket_dt = datetime.fromtimestamp(bucket, tz=UTC)
-        result.append({"bucket_start": bucket_dt.isoformat(), "value": round(avg_value, 3), "age_ms": _age_ms(bucket_dt.isoformat(), now)})
+        result.append({"bucket_start": bucket_dt.isoformat(), "value": round(bucket_value, 3), "age_ms": _age_ms(bucket_dt.isoformat(), now)})
     return result
 
 
@@ -825,7 +840,14 @@ def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
     temperature_current = _aggregate_numeric_points(temp_rows, value_key="current_temperature", bucket_seconds=bucket_seconds, now=now)
     temperature_target = _aggregate_numeric_points(temp_rows, value_key="target_temperature", bucket_seconds=bucket_seconds, now=now)
     setpoint_points = _aggregate_numeric_points(setpoint_rows, value_key="target_temperature", bucket_seconds=bucket_seconds, now=now)
-    demand_points = _aggregate_numeric_points(demand_rows, value_key="demand", bucket_seconds=bucket_seconds, now=now)
+    demand_points = _aggregate_numeric_points(
+        demand_rows,
+        value_key="demand",
+        bucket_seconds=bucket_seconds,
+        now=now,
+        strategy="last",
+        binary=True,
+    )
 
     return {
         "device_id": device_external_id,
@@ -1087,13 +1109,14 @@ def upsert_zone_state(
                 (_new_uuid(), device["id"], zone_id, current_temperature, target_temperature, now),
             )
 
-        if target_temperature is not None and (row is None or row["target_temperature"] != target_temperature):
+        should_log_snapshot = current_temperature is not None or target_temperature is not None
+        if should_log_snapshot and persisted_target_temperature is not None:
             conn.execute(
                 """
                 INSERT INTO setpoint_history(uuid, device_id, zone_id, target_temperature, source, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (_new_uuid(), device["id"], zone_id, target_temperature, source, now),
+                (_new_uuid(), device["id"], zone_id, persisted_target_temperature, source, now),
             )
 
         if demand is not None:

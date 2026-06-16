@@ -1,13 +1,23 @@
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from 'recharts';
 import { HistoryPoint } from '../types/api';
 
 interface HistoryChartProps {
   title: string;
   points: HistoryPoint[];
   color?: string;
+  mode?: 'line' | 'step';
+  binary?: boolean;
+  chartType?: 'line' | 'bar';
 }
 
-export function HistoryChart({ title, points, color = '#301E96' }: HistoryChartProps) {
+export function HistoryChart({
+  title,
+  points,
+  color = '#301E96',
+  mode = 'line',
+  binary = false,
+  chartType = 'line',
+}: HistoryChartProps) {
   const data = points.map((p) => ({
     time: new Date(p.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     value: p.value,
@@ -21,13 +31,57 @@ export function HistoryChart({ title, points, color = '#301E96' }: HistoryChartP
       ) : (
         <div className="h-52">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />
-              <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={36} />
-              <Tooltip />
-              <Line type="monotone" dataKey="value" stroke={color} dot={false} strokeWidth={3} />
-            </LineChart>
+            {chartType === 'bar' ? (
+              <BarChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />
+                <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={36}
+                  domain={binary ? [0, 1] : ['auto', 'auto']}
+                  ticks={binary ? [0, 1] : undefined}
+                  allowDecimals={!binary}
+                />
+                <Tooltip formatter={(value) => {
+                  const numeric = typeof value === 'number' ? value : Number(value);
+                  if (!binary || Number.isNaN(numeric)) {
+                    return value;
+                  }
+                  return numeric >= 0.5 ? 'On' : 'Off';
+                }} />
+                <Bar dataKey="value" fill={color} radius={[3, 3, 0, 0]} />
+              </BarChart>
+            ) : (
+              <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(125,133,255,0.18)" />
+                <XAxis dataKey="time" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={36}
+                  domain={binary ? [0, 1] : ['auto', 'auto']}
+                  ticks={binary ? [0, 1] : undefined}
+                  allowDecimals={!binary}
+                />
+                <Tooltip formatter={(value) => {
+                  const numeric = typeof value === 'number' ? value : Number(value);
+                  if (!binary || Number.isNaN(numeric)) {
+                    return value;
+                  }
+                  return numeric >= 0.5 ? 'On' : 'Off';
+                }} />
+                <Line
+                  type={mode === 'step' ? 'stepAfter' : 'monotone'}
+                  dataKey="value"
+                  stroke={color}
+                  dot={false}
+                  strokeWidth={3}
+                />
+              </LineChart>
+            )}
           </ResponsiveContainer>
         </div>
       )}
