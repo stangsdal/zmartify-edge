@@ -674,6 +674,43 @@ def test_mobile_history_endpoints(monkeypatch, tmp_path: Path):
     assert invalid.status_code == 400
 
 
+def test_device_history_carries_pre_window_state(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-hist03")
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 21.1, "target_temperature_c": 21.6, "demand": False}],
+        },
+    )
+    assert ingest.status_code == 200
+
+    with get_connection() as conn:
+        device_row = conn.execute("SELECT id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        assert device_row is not None
+        device_pk = int(device_row["id"])
+        conn.execute(
+            "UPDATE device_health_history SET created_at = datetime('now', '-2 hours') WHERE device_id = ?",
+            (device_pk,),
+        )
+        conn.commit()
+
+    history = client.get(f"/mobile/devices/{device_id}/history", headers=headers, params={"window": "1h"})
+    assert history.status_code == 200
+    body = history.json()
+    assert len(body["online"]) >= 1
+    assert len(body["mqtt_connected"]) >= 1
+    assert body["online"][0]["value"] in (0.0, 1.0)
+    assert body["mqtt_connected"][0]["value"] in (0.0, 1.0)
+
+
 def test_device_admin_token_can_ingest_for_own_device_only(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     admin_headers = {"Authorization": "Bearer emergency-token"}

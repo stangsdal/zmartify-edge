@@ -882,9 +882,40 @@ def get_zone_history(zone_ref: str, *, window: str = "24h") -> dict[str, Any]:
 def get_device_history(device_external_id: str, *, window: str = "24h") -> dict[str, Any]:
     span, bucket_seconds = _history_window(window)
     now = datetime.now(UTC)
-    cutoff = (now - span).replace(microsecond=0).isoformat()
+    cutoff_dt = (now - span).replace(microsecond=0)
+    cutoff = cutoff_dt.isoformat()
+
+    def _with_baseline(points: list[dict[str, Any]], baseline: Any) -> list[dict[str, Any]]:
+        if baseline is None:
+            return points
+
+        baseline_value = float(baseline)
+        baseline_point = {
+            "bucket_start": cutoff,
+            "value": round(baseline_value, 3),
+            "age_ms": _age_ms(cutoff, now),
+        }
+
+        if not points:
+            return [baseline_point]
+
+        first_dt = _parse_iso_datetime(points[0].get("bucket_start"))
+        if first_dt is None or first_dt > cutoff_dt:
+            return [baseline_point, *points]
+        return points
+
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        baseline_row = conn.execute(
+            """
+            SELECT online, mqtt_connected, created_at
+            FROM device_health_history
+            WHERE device_id = ? AND created_at < ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (device["id"], cutoff),
+        ).fetchone()
         health_rows = conn.execute(
             """
             SELECT online, mqtt_connected, created_at
@@ -897,6 +928,9 @@ def get_device_history(device_external_id: str, *, window: str = "24h") -> dict[
 
     online_points = _aggregate_numeric_points(health_rows, value_key="online", bucket_seconds=bucket_seconds, now=now)
     mqtt_points = _aggregate_numeric_points(health_rows, value_key="mqtt_connected", bucket_seconds=bucket_seconds, now=now)
+    if baseline_row is not None:
+        online_points = _with_baseline(online_points, baseline_row["online"])
+        mqtt_points = _with_baseline(mqtt_points, baseline_row["mqtt_connected"])
 
     return {
         "device_id": device_external_id,
