@@ -8,6 +8,7 @@ interface HistoryChartProps {
   mode?: 'line' | 'step';
   smooth?: boolean;
   binary?: boolean;
+  binaryLabels?: [string, string]; // [offLabel, onLabel] — overrides axis ticks and tooltip
   chartType?: 'line' | 'area';
   startMs?: number;
   endMs?: number;
@@ -20,10 +21,14 @@ export function HistoryChart({
   mode = 'line',
   smooth = false,
   binary = false,
+  binaryLabels,
   chartType = 'line',
   startMs,
   endMs,
 }: HistoryChartProps) {
+  const isBinary = binary || binaryLabels != null;
+  const offLabel = binaryLabels?.[0] ?? 'Off';
+  const onLabel  = binaryLabels?.[1] ?? 'On';
   const baseData = points
     .map((p) => ({
       ts: new Date(p.bucket_start).getTime(),
@@ -84,19 +89,20 @@ export function HistoryChart({
                   tick={{ fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  width={36}
-                  domain={binary ? [0, 1] : ['auto', 'auto']}
-                  ticks={binary ? [0, 1] : undefined}
-                  allowDecimals={!binary}
+                  width={isBinary ? 52 : 36}
+                  domain={isBinary ? [0, 1] : ['auto', 'auto']}
+                  ticks={isBinary ? [0, 1] : undefined}
+                  allowDecimals={!isBinary}
+                  tickFormatter={(v) => isBinary ? (Number(v) >= 0.5 ? onLabel : offLabel) : String(v)}
                 />
                 <Tooltip
                   labelFormatter={formatTooltipTime}
                   formatter={(value) => {
                   const numeric = typeof value === 'number' ? value : Number(value);
-                  if (!binary || Number.isNaN(numeric)) {
+                  if (!isBinary || Number.isNaN(numeric)) {
                     return value;
                   }
-                  return numeric >= 0.5 ? 'On' : 'Off';
+                  return numeric >= 0.5 ? onLabel : offLabel;
                   }}
                 />
                 <Area
@@ -125,19 +131,20 @@ export function HistoryChart({
                   tick={{ fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  width={36}
-                  domain={binary ? [0, 1] : ['auto', 'auto']}
-                  ticks={binary ? [0, 1] : undefined}
-                  allowDecimals={!binary}
+                  width={isBinary ? 52 : 36}
+                  domain={isBinary ? [0, 1] : ['auto', 'auto']}
+                  ticks={isBinary ? [0, 1] : undefined}
+                  allowDecimals={!isBinary}
+                  tickFormatter={(v) => isBinary ? (Number(v) >= 0.5 ? onLabel : offLabel) : String(v)}
                 />
                 <Tooltip
                   labelFormatter={formatTooltipTime}
                   formatter={(value) => {
                   const numeric = typeof value === 'number' ? value : Number(value);
-                  if (!binary || Number.isNaN(numeric)) {
+                  if (!isBinary || Number.isNaN(numeric)) {
                     return value;
                   }
-                  return numeric >= 0.5 ? 'On' : 'Off';
+                  return numeric >= 0.5 ? onLabel : offLabel;
                   }}
                 />
                 <Line

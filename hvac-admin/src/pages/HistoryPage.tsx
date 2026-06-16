@@ -210,6 +210,8 @@ export function HistoryPage() {
             title="Device Online"
             points={deviceHistory?.online || []}
             color="#301E96"
+            mode="step"
+            binaryLabels={['Offline', 'Online']}
             startMs={timelineBounds.startMs}
             endMs={timelineBounds.endMs}
           />
@@ -217,6 +219,8 @@ export function HistoryPage() {
             title="Device MQTT Connectivity"
             points={deviceHistory?.mqtt_connected || []}
             color="#67FBFF"
+            mode="step"
+            binaryLabels={['Disconnected', 'Connected']}
             startMs={timelineBounds.startMs}
             endMs={timelineBounds.endMs}
           />
@@ -243,7 +247,7 @@ export function HistoryPage() {
             color="#67FBFF"
             chartType="area"
             mode="step"
-            binary
+            binaryLabels={['Off', 'On']}
             startMs={timelineBounds.startMs}
             endMs={timelineBounds.endMs}
           />
