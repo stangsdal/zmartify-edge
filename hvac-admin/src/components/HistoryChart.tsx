@@ -50,6 +50,14 @@ export function HistoryChart({
     return next;
   })();
 
+  const formatTooltipTime = (label: unknown) => {
+    const ts = Number(label);
+    if (!Number.isFinite(ts)) {
+      return String(label ?? '');
+    }
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div className="rounded-2xl p-4 app-surface shadow-soft border border-slate-100">
       <p className="font-semibold mb-3">{title}</p>
@@ -79,13 +87,16 @@ export function HistoryChart({
                   ticks={binary ? [0, 1] : undefined}
                   allowDecimals={!binary}
                 />
-                <Tooltip formatter={(value) => {
+                <Tooltip
+                  labelFormatter={formatTooltipTime}
+                  formatter={(value) => {
                   const numeric = typeof value === 'number' ? value : Number(value);
                   if (!binary || Number.isNaN(numeric)) {
                     return value;
                   }
                   return numeric >= 0.5 ? 'On' : 'Off';
-                }} />
+                  }}
+                />
                 <Area
                   type={mode === 'step' ? 'stepAfter' : 'monotone'}
                   dataKey="value"
@@ -117,13 +128,16 @@ export function HistoryChart({
                   ticks={binary ? [0, 1] : undefined}
                   allowDecimals={!binary}
                 />
-                <Tooltip formatter={(value) => {
+                <Tooltip
+                  labelFormatter={formatTooltipTime}
+                  formatter={(value) => {
                   const numeric = typeof value === 'number' ? value : Number(value);
                   if (!binary || Number.isNaN(numeric)) {
                     return value;
                   }
                   return numeric >= 0.5 ? 'On' : 'Off';
-                }} />
+                  }}
+                />
                 <Line
                   type={mode === 'step' ? 'stepAfter' : 'monotone'}
                   dataKey="value"
