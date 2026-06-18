@@ -42,7 +42,7 @@ Output goes to `dist/` folder, which will be served at `http://edge-host:8080/ap
 ## API Configuration
 
 The app reads from:
-- `localStorage['api_base_url']` - defaults to `http://192.168.10.53:8080`
+- `localStorage['api_base_url']` - defaults to `http://hvac-edge:443`
 - `localStorage['admin_api_token']` - Bearer token for protected endpoints
 
 Login screen allows configuring these values.

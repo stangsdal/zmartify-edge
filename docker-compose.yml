@@ -3,12 +3,14 @@ services:
     image: eclipse-mosquitto:2
     container_name: hvac-mosquitto
     restart: unless-stopped
+    user: root
     ports:
-      - "1883:1883"
+      - "8883:8883"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
+      - ./acme:/letsencrypt:ro
 
   hvac-edge-api:
     build:
@@ -19,7 +21,49 @@ services:
     restart: unless-stopped
     working_dir: /app
     ports:
-      - "8080:8080"
+      - "443:8443"
+    volumes:
+      - hvac-edge-data:/data
+      - ./mosquitto/config:/mosquitto/config
+      - ./admin-ui/dist:/admin-ui/dist:ro
+      - ./hvac-admin/dist:/hvac-admin/dist:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./acme:/letsencrypt:ro
+    command:
+      - sh
+      - -c
+      - >-
+        exec uvicorn main:app --host 0.0.0.0 --port 8443
+        --ssl-certfile /letsencrypt/live/pilot.zmartify.dk/fullchain.pem
+        --ssl-keyfile /letsencrypt/live/pilot.zmartify.dk/privkey.pem
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - HVAC_EDGE_DB_PATH=/data/hvac-edge.sqlite
+      - HVAC_EDGE_APPLY_MQTT_COMMANDS=1
+      - HVAC_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
+      - HVAC_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
+      - HVAC_EDGE_MOSQUITTO_PASSWD_BIN=mosquitto_passwd
+      - HVAC_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
+      - HVAC_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
+      - HVAC_EDGE_DRY_RUN_ACL_WRITE=0
+      - HVAC_EDGE_FORWARD_SETPOINT_TO_MQTT=1
+      - HVAC_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
+      - HVAC_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
+      - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
+    depends_on:
+      - mosquitto
+
+  hvac-edge-api-http:
+    build:
+      context: ./hvac-edge-api
+      dockerfile: Dockerfile
+    image: hvac-edge-api:local
+    container_name: hvac-edge-api-http
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "80:8080"
     volumes:
       - hvac-edge-data:/data
       - ./mosquitto/config:/mosquitto/config
@@ -38,6 +82,8 @@ services:
       - HVAC_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
       - HVAC_EDGE_DRY_RUN_ACL_WRITE=0
       - HVAC_EDGE_FORWARD_SETPOINT_TO_MQTT=1
+      - HVAC_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
+      - HVAC_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
