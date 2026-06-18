@@ -28,32 +28,66 @@ import { BottomNavigation } from './components/BottomNavigation';
 export function App() {
   const location = useLocation();
   const [roles, setRoles] = useState<string[]>([]);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const appBase = '/app';
   const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`];
   const isPublicRoute = publicRoutePrefixes.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
   );
   const isAdmin = roles.includes('admin');
+  const authLoadingView = <div style={{ padding: '16px' }}>Spinning up...</div>;
+
+  const requireAuth = (view: JSX.Element) => {
+    if (!authChecked) {
+      return authLoadingView;
+    }
+    if (!isAuthenticated) {
+      return <Redirect to={`${appBase}/login`} />;
+    }
+    return view;
+  };
+
+  const requireAdmin = (view: JSX.Element, nonAdminRedirect: string = `${appBase}/home`) => {
+    if (!authChecked) {
+      return authLoadingView;
+    }
+    if (!isAuthenticated) {
+      return <Redirect to={`${appBase}/login`} />;
+    }
+    if (!isAdmin) {
+      return <Redirect to={nonAdminRedirect} />;
+    }
+    return view;
+  };
 
   useEffect(() => {
     let canceled = false;
     const token = localStorage.getItem('admin_api_token');
     if (!token) {
       setRoles([]);
+      setIsAuthenticated(false);
+      setAuthChecked(true);
       return () => {
         canceled = true;
       };
     }
 
     const loadMe = async () => {
+        setAuthChecked(false);
       try {
         const me = await authApi.me();
         if (!canceled) {
           setRoles(me.roles || []);
+          setIsAuthenticated(true);
+          setAuthChecked(true);
         }
       } catch {
         if (!canceled) {
+          localStorage.removeItem('admin_api_token');
           setRoles([]);
+          setIsAuthenticated(false);
+          setAuthChecked(true);
         }
       }
     };
@@ -68,31 +102,107 @@ export function App() {
     <>
       <OfflineIndicator />
       <IonTabs>
-      <IonRouterOutlet>
+        <IonRouterOutlet>
         <Route exact path={`${appBase}/login`} component={LoginPage} />
-        <Route exact path={`${appBase}/home`} component={HomePage} />
-        <Route exact path={`${appBase}/rooms`} component={RoomsPage} />
-        <Route exact path={`${appBase}/rooms/:zoneRef`} component={RoomDetailPage} />
-        <Route exact path={`${appBase}/history`} component={HistoryPage} />
-        <Route exact path={`${appBase}/alerts`} component={AlertsPage} />
-        <Route exact path={`${appBase}/settings`} component={SettingsPage} />
+          <Route
+            exact
+            path={`${appBase}/home`}
+              render={() => requireAuth(<HomePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/rooms`}
+              render={() => requireAuth(<RoomsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/rooms/:zoneRef`}
+              render={() => requireAuth(<RoomDetailPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/history`}
+              render={() => requireAuth(<HistoryPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/alerts`}
+              render={() => requireAuth(<AlertsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/settings`}
+              render={() => requireAuth(<SettingsPage />)}
+          />
 
-        <Route exact path={`${appBase}/dashboard`} render={() => (isAdmin ? <DashboardPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/domains`} render={() => (isAdmin ? <DomainsPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/sites`} render={() => (isAdmin ? <SitesPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/devices`} render={() => (isAdmin ? <DevicesPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/devices/add`} render={() => (isAdmin ? <AddDevicePage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/devices/:id/history`} render={() => (isAdmin ? <DeviceHistoryPage /> : <Redirect to={`${appBase}/history`} />)} />
-        <Route exact path={`${appBase}/users`} render={() => (isAdmin ? <UsersPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/roles`} render={() => (isAdmin ? <RolesPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/admin/audit-log`} render={() => (isAdmin ? <AuditLogPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/system`} render={() => (isAdmin ? <SystemPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/mqtt-clients`} render={() => (isAdmin ? <MqttClientsPage /> : <Redirect to={`${appBase}/home`} />)} />
-        <Route exact path={`${appBase}/profile`} component={ProfilePage} />
-        <Route exact path={`${appBase}/notifications`} component={NotificationsPage} />
+          <Route
+            exact
+            path={`${appBase}/dashboard`}
+              render={() => requireAdmin(<DashboardPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/domains`}
+              render={() => requireAdmin(<DomainsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/sites`}
+              render={() => requireAdmin(<SitesPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/devices`}
+              render={() => requireAdmin(<DevicesPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/devices/add`}
+              render={() => requireAdmin(<AddDevicePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/devices/:id/history`}
+              render={() => requireAdmin(<DeviceHistoryPage />, `${appBase}/history`)}
+          />
+          <Route
+            exact
+            path={`${appBase}/users`}
+              render={() => requireAdmin(<UsersPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/roles`}
+              render={() => requireAdmin(<RolesPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/admin/audit-log`}
+              render={() => requireAdmin(<AuditLogPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/system`}
+              render={() => requireAdmin(<SystemPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/mqtt-clients`}
+              render={() => requireAdmin(<MqttClientsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/profile`}
+              render={() => requireAuth(<ProfilePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/notifications`}
+              render={() => requireAuth(<NotificationsPage />)}
+          />
 
-        <Route exact path="/" render={() => <Redirect to={`${appBase}/home`} />} />
-        <Route exact path={appBase} render={() => <Redirect to={`${appBase}/home`} />} />
+          <Route exact path="/" render={() => <Redirect to={`${appBase}/home`} />} />
+          <Route exact path={appBase} render={() => <Redirect to={`${appBase}/home`} />} />
       </IonRouterOutlet>
 
       {!isPublicRoute && <BottomNavigation appBase={appBase} isAdmin={isAdmin} />}

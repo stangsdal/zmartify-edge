@@ -399,16 +399,14 @@ def _edge_public_base_url(request: Request) -> str:
     configured = os.getenv("HVAC_EDGE_PUBLIC_API_BASE", "").strip()
     if configured:
         return configured.rstrip("/")
-    return str(request.base_url).rstrip("/")
+    return "https://pilot.zmartify.dk"
 
 
 def _edge_public_mqtt_uri(request: Request) -> str:
     configured = os.getenv("HVAC_EDGE_PUBLIC_MQTT_URI", "").strip()
     if configured:
         return configured
-    host = request.url.hostname or "127.0.0.1"
-    port = os.getenv("HVAC_EDGE_PUBLIC_MQTT_PORT", "1883").strip() or "1883"
-    return f"mqtt://{host}:{port}"
+    return "mqtts://mqtt.pilot.zmartify.dk:8883"
 
 
 def _build_device_push_payload(request: Request, device_id: str, claim_token: str | None) -> dict:

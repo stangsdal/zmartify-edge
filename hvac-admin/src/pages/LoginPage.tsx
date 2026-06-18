@@ -10,19 +10,53 @@ import {
   IonInput,
   IonButton,
   IonCard,
+  IonSpinner,
 } from '@ionic/react';
 import { apiClient } from '../api/client';
 import { authApi } from '../api/auth';
+
+function formatLoginError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error || '');
+
+  if (/422/.test(msg) && /username/.test(msg) && /password/.test(msg)) {
+    return 'Please enter both username and password.';
+  }
+
+  if (/401|invalid credentials|unauthorized/i.test(msg)) {
+    return 'Invalid username or password.';
+  }
+
+  if (/network error while calling|failed to fetch|network request failed/i.test(msg)) {
+    return 'Unable to reach the server. Check API Base URL and your network connection.';
+  }
+
+  if (/403/.test(msg)) {
+    return 'Access denied. Your account may not have permission to log in.';
+  }
+
+  return 'Login failed. Please try again.';
+}
 
 export function LoginPage() {
   const appBase = '/app';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [baseUrl, setBaseUrl] = useState(
-    () => localStorage.getItem('api_base_url') || 'http://192.168.10.53:8080'
+    () => localStorage.getItem('api_base_url') || 'https://pilot.zmartify.dk'
   );
   const [message, setMessage] = useState('');
+  const [messageTone, setMessageTone] = useState<'info' | 'error'>('info');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const history = useHistory();
+
+  const navigateToHome = () => {
+    history.replace(`${appBase}/home`);
+    window.setTimeout(() => {
+      if (window.location.pathname === `${appBase}/login`) {
+        window.location.assign(`${appBase}/home`);
+      }
+    }, 200);
+  };
 
   useEffect(() => {
     let canceled = false;
@@ -54,16 +88,40 @@ export function LoginPage() {
   }, [history]);
 
   const handleLogin = async () => {
+    const user = username.trim();
+    const pass = password.trim();
+
+    if (!user && !pass) {
+      setMessageTone('error');
+      setMessage('Please enter username and password.');
+      return;
+    }
+
+    if (!user) {
+      setMessageTone('error');
+      setMessage('Please enter username.');
+      return;
+    }
+
+    if (!pass) {
+      setMessageTone('error');
+      setMessage('Please enter password.');
+      return;
+    }
+
     try {
+      setIsLoggingIn(true);
+      setMessageTone('info');
+      setMessage('Spinning up...');
       apiClient.setBaseUrl(baseUrl);
-      const data = await authApi.login(username, password);
+      const data = await authApi.login(user, pass);
       apiClient.setAuthToken(data.access_token);
-      setMessage('Login successful');
-      setTimeout(() => {
-        history.push(`${appBase}/home`);
-      }, 300);
+      navigateToHome();
     } catch (e) {
-      setMessage(String(e));
+      setMessageTone('error');
+      setMessage(formatLoginError(e));
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -71,6 +129,7 @@ export function LoginPage() {
     setUsername('');
     setPassword('');
     apiClient.clearAuthToken();
+    setMessageTone('info');
     setMessage('Token cleared');
   };
 
@@ -89,7 +148,7 @@ export function LoginPage() {
             <IonInput
               value={baseUrl}
               onIonChange={(e) => setBaseUrl(e.detail.value || '')}
-              placeholder="http://192.168.10.53:8080"
+              placeholder="https://pilot.zmartify.dk"
             />
 
             <IonLabel style={{ marginTop: '16px', display: 'block' }}>
@@ -112,15 +171,19 @@ export function LoginPage() {
             />
 
             <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
-              <IonButton onClick={handleLogin} expand="block">
-                Login
+              <IonButton onClick={handleLogin} expand="block" disabled={isLoggingIn}>
+                {isLoggingIn ? <IonSpinner name="crescent" /> : 'Login'}
               </IonButton>
-              <IonButton onClick={handleClearToken} expand="block" color="medium">
+              <IonButton onClick={handleClearToken} expand="block" color="medium" disabled={isLoggingIn}>
                 Clear
               </IonButton>
             </div>
 
-            {message && <p style={{ color: 'green', marginTop: '8px' }}>{message}</p>}
+            {message && (
+              <p style={{ color: messageTone === 'error' ? '#b00020' : 'green', marginTop: '8px' }}>
+                {message}
+              </p>
+            )}
           </div>
         </IonCard>
       </IonContent>
