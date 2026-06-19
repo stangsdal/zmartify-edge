@@ -142,6 +142,37 @@ class DeviceOnboardingStatusOut(BaseModel):
     last_error: str | None
 
 
+class DeviceOtaOut(BaseModel):
+    device_id: str
+    local_url: str
+    ota_response: dict
+    written_bytes: int | None = None
+    reboot_requested: bool = False
+    reboot_triggered: bool = False
+    reboot_response: dict | None = None
+    reboot_error: str | None = None
+
+
+class DeviceOtaStageOut(BaseModel):
+    device_id: str
+    version: str
+    sha256: str
+    size_bytes: int
+    force: bool = False
+    notes: str | None = None
+    uploaded_at: str
+
+
+class DeviceOtaPollOut(BaseModel):
+    device_id: str
+    update_available: bool
+    version: str | None = None
+    sha256: str | None = None
+    size_bytes: int | None = None
+    download_url: str | None = None
+    reason: str | None = None
+
+
 class ZoneRenameIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 

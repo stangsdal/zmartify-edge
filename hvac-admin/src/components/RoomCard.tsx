@@ -9,6 +9,7 @@ interface RoomCardProps {
   onOpen: () => void;
   onHistory: () => void;
   onRename: () => void;
+  onSetpointChange: (delta: number) => void;
 }
 
 function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | 'critical' | 'info' } {
@@ -18,7 +19,7 @@ function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | '
   return { label: 'Idle', tone: 'good' };
 }
 
-export function RoomCard({ zone, onOpen, onHistory, onRename }: RoomCardProps) {
+export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange }: RoomCardProps) {
   const state = zoneState(zone);
   return (
     <motion.div
@@ -33,8 +34,28 @@ export function RoomCard({ zone, onOpen, onHistory, onRename }: RoomCardProps) {
         </div>
         <HealthBadge label={state.label} tone={state.tone} />
       </div>
-      <div onClick={onOpen} className="mt-3">
-        <TemperatureBadge value={zone.current_temperature_c} />
+      <div className="mt-3 flex items-center gap-3">
+        <div className="flex items-center gap-1">
+          <IonButton
+            size="small"
+            fill="clear"
+            className="text-lg font-bold"
+            onClick={(e) => { e.stopPropagation(); onSetpointChange(-0.5); }}
+          >
+            −
+          </IonButton>
+          <div onClick={onOpen}>
+            <TemperatureBadge value={zone.current_temperature_c} />
+          </div>
+          <IonButton
+            size="small"
+            fill="clear"
+            className="text-lg font-bold"
+            onClick={(e) => { e.stopPropagation(); onSetpointChange(+0.5); }}
+          >
+            +
+          </IonButton>
+        </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
         <IonButton size="small" fill="outline" onClick={(e) => { e.stopPropagation(); onRename(); }}>

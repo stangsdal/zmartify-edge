@@ -18,6 +18,20 @@ export function RoomsPage() {
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
 
+  const handleSetpointChange = async (room: RoomWithRef, delta: number) => {
+    const current = room.target_temperature_c ?? 20;
+    const next = Math.round((current + delta) * 2) / 2; // keep 0.5 steps
+    if (!room.zone_ref) return;
+    try {
+      await mobileApi.setZoneSetpoint(room.zone_ref, next);
+      setRooms((prev) =>
+        prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, target_temperature_c: next } : r))
+      );
+    } catch (error) {
+      console.error('setpoint change failed', error);
+    }
+  };
+
   const handleRename = async (room: RoomWithRef) => {
     const nextName = window.prompt('New room name', room.name);
     if (!nextName) return;
@@ -134,6 +148,9 @@ export function RoomsPage() {
                 onHistory={() => history.push(`/app/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
                 onRename={() => {
                   void handleRename(room);
+                }}
+                onSetpointChange={(delta) => {
+                  void handleSetpointChange(room, delta);
                 }}
               />
             ))}

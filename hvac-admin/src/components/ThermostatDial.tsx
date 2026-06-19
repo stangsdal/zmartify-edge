@@ -44,7 +44,7 @@ export function ThermostatDial({
 
   const ratio = useMemo(() => (value - min) / (max - min), [value, min, max]);
   const clampedRatio = Math.max(0, Math.min(1, ratio));
-  const ringRadius = 128;
+  const ringRadius = 138;
   const measuredTemp = typeof currentTemperature === 'number' ? currentTemperature : value;
   const clampedMeasuredTemp = clamp(measuredTemp, min, max);
   const clampedSetpoint = clamp(value, min, max);
@@ -106,7 +106,7 @@ export function ThermostatDial({
       </div>
 
       <div className="relative mt-4 flex items-center justify-center">
-        <svg viewBox="0 0 320 320" className="h-[268px] w-[268px]">
+        <svg viewBox="0 0 320 320" className="h-[289px] w-[289px]">
           <path d={fullScalePath} stroke="rgba(255,255,255,0.18)" strokeWidth="6" fill="none" strokeLinecap="round" />
           <path d={bandPath} stroke={deltaColor} strokeWidth="6" fill="none" strokeLinecap="round" opacity={showBand ? 1 : 0} />
           {markerTemps.map((markerTemp) => {
@@ -116,17 +116,17 @@ export function ThermostatDial({
             return (
               <g key={markerTemp}>
                 <line
-                  x1={160 + 114 * cos}
-                  y1={160 + 114 * sin}
-                  x2={160 + 126 * cos}
-                  y2={160 + 126 * sin}
+                  x1={160 + 122 * cos}
+                  y1={160 + 122 * sin}
+                  x2={160 + 136 * cos}
+                  y2={160 + 136 * sin}
                   stroke={markerTemp === 20 ? primaryColor : 'rgba(255,255,255,0.55)'}
                   strokeWidth={markerTemp === 20 ? 2.5 : 2}
                   strokeLinecap="round"
                 />
                 <text
-                  x={160 + 143 * cos}
-                  y={160 + 143 * sin + 4}
+                  x={160 + 154 * cos}
+                  y={160 + 154 * sin + 4}
                   fill={markerTemp === 20 ? primaryColor : 'rgba(255,255,255,0.72)'}
                   fontSize="11"
                   fontWeight={markerTemp === 20 ? '700' : '500'}
