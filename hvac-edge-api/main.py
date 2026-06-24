@@ -292,8 +292,25 @@ def _ota_save_stage(device_id: str, firmware_bytes: bytes, version: str, force: 
 
 def _create_spa_handler(dist_path: Path):
     """Factory function to create SPA handler with correct path binding."""
-    def handler(_path: str = "") -> FileResponse:  # noqa: ARG001 - path used by route matching
-        return FileResponse(dist_path / "index.html")
+    dist_root = dist_path.resolve()
+
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
+    def handler(path: str = "") -> FileResponse:
+        requested_path = (path or "").lstrip("/")
+        if requested_path:
+            candidate = (dist_root / requested_path).resolve()
+            if dist_root in candidate.parents and candidate.is_file():
+                if requested_path in {"sw.js", "manifest.json", "index.html"}:
+                    return FileResponse(candidate, headers=no_cache_headers)
+                return FileResponse(candidate)
+
+        return FileResponse(dist_root / "index.html", headers=no_cache_headers)
+
     return handler
 
 
@@ -317,6 +334,7 @@ for admin_ui_dist in admin_ui_dist_candidates:
 # Ionic PWA (Ionic React) at /app
 ionic_pwa_dist_candidates = [
     Path("/app-dist"),
+    Path("/hvac-admin/dist"),
     Path(__file__).resolve().parent / "hvac-admin" / "dist",
     Path(__file__).resolve().parent.parent / "hvac-admin" / "dist",
 ]
@@ -1524,6 +1542,40 @@ def mobile_site_devices(site_id: str, request: Request) -> dict:
             }
             for item in site.get("devices", [])
         ],
+    }
+
+
+@app.get("/mobile/sites/{site_id}/zones")
+def mobile_site_zones(site_id: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    resolved_site_id = _resolve_site_filter_id(site_id)
+    _enforce_mobile_site_scope(request, resolved_site_id)
+    try:
+        site = get_mobile_site(site_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    devices_out = []
+    for item in site.get("devices", []):
+        device_id = item.get("device_id")
+        if not device_id:
+            continue
+        try:
+            zones = list_device_zones(device_id)
+        except RegistryNotFoundError:
+            continue
+        devices_out.append(
+            {
+                "device_id": device_id,
+                "display_name": item.get("display_name"),
+                "zones": zones,
+            }
+        )
+
+    return {
+        "site_id": site["site_id"],
+        "site_name": site["site_name"],
+        "devices": devices_out,
     }
 
 

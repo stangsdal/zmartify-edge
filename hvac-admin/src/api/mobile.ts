@@ -31,6 +31,16 @@ export interface MobileSiteDetail {
   devices: MobileSiteDevice[];
 }
 
+export interface MobileSiteZonesDetail {
+  site_id: string;
+  site_name: string;
+  devices: Array<{
+    device_id: string;
+    display_name: string;
+    zones: MobileZone[];
+  }>;
+}
+
 export interface MobileZone {
   zone_uuid?: string;
   zone_id: number;
@@ -96,6 +106,9 @@ export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
   getSite: (siteId: string): Promise<MobileSiteDetail> => apiClient.get(`/mobile/sites/${siteId}`),
+
+  getSiteZones: (siteId: string): Promise<MobileSiteZonesDetail> =>
+    apiClient.get(`/mobile/sites/${siteId}/zones`),
 
   getDevice: (deviceId: string): Promise<MobileDeviceDetail> => apiClient.get(`/mobile/devices/${deviceId}`),
 

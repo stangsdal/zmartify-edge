@@ -1,5 +1,5 @@
-const CACHE_NAME = 'hvac-admin-v1';
-const RUNTIME_CACHE = 'hvac-admin-runtime-v1';
+const CACHE_NAME = 'hvac-admin-v2';
+const RUNTIME_CACHE = 'hvac-admin-runtime-v2';
 const CRITICAL_ASSETS = [
   '/',
   '/app/',
@@ -42,6 +42,26 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  const cacheResponseSafely = (response) => {
+    if (!response || !response.ok) {
+      return;
+    }
+
+    let cloned;
+    try {
+      cloned = response.clone();
+    } catch (err) {
+      console.warn('[SW] Skipping cache put, response clone failed:', err);
+      return;
+    }
+
+    event.waitUntil(
+      caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, cloned)).catch((err) => {
+        console.warn('[SW] Failed runtime cache put:', err);
+      })
+    );
+  };
+
   // Skip non-GET requests
   if (request.method !== 'GET') {
     return;
@@ -53,10 +73,7 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           // Cache successful API responses
-          if (response.ok) {
-            const cache = caches.open(RUNTIME_CACHE);
-            cache.then((c) => c.put(request, response.clone()));
-          }
+          cacheResponseSafely(response);
           return response;
         })
         .catch(() => {
@@ -96,9 +113,7 @@ self.addEventListener('fetch', (event) => {
         return fetch(request)
           .then((response) => {
             if (response.ok) {
-              caches.open(RUNTIME_CACHE).then((cache) => {
-                cache.put(request, response.clone());
-              });
+              cacheResponseSafely(response);
             }
             return response;
           })
@@ -116,9 +131,7 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           if (response.ok) {
-            caches.open(RUNTIME_CACHE).then((cache) => {
-              cache.put(request, response.clone());
-            });
+            cacheResponseSafely(response);
           }
           return response;
         })

@@ -64,8 +64,10 @@ export function HistoryPage() {
 
   useEffect(() => {
     if (!siteId) return;
+    let canceled = false;
     const loadDevices = async () => {
       const site = await mobileApi.getSite(siteId);
+      if (canceled) return;
       setDevices(site.devices.map((d) => ({ device_id: d.device_id, display_name: d.display_name })));
       if (site.devices.length) {
         if (!deviceId || !site.devices.some((device) => device.device_id === deviceId)) {
@@ -78,7 +80,10 @@ export function HistoryPage() {
       }
     };
     loadDevices().catch(console.error);
-  }, [siteId, deviceId]);
+    return () => {
+      canceled = true;
+    };
+  }, [siteId]);
 
   useEffect(() => {
     if (!deviceId) return;

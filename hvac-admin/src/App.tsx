@@ -64,18 +64,17 @@ export function App() {
 
   useEffect(() => {
     let canceled = false;
-    const token = localStorage.getItem('admin_api_token');
-    if (!token) {
-      setRoles([]);
-      setIsAuthenticated(false);
-      setAuthChecked(true);
-      return () => {
-        canceled = true;
-      };
-    }
 
     const loadMe = async () => {
-        setAuthChecked(false);
+      const token = localStorage.getItem('admin_api_token');
+      if (!token) {
+        setRoles([]);
+        setIsAuthenticated(false);
+        setAuthChecked(true);
+        return;
+      }
+
+      setAuthChecked(false);
       try {
         const me = await authApi.me();
         if (!canceled) {
@@ -94,10 +93,19 @@ export function App() {
     };
 
     loadMe();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'admin_api_token') {
+        void loadMe();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
     return () => {
       canceled = true;
+      window.removeEventListener('storage', onStorage);
     };
-  }, [location.pathname]);
+  }, []);
 
   return (
     <>

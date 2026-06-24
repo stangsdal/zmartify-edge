@@ -30,7 +30,8 @@ if (storedTheme === 'dark') {
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    const swUrl = '/app/sw.js';
+    const swVersion = '20260624-3';
+    const swUrl = `/app/sw.js?v=${swVersion}`;
     fetch(swUrl, { cache: 'no-store' })
       .then((res) => {
         const mime = (res.headers.get('content-type') || '').toLowerCase();
