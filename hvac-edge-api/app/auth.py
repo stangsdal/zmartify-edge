@@ -6,6 +6,7 @@ import os
 import secrets
 import sqlite3
 import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -226,6 +227,284 @@ def _record_failure(conn: sqlite3.Connection, username: str, user_id: int | None
 
 def _token_ttl_hours() -> int:
     return int(os.getenv("HVAC_EDGE_ACCESS_TOKEN_TTL_HOURS", "24"))
+
+
+def _invite_app_login_url() -> str:
+    return os.getenv("HVAC_EDGE_PILOT_APP_LOGIN_URL", "https://pilot.zmartify.dk/app/login").strip()
+
+
+def _invite_default_ttl_hours() -> int:
+    return int(os.getenv("HVAC_EDGE_INVITE_DEFAULT_TTL_HOURS", "168"))
+
+
+def _invite_code() -> str:
+    return secrets.token_hex(4).upper()
+
+
+def _append_query_param(url: str, key: str, value: str) -> str:
+    parsed = urlsplit(url)
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    params = [(k, v) for (k, v) in params if k != key]
+    params.append((key, value))
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(params), parsed.fragment))
+
+
+def _invite_label_text(*, invite_code: str, invite_url: str, device_id: str | None, label: str | None) -> str:
+    label_parts = [
+        f"INVITE_CODE:{invite_code}",
+        f"INVITE_URL:{invite_url}",
+    ]
+    if device_id:
+        label_parts.insert(0, f"DEVICE_ID:{device_id}")
+    if label:
+        label_parts.insert(0, f"LABEL:{label}")
+    return "\n".join(label_parts)
+
+
+def _csv_escape(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def issue_registration_invite(*, actor_user_id: int | None, device_id: str | None, label: str | None, expires_hours: int | None = None) -> dict:
+    raw_token = secrets.token_urlsafe(36)
+    invite_code = _invite_code()
+    ttl_hours = max(1, int(expires_hours if expires_hours is not None else _invite_default_ttl_hours()))
+    expires_at = _now_utc() + timedelta(hours=ttl_hours)
+
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO registration_invites(token_hash, invite_code, device_id, label, expires_at, created_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (hash_token(raw_token), invite_code, device_id, label, _iso(expires_at), actor_user_id),
+        )
+        _audit(
+            conn,
+            actor_user_id,
+            "registration_invite_issued",
+            "registration_invite",
+            str(cur.lastrowid),
+            {"device_id": device_id, "label": label, "expires_at": _iso(expires_at)},
+        )
+        conn.commit()
+
+    invite_url = _append_query_param(_invite_app_login_url(), "invite_token", raw_token)
+    return {
+        "invite_token": raw_token,
+        "invite_code": invite_code,
+        "invite_url": invite_url,
+        "label_text": _invite_label_text(invite_code=invite_code, invite_url=invite_url, device_id=device_id, label=label),
+        "expires_at": _iso(expires_at),
+        "device_id": device_id,
+    }
+
+
+def issue_registration_invites_bulk(
+    *,
+    actor_user_id: int | None,
+    device_ids: list[str],
+    label_prefix: str | None,
+    expires_hours: int | None = None,
+) -> dict:
+    cleaned_ids = [device_id.strip() for device_id in device_ids if device_id and device_id.strip()]
+    if not cleaned_ids:
+        raise AuthError("at least one device_id is required")
+
+    ttl_hours = max(1, int(expires_hours if expires_hours is not None else _invite_default_ttl_hours()))
+    invites: list[dict] = []
+
+    with get_connection() as conn:
+        for device_id in cleaned_ids:
+            raw_token = secrets.token_urlsafe(36)
+            invite_code = _invite_code()
+            expires_at = _now_utc() + timedelta(hours=ttl_hours)
+            label = f"{label_prefix} {device_id}".strip() if label_prefix else None
+
+            cur = conn.execute(
+                """
+                INSERT INTO registration_invites(token_hash, invite_code, device_id, label, expires_at, created_by_user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (hash_token(raw_token), invite_code, device_id, label, _iso(expires_at), actor_user_id),
+            )
+            _audit(
+                conn,
+                actor_user_id,
+                "registration_invite_issued",
+                "registration_invite",
+                str(cur.lastrowid),
+                {"device_id": device_id, "label": label, "expires_at": _iso(expires_at)},
+            )
+
+            invite_url = _append_query_param(_invite_app_login_url(), "invite_token", raw_token)
+            invites.append(
+                {
+                    "invite_token": raw_token,
+                    "invite_code": invite_code,
+                    "invite_url": invite_url,
+                    "label_text": _invite_label_text(invite_code=invite_code, invite_url=invite_url, device_id=device_id, label=label),
+                    "expires_at": _iso(expires_at),
+                    "device_id": device_id,
+                }
+            )
+        conn.commit()
+
+    csv_lines = ["device_id,invite_code,invite_url,expires_at,qr_payload"]
+    for row in invites:
+        csv_lines.append(
+            ",".join(
+                [
+                    _csv_escape(str(row.get("device_id") or "")),
+                    _csv_escape(str(row.get("invite_code") or "")),
+                    _csv_escape(str(row.get("invite_url") or "")),
+                    _csv_escape(str(row.get("expires_at") or "")),
+                    _csv_escape(str(row.get("invite_url") or "")),
+                ]
+            )
+        )
+
+    return {
+        "invites": invites,
+        "csv_content": "\n".join(csv_lines) + "\n",
+    }
+
+
+def validate_registration_invite(invite_token: str) -> dict:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT invite_code, expires_at, used_at, device_id, label
+            FROM registration_invites
+            WHERE token_hash = ?
+            """,
+            (hash_token(invite_token),),
+        ).fetchone()
+
+        if row is None:
+            return {"valid": False, "reason": "invite not found"}
+
+        if row["used_at"]:
+            return {"valid": False, "reason": "invite already used"}
+
+        expires_at = _parse_dt(row["expires_at"])
+        if expires_at is None or _now_utc() >= expires_at:
+            return {"valid": False, "reason": "invite expired"}
+
+        return {
+            "valid": True,
+            "invite_code": row["invite_code"],
+            "expires_at": row["expires_at"],
+            "device_id": row["device_id"],
+            "label": row["label"],
+            "reason": None,
+        }
+
+
+def register_user_with_invite(*, invite_token: str, username: str, display_name: str, password: str, email: str | None) -> dict:
+    if len(password) < 12:
+        raise AuthError("password must be at least 12 characters")
+
+    with get_connection() as conn:
+        invite = conn.execute(
+            """
+            SELECT id, invite_code, expires_at, used_at
+            FROM registration_invites
+            WHERE token_hash = ?
+            """,
+            (hash_token(invite_token),),
+        ).fetchone()
+        if invite is None:
+            raise AuthError("invalid invite token")
+        if invite["used_at"]:
+            raise AuthError("invite token already used")
+
+        expires_at = _parse_dt(invite["expires_at"])
+        if expires_at is None or _now_utc() >= expires_at:
+            raise AuthError("invite token expired")
+
+        try:
+            user_cur = conn.execute(
+                """
+                INSERT INTO users(uuid, username, email, display_name, password_hash, enabled)
+                VALUES (?, ?, ?, ?, ?, 1)
+                """,
+                (_new_uuid(), username, email, display_name, hash_password(password)),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise AuthError("username already exists") from exc
+
+        role_map = _role_ids(conn)
+        viewer_role_id = role_map.get(ROLE_VIEWER)
+        if viewer_role_id is None:
+            raise AuthError("viewer role missing")
+
+        new_user_id = int(user_cur.lastrowid)
+        conn.execute("INSERT OR IGNORE INTO user_roles(user_id, role_id) VALUES (?, ?)", (new_user_id, viewer_role_id))
+
+        invite_update = conn.execute(
+            """
+            UPDATE registration_invites
+            SET used_at = CURRENT_TIMESTAMP, used_by_user_id = ?
+            WHERE id = ? AND used_at IS NULL
+            """,
+            (new_user_id, int(invite["id"])),
+        )
+        if invite_update.rowcount == 0:
+            raise AuthError("invite token already used")
+
+        _audit(
+            conn,
+            new_user_id,
+            "self_register_by_invite",
+            "registration_invite",
+            str(invite["id"]),
+            {"invite_code": invite["invite_code"], "username": username},
+        )
+        conn.commit()
+
+    return get_user(new_user_id)
+
+
+def list_registration_invites(limit: int = 200) -> list[dict]:
+    safe_limit = max(1, min(limit, 2000))
+    now = _now_utc()
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, invite_code, device_id, label, expires_at, used_at, created_at,
+                   created_by_user_id, used_by_user_id
+            FROM registration_invites
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+
+    invites: list[dict] = []
+    for row in rows:
+        status = "active"
+        if row["used_at"]:
+            status = "used"
+        else:
+            expiry = _parse_dt(row["expires_at"])
+            if expiry is None or now >= expiry:
+                status = "expired"
+        invites.append(
+            {
+                "id": row["id"],
+                "invite_code": row["invite_code"],
+                "device_id": row["device_id"],
+                "label": row["label"],
+                "expires_at": row["expires_at"],
+                "used_at": row["used_at"],
+                "created_at": row["created_at"],
+                "created_by_user_id": row["created_by_user_id"],
+                "used_by_user_id": row["used_by_user_id"],
+                "status": status,
+            }
+        )
+    return invites
 
 
 def login(username: str, password: str) -> tuple[str, str, int]:

@@ -36,8 +36,9 @@ export interface DeviceDiscovery {
   };
   claim: {
     device_id: string;
-    claim_token: string;
+    claim_token: string | null;
     expires_in_s: number;
+    error?: string;
   };
   status: {
     state: string;
@@ -144,6 +145,62 @@ export interface AclPreview {
 export interface LoginResponse {
   access_token: string;
   expires_at: string;
+}
+
+export interface InviteValidateResponse {
+  valid: boolean;
+  invite_code?: string;
+  expires_at?: string;
+  device_id?: string;
+  label?: string;
+  reason?: string;
+}
+
+export interface RegisterByInviteRequest {
+  invite_token: string;
+  username: string;
+  display_name: string;
+  password: string;
+  email?: string;
+}
+
+export interface CreateInviteRequest {
+  device_id?: string;
+  label?: string;
+  expires_hours?: number;
+}
+
+export interface CreateInviteResponse {
+  invite_token: string;
+  invite_code: string;
+  invite_url: string;
+  label_text: string;
+  expires_at: string;
+  device_id?: string;
+}
+
+export interface InviteListItem {
+  id: number;
+  invite_code: string;
+  device_id?: string;
+  label?: string;
+  expires_at: string;
+  used_at?: string;
+  created_at: string;
+  created_by_user_id?: number;
+  used_by_user_id?: number;
+  status: 'active' | 'used' | 'expired' | string;
+}
+
+export interface CreateInviteBulkRequest {
+  device_ids: string[];
+  label_prefix?: string;
+  expires_hours?: number;
+}
+
+export interface CreateInviteBulkResponse {
+  invites: CreateInviteResponse[];
+  csv_content: string;
 }
 
 export interface SetupStatus {

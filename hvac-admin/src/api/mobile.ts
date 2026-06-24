@@ -37,6 +37,8 @@ export interface MobileZone {
   name: string;
   mode?: number | null;
   thermostat_mode?: number | null;
+  humidity?: number | null;
+  window_open?: boolean | null;
   current_temperature_c?: number;
   target_temperature_c?: number;
   demand?: boolean;

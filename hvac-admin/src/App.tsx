@@ -16,6 +16,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { DeviceHistoryPage } from './pages/DeviceHistoryPage';
 import { AddDevicePage } from './pages/AddDevicePage';
 import { UsersPage } from './pages/UsersPage';
+import { InvitesPage } from './pages/InvitesPage';
 import { RolesPage } from './pages/RolesPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { SystemPage } from './pages/SystemPage';
@@ -35,7 +36,7 @@ export function App() {
   const isPublicRoute = publicRoutePrefixes.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
   );
-  const isAdmin = roles.includes('admin');
+  const isAdmin = roles.includes('admin') || roles.includes('owner');
   const authLoadingView = <div style={{ padding: '16px' }}>Spinning up...</div>;
 
   const requireAuth = (view: JSX.Element) => {
@@ -169,6 +170,11 @@ export function App() {
             exact
             path={`${appBase}/users`}
               render={() => requireAdmin(<UsersPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/invites`}
+              render={() => requireAdmin(<InvitesPage />)}
           />
           <Route
             exact

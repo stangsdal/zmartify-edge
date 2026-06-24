@@ -22,22 +22,28 @@ from app.auth import (
     delete_user,
     ensure_bootstrap_owner,
     get_user,
+    issue_registration_invites_bulk,
+    issue_registration_invite,
     is_initialized,
+    list_registration_invites,
     list_audit_logs,
     list_user_site_access,
     list_users,
     login,
     logout_token,
+    register_user_with_invite,
     require_any_role,
     reset_user_password,
     set_user_enabled,
     set_user_roles,
     set_user_site_access,
+    validate_registration_invite,
 )
 from app.db import get_connection, get_db_path, initialize_database
 from app.device_onboarding import (
     DeviceOnboardingError,
     discover_remote_device,
+    get_remote_device_version,
     get_remote_onboarding_status,
     normalize_device_base_url,
     push_remote_onboarding_config,
@@ -109,6 +115,7 @@ from app.registry import (
     rotate_mqtt_client_password,
     ensure_device_admin_token,
     set_mqtt_client_enabled,
+    update_device_firmware_version,
     update_device_local_url,
 )
 from app.schemas import (
@@ -153,15 +160,26 @@ from app.schemas import (
     AuthLoginIn,
     AuthLoginOut,
     AuditLogOut,
+    AuthRegisterByInviteIn,
     SiteCreate,
     SiteOut,
+    InviteCreateIn,
+    InviteCreateOut,
+    InviteBulkCreateIn,
+    InviteBulkCreateOut,
+    InviteListItemOut,
+    InviteValidateOut,
 )
 
 app = FastAPI(title="HVAC Edge API", version="0.1.0")
 
+_REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
+_REQUIRED_PUBLIC_MQTT_URI = "mqtts://mqtt.pilot.zmartify.dk:8883"
+
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
 _OTA_STAGE_ROOT = Path(os.getenv("HVAC_EDGE_OTA_STAGE_DIR", "/data/ota-stage"))
+_ALLOW_MANUAL_FIRMWARE_REFRESH = os.getenv("HVAC_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH", "0").strip() == "1"
 
 
 class ZoneStreamHub:
@@ -459,17 +477,19 @@ def _enforce_admin_user_guardrails(actor_roles: set[str], target_roles: list[str
 
 
 def _edge_public_base_url(request: Request) -> str:
+    _ = request
     configured = os.getenv("HVAC_EDGE_PUBLIC_API_BASE", "").strip()
-    if configured:
-        return configured.rstrip("/")
-    return "https://pilot.zmartify.dk"
+    if configured.rstrip("/") == _REQUIRED_PUBLIC_EDGE_URL:
+        return _REQUIRED_PUBLIC_EDGE_URL
+    return _REQUIRED_PUBLIC_EDGE_URL
 
 
 def _edge_public_mqtt_uri(request: Request) -> str:
+    _ = request
     configured = os.getenv("HVAC_EDGE_PUBLIC_MQTT_URI", "").strip()
-    if configured:
-        return configured
-    return "mqtts://mqtt.pilot.zmartify.dk:8883"
+    if configured == _REQUIRED_PUBLIC_MQTT_URI:
+        return _REQUIRED_PUBLIC_MQTT_URI
+    return _REQUIRED_PUBLIC_MQTT_URI
 
 
 def _build_device_push_payload(request: Request, device_id: str, claim_token: str | None) -> dict:
@@ -506,6 +526,27 @@ def auth_login(payload: AuthLoginIn) -> dict:
         return {"access_token": token, "expires_at": expires_at}
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+@app.get("/auth/invite/validate", response_model=InviteValidateOut)
+def auth_validate_invite(token: str) -> dict:
+    return validate_registration_invite(token)
+
+
+@app.post("/auth/register", response_model=AuthLoginOut)
+def auth_register_by_invite(payload: AuthRegisterByInviteIn) -> dict:
+    try:
+        register_user_with_invite(
+            invite_token=payload.invite_token,
+            username=payload.username,
+            display_name=payload.display_name,
+            password=payload.password,
+            email=payload.email,
+        )
+        token, expires_at, _user_id = login(payload.username, payload.password)
+        return {"access_token": token, "expires_at": expires_at}
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @app.post("/auth/logout")
@@ -582,6 +623,43 @@ def admin_regenerate_acl(request: Request) -> dict:
         return result
     except RegistryOperationError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/admin/invites/register", response_model=InviteCreateOut)
+def admin_create_registration_invite(payload: InviteCreateIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    auth_user = request.state.auth_user
+    try:
+        invite = issue_registration_invite(
+            actor_user_id=auth_user.user_id,
+            device_id=payload.device_id,
+            label=payload.label,
+            expires_hours=payload.expires_hours,
+        )
+        return invite
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/admin/invites/register/bulk", response_model=InviteBulkCreateOut)
+def admin_create_registration_invites_bulk(payload: InviteBulkCreateIn, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    auth_user = request.state.auth_user
+    try:
+        return issue_registration_invites_bulk(
+            actor_user_id=auth_user.user_id,
+            device_ids=payload.device_ids,
+            label_prefix=payload.label_prefix,
+            expires_hours=payload.expires_hours,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/admin/invites/register", response_model=list[InviteListItemOut])
+def admin_list_registration_invites(request: Request, limit: int = 200) -> list[dict]:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    return list_registration_invites(limit=limit)
 
 
 @app.post("/domains", response_model=DomainOut, status_code=status.HTTP_201_CREATED)
@@ -1136,6 +1214,7 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
             device_id,
             source=payload.source,
             source_timestamp=payload.source_timestamp,
+            firmware_version=payload.firmware_version,
             online=payload.online,
             mqtt_connected=payload.mqtt_connected,
             last_error=payload.last_error,
@@ -1150,6 +1229,60 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/devices/{device_id}/firmware/refresh")
+def api_refresh_device_firmware(
+    device_id: str,
+    request: Request,
+    base_url: str | None = None,
+) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    if not _ALLOW_MANUAL_FIRMWARE_REFRESH:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    try:
+        device = get_device(device_id)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    candidate_urls: list[str] = []
+    if isinstance(base_url, str) and base_url.strip():
+        candidate_urls.append(base_url.strip())
+    local_url = device.get("local_url") if isinstance(device, dict) else None
+    if isinstance(local_url, str) and local_url.strip():
+        candidate_urls.append(local_url.strip())
+
+    seen: set[str] = set()
+    normalized_candidates: list[str] = []
+    for raw in candidate_urls:
+        normalized = normalize_device_base_url(raw)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_candidates.append(normalized)
+
+    for candidate in normalized_candidates:
+        try:
+            version_payload = get_remote_device_version(candidate)
+            live_version = version_payload.get("version")
+            if isinstance(live_version, str) and live_version.strip():
+                resolved_version = live_version.strip()
+                update_device_firmware_version(device_id, resolved_version)
+                return {
+                    "device_id": device_id,
+                    "firmware_version": resolved_version,
+                    "source": "remote_version",
+                    "base_url": candidate,
+                }
+        except DeviceOnboardingError:
+            continue
+        except RegistryOperationError as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="unable to query device /version; provide base_url reachable from edge",
+    )
 
 
 @app.websocket("/mobile/ws/zones/{zone_ref}")
@@ -1350,7 +1483,21 @@ def mobile_site_detail(site_id: str, request: Request) -> dict:
     resolved_site_id = _resolve_site_filter_id(site_id)
     _enforce_mobile_site_scope(request, resolved_site_id)
     try:
-        return get_mobile_site(site_id)
+        site = get_mobile_site(site_id)
+        for device in site.get("devices", []):
+            local_url = device.get("local_url")
+            if not local_url or not device.get("online"):
+                continue
+            try:
+                version_payload = get_remote_device_version(local_url)
+                live_version = version_payload.get("version")
+                if isinstance(live_version, str) and live_version:
+                    if live_version != device.get("firmware_version"):
+                        update_device_firmware_version(device.get("device_id"), live_version)
+                    device["firmware_version"] = live_version
+            except DeviceOnboardingError:
+                continue
+        return site
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1390,7 +1537,7 @@ def mobile_device(device_id: str, request: Request) -> dict:
     with get_connection() as conn:
         row = conn.execute(
             """
-                     SELECT d.device_id, d.display_name, d.firmware_version, d.integration_mode,
+                     SELECT d.device_id, d.display_name, d.firmware_version, d.local_url, d.integration_mode,
                          d.last_seen_at, s.uuid AS site_uuid, s.slug AS site_slug, s.name AS site_name
             FROM devices d
             LEFT JOIN sites s ON s.id = d.site_id
@@ -1402,12 +1549,25 @@ def mobile_device(device_id: str, request: Request) -> dict:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
 
+    firmware_version = row["firmware_version"]
+
+    if row["local_url"]:
+        try:
+            version_payload = get_remote_device_version(row["local_url"])
+            live_version = version_payload.get("version")
+            if isinstance(live_version, str) and live_version:
+                if live_version != firmware_version:
+                    update_device_firmware_version(device_id, live_version)
+                firmware_version = live_version
+        except DeviceOnboardingError:
+            pass
+
     zones = list_device_zones(device_id)
     channels = list_device_channels(device_id)
     return {
         "device_id": row["device_id"],
         "display_name": row["display_name"],
-        "firmware_version": row["firmware_version"],
+        "firmware_version": firmware_version,
         "online": bool(row["last_seen_at"]),
         "integration_mode": row["integration_mode"],
         "site": {"site_id": row["site_uuid"] or row["site_slug"], "site_name": row["site_name"]}
@@ -1455,9 +1615,11 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
         _enforce_mobile_site_scope(request, int(site_pk_id))
 
+        command_state = "local_only"
         if should_forward_setpoint_commands():
             try:
                 publish_setpoint_command(device_id, zone_id, float(payload.target_temperature_c))
+                command_state = "forwarded"
             except MqttCommandError as exc:
                 raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setpoint publish failed: {exc}") from exc
 
@@ -1485,7 +1647,7 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             "device_id": device_id,
             "zone_id": zone_id,
             "target_temperature_c": float(payload.target_temperature_c),
-            "command_state": "queued",
+            "command_state": command_state,
             "zone": zone,
         }
     except RegistryNotFoundError as exc:

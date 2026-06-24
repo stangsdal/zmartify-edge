@@ -218,6 +218,11 @@ export function RoomDetailPage() {
             <ThermostatDial
               value={target}
               currentTemperature={zone?.current_temperature_c ?? null}
+              humidity={zone?.humidity ?? null}
+              freshnessAgeMs={zone?.freshness_age_ms ?? null}
+              online={zone?.online !== false}
+              fault={zone?.fault ?? null}
+              windowOpen={zone?.window_open ?? null}
               roomName={zone?.name}
               statusLabel={statusText}
               heating={!!zone?.demand}

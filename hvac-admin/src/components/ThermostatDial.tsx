@@ -3,6 +3,11 @@ import { useMemo } from 'react';
 interface ThermostatDialProps {
   value: number;
   currentTemperature?: number | null;
+  humidity?: number | null;
+  freshnessAgeMs?: number | null;
+  online?: boolean;
+  fault?: string | null;
+  windowOpen?: boolean | null;
   roomName?: string;
   statusLabel?: string;
   heating?: boolean;
@@ -16,6 +21,11 @@ interface ThermostatDialProps {
 export function ThermostatDial({
   value,
   currentTemperature,
+  humidity,
+  freshnessAgeMs,
+  online = true,
+  fault,
+  windowOpen,
   roomName,
   statusLabel,
   heating = false,
@@ -79,9 +89,18 @@ export function ThermostatDial({
   const fullScalePath = describeArc(scaleStartAngle, scaleEndAngle);
   const bandPath = describeArc(bandStartAngle, bandEndAngle);
   const showBand = Math.abs(bandEndTemp - bandStartTemp) > 0.05;
+  const freshnessText =
+    typeof freshnessAgeMs === 'number'
+      ? freshnessAgeMs < 15_000
+        ? 'Live'
+        : `${Math.floor(freshnessAgeMs / 1000)}s old`
+      : 'Unknown';
+
+  const modePills = ['MANUAL', 'ECO', 'COMFORT', 'AWAY'];
+  const activeMode = modeLabel;
 
   return (
-    <div className="relative mx-auto w-full max-w-[360px] overflow-hidden rounded-[2rem] border border-white/10 hero-glow bg-[radial-gradient(circle_at_top,rgba(103,251,255,0.16),transparent_38%),linear-gradient(180deg,rgba(21,28,44,0.92),rgba(21,28,44,0.78))] p-5 text-white shadow-2xl">
+    <div className="relative mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border border-white/10 hero-glow bg-[radial-gradient(circle_at_top,rgba(103,251,255,0.16),transparent_38%),linear-gradient(180deg,rgba(21,28,44,0.92),rgba(21,28,44,0.78))] p-5 text-white shadow-2xl">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(103,251,255,0.16),transparent_25%),radial-gradient(circle_at_82%_20%,rgba(255,106,43,0.18),transparent_28%)]" />
 
       <div className="relative flex items-center justify-between text-xs uppercase tracking-[0.28em] text-white/70">
@@ -89,7 +108,16 @@ export function ThermostatDial({
         <span>{heating ? 'Heating' : statusLabel || 'Idle'}</span>
       </div>
 
-      <div className="relative mt-3 flex justify-end">
+      <div className="relative mt-3 flex flex-wrap gap-2">
+        <span className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] bg-white/10 text-white/90">
+          {online ? 'Online' : 'Offline'}
+        </span>
+        <span className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] bg-white/10 text-white/90">
+          {freshnessText}
+        </span>
+        <span className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] bg-white/10 text-white/90">
+          Humidity {typeof humidity === 'number' ? `${humidity}%` : '--'}
+        </span>
         <span
           className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]"
           style={{
@@ -97,12 +125,18 @@ export function ThermostatDial({
             backgroundColor: heating ? 'rgba(255,106,43,0.15)' : 'rgba(138,148,166,0.15)',
           }}
         >
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ backgroundColor: heating ? '#FF6A2B' : '#8A94A6' }}
-          />
           {heating ? 'Heat ON' : 'Heat OFF'}
         </span>
+        {windowOpen ? (
+          <span className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] bg-cyan-400/20 text-cyan-100">
+            Window Open
+          </span>
+        ) : null}
+        {fault ? (
+          <span className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] bg-rose-400/20 text-rose-100">
+            Fault
+          </span>
+        ) : null}
       </div>
 
       <div className="relative mt-4 flex items-center justify-center">
@@ -174,6 +208,25 @@ export function ThermostatDial({
           onChange={(e) => onChange(Number(e.target.value))}
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
         />
+      </div>
+
+      <div className="relative mt-4 grid grid-cols-4 gap-2">
+        {modePills.map((mode) => {
+          const active = mode === activeMode;
+          return (
+            <div
+              key={mode}
+              className="rounded-xl px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.12em]"
+              style={{
+                backgroundColor: active ? 'rgba(103,251,255,0.2)' : 'rgba(255,255,255,0.08)',
+                color: active ? '#67FBFF' : 'rgba(255,255,255,0.78)',
+                border: active ? '1px solid rgba(103,251,255,0.65)' : '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              {mode}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

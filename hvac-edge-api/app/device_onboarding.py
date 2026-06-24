@@ -79,6 +79,11 @@ def get_remote_onboarding_status(base_url: str) -> dict:
     return _request_json("GET", f"{normalized}/onboarding/status")
 
 
+def get_remote_device_version(base_url: str) -> dict:
+    normalized = normalize_device_base_url(base_url)
+    return _request_json("GET", f"{normalized}/version")
+
+
 def _request_octet_stream_json(method: str, url: str, payload: bytes, timeout_s: int = 120) -> dict:
     headers = {
         "Accept": "application/json",

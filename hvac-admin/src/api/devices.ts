@@ -28,6 +28,9 @@ export const deviceApi = {
   claim: (payload: DeviceClaimRequest) =>
     apiClient.post('/devices/claim', payload),
 
+  pushConfig: (deviceId: string, payload: { claim_token?: string } = {}) =>
+    apiClient.post(`/devices/${deviceId}/push-config`, payload),
+
   getOnboardingStatus: (deviceId: string) =>
     apiClient.get(`/devices/${deviceId}/onboarding-status`),
   

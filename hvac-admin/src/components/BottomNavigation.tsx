@@ -1,5 +1,5 @@
 import { IonTabBar, IonTabButton, IonIcon } from '@ionic/react';
-import { homeOutline, gridOutline, statsChartOutline, notificationsOutline, settingsOutline, peopleOutline, hardwareChipOutline } from 'ionicons/icons';
+import { homeOutline, gridOutline, statsChartOutline, notificationsOutline, settingsOutline, peopleOutline, hardwareChipOutline, qrCodeOutline } from 'ionicons/icons';
 
 interface BottomNavigationProps {
   appBase: string;
@@ -23,6 +23,12 @@ export function BottomNavigation({ appBase, isAdmin = false }: BottomNavigationP
         <IonTabButton tab="users" href={`${appBase}/users`}>
           <IonIcon icon={peopleOutline} />
           Users
+        </IonTabButton>
+      )}
+      {isAdmin && (
+        <IonTabButton tab="invites" href={`${appBase}/invites`}>
+          <IonIcon icon={qrCodeOutline} />
+          Invites
         </IonTabButton>
       )}
       <IonTabButton tab="rooms" href={`${appBase}/rooms`}>

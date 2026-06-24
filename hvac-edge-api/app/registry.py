@@ -292,6 +292,26 @@ def update_device_local_url(device_id: str, local_url: str) -> dict[str, Any]:
         return _row_to_dict(row) or {}
 
 
+def update_device_firmware_version(device_id: str, firmware_version: str | None) -> dict[str, Any]:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE devices SET firmware_version = ? WHERE device_id = ?",
+            (firmware_version, device_id),
+        )
+        if cur.rowcount == 0:
+            raise RegistryNotFoundError("device not found")
+        row = conn.execute(
+            """
+            SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
+                   device_type, integration_mode, created_at, last_seen_at
+            FROM devices
+            WHERE device_id = ?
+            """,
+            (device_id,),
+        ).fetchone()
+        return _row_to_dict(row) or {}
+
+
 def ensure_device_admin_token(device_id: str) -> str:
     token = secrets.token_urlsafe(24)
     with get_connection() as conn:

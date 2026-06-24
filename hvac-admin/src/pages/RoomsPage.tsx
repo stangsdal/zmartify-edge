@@ -16,6 +16,7 @@ export function RoomsPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
+  const [setpointError, setSetpointError] = useState('');
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
 
   const handleSetpointChange = async (room: RoomWithRef, delta: number) => {
@@ -27,8 +28,10 @@ export function RoomsPage() {
       setRooms((prev) =>
         prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, target_temperature_c: next } : r))
       );
+      setSetpointError('');
     } catch (error) {
-      console.error('setpoint change failed', error);
+      const msg = error instanceof Error ? error.message : String(error || 'Unknown error');
+      setSetpointError(`Setpoint update failed: ${msg}`);
     }
   };
 
@@ -138,6 +141,12 @@ export function RoomsPage() {
             value={selectedSite}
             onChange={setSelectedSite}
           />
+
+          {setpointError ? (
+            <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {setpointError}
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-3">
             {sortedRooms.map((room) => (

@@ -550,6 +550,7 @@ def ingest_device_twin_snapshot(
     *,
     source: str,
     source_timestamp: str | None,
+    firmware_version: str | None,
     online: bool | None,
     mqtt_connected: bool | None,
     last_error: str | None,
@@ -561,6 +562,7 @@ def ingest_device_twin_snapshot(
             {
                 "source": source,
                 "source_timestamp": source_timestamp,
+                "firmware_version": firmware_version,
                 "online": online,
                 "mqtt_connected": mqtt_connected,
                 "last_error": last_error,
@@ -575,6 +577,11 @@ def ingest_device_twin_snapshot(
 
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        if firmware_version is not None and str(firmware_version).strip() != "":
+            conn.execute(
+                "UPDATE devices SET firmware_version = ? WHERE id = ?",
+                (str(firmware_version).strip(), device["id"]),
+            )
         ingest_row = conn.execute(
             "SELECT last_source, last_payload_hash, last_ingested_at FROM twin_ingest_state WHERE device_id = ?",
             (device["id"],),
@@ -1324,7 +1331,7 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
         site = _resolve_site(conn, site_ref)
         rows = conn.execute(
             """
-            SELECT d.device_id, d.uuid, d.display_name, d.firmware_version,
+                 SELECT d.device_id, d.uuid, d.display_name, d.firmware_version, d.local_url,
                    ds.online, ds.mqtt_connected, ds.updated_at
             FROM devices d
             LEFT JOIN device_state ds ON ds.device_id = d.id
@@ -1347,6 +1354,7 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
                 "device_uuid": row["uuid"],
                 "display_name": row["display_name"],
                 "firmware_version": row["firmware_version"],
+                "local_url": row["local_url"],
                 "online": bool(row["online"]) if row["online"] is not None else False,
                 "mqtt_connected": bool(row["mqtt_connected"]) if row["mqtt_connected"] is not None else False,
                 "updated_at": row["updated_at"],

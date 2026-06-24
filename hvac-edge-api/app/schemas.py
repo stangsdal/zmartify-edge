@@ -244,6 +244,7 @@ class TelemetryChannelIn(BaseModel):
 class DeviceTwinIngestIn(BaseModel):
     source: str = Field(default="device_ingest", min_length=1)
     source_timestamp: str | None = None
+    firmware_version: str | None = None
     online: bool | None = None
     mqtt_connected: bool | None = None
     last_error: str | None = None
@@ -374,6 +375,68 @@ class AuthLoginIn(BaseModel):
 class AuthLoginOut(BaseModel):
     access_token: str
     expires_at: str
+
+
+class InviteCreateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    device_id: str | None = None
+    label: str | None = None
+    expires_hours: int = Field(default=168, ge=1, le=24 * 90)
+
+
+class InviteCreateOut(BaseModel):
+    invite_token: str
+    invite_code: str
+    invite_url: str
+    label_text: str
+    expires_at: str
+    device_id: str | None
+
+
+class InviteBulkCreateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    device_ids: list[str] = Field(min_length=1)
+    label_prefix: str | None = None
+    expires_hours: int = Field(default=168, ge=1, le=24 * 90)
+
+
+class InviteBulkCreateOut(BaseModel):
+    invites: list[InviteCreateOut]
+    csv_content: str
+
+
+class InviteValidateOut(BaseModel):
+    valid: bool
+    invite_code: str | None = None
+    expires_at: str | None = None
+    device_id: str | None = None
+    label: str | None = None
+    reason: str | None = None
+
+
+class InviteListItemOut(BaseModel):
+    id: int
+    invite_code: str
+    device_id: str | None = None
+    label: str | None = None
+    expires_at: str
+    used_at: str | None = None
+    created_at: str
+    created_by_user_id: int | None = None
+    used_by_user_id: int | None = None
+    status: str
+
+
+class AuthRegisterByInviteIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    invite_token: str = Field(min_length=16)
+    username: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    password: str = Field(min_length=12)
+    email: str | None = None
 
 
 class SetupStatusOut(BaseModel):
