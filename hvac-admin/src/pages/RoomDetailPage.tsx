@@ -4,7 +4,8 @@ import { useParams } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { ThermostatDial } from '../components/ThermostatDial';
 import { apiClient } from '../api/client';
-import { mobileApi, MobileZone } from '../api/mobile';
+import { mobileApi, MobileSetpointResponse, MobileZone } from '../api/mobile';
+import { freshnessFromAgeMs } from '../utils/freshness';
 
 interface RouteParams {
   zoneRef: string;
@@ -18,6 +19,7 @@ export function RoomDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [setpointState, setSetpointState] = useState<'idle' | 'pending' | 'confirmed' | 'failed'>('idle');
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState('');
@@ -38,11 +40,29 @@ export function RoomDetailPage() {
     setZone(nextZone);
     setRenameValue(nextZone.name || '');
     const nextTarget = nextZone.target_temperature_c ?? 21;
-    if (!dirtyRef.current && !savingRef.current) {
-      setTarget(nextTarget);
-      lastAppliedRef.current = nextTarget;
+
+    if (nextZone.setpoint_pending || nextZone.setpoint_command_state === 'pending_device_feedback') {
+      setSetpointState('pending');
+      setSaveError('');
+    } else if ((nextZone.setpoint_command_state || '').startsWith('failed')) {
+      setSetpointState('failed');
+      if (nextZone.setpoint_failure_reason) {
+        setSaveError(String(nextZone.setpoint_failure_reason));
+      }
+    } else if (nextZone.setpoint_command_state === 'confirmed') {
+      setSetpointState('confirmed');
+      setSaveError('');
     }
-    setSaveError('');
+
+    if (!dirtyRef.current && !savingRef.current) {
+      const pendingRequested =
+        nextZone.setpoint_pending && typeof nextZone.setpoint_requested_target_c === 'number'
+          ? nextZone.setpoint_requested_target_c
+          : null;
+      const dialTarget = pendingRequested ?? nextTarget;
+      setTarget(dialTarget);
+      lastAppliedRef.current = dialTarget;
+    }
   };
 
   useEffect(() => {
@@ -133,10 +153,22 @@ export function RoomDetailPage() {
 
   const statusText = useMemo(() => {
     if (!zone) return 'Loading room status...';
-    if (!zone.online) return 'Offline';
+    const freshness = freshnessFromAgeMs(zone.freshness_age_ms);
+    if (freshness.state === 'offline' || !zone.online) return 'Offline';
+    if (freshness.state === 'stale') return 'Stale data';
+    const heating = zone.demand ?? zone.active ?? false;
     if (zone.fault) return `Fault: ${zone.fault}`;
-    if (zone.demand) return 'Heating';
+    if (heating) return 'Heating';
     return 'Comfortable';
+  }, [zone]);
+
+  const heatSignalText = useMemo(() => {
+    if (!zone) return 'Unknown';
+    const freshness = freshnessFromAgeMs(zone.freshness_age_ms);
+    if (freshness.state !== 'fresh') return freshness.label;
+    if (zone.demand != null) return `Demand (${zone.demand ? 'ON' : 'OFF'})`;
+    if (zone.active != null) return `Active fallback (${zone.active ? 'ON' : 'OFF'})`;
+    return 'Unavailable';
   }, [zone]);
 
   useEffect(() => {
@@ -151,11 +183,26 @@ export function RoomDetailPage() {
         setSaving(true);
         setSaveError('');
         try {
-          await mobileApi.setZoneSetpoint(resolvedRef, target);
+          const result: MobileSetpointResponse = await mobileApi.setZoneSetpoint(resolvedRef, target);
+          const pending = Boolean(result.pending || result.command_state === 'pending_device_feedback');
           lastAppliedRef.current = target;
-          setZone((prev) => (prev ? { ...prev, target_temperature_c: target } : prev));
+          setZone((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  target_temperature_c: pending ? prev.target_temperature_c : target,
+                  setpoint_pending: pending,
+                  setpoint_command_state: result.command_state,
+                  setpoint_command_id: result.command_id ?? null,
+                  setpoint_requested_target_c: target,
+                  setpoint_failure_reason: pending ? null : prev.setpoint_failure_reason,
+                }
+              : prev,
+          );
+          setSetpointState(pending ? 'pending' : 'confirmed');
           setDirty(false);
         } catch (e) {
+          setSetpointState('failed');
           setSaveError(String(e));
         } finally {
           setSaving(false);
@@ -171,7 +218,18 @@ export function RoomDetailPage() {
   const handleTargetChange = (nextTarget: number) => {
     setTarget(nextTarget);
     setDirty(true);
+    setSaveError('');
+    setSetpointState('idle');
   };
+
+  const setpointStatusText = useMemo(() => {
+    if (saving) return 'Sending setpoint...';
+    if (dirty) return 'Will apply in a moment';
+    if (setpointState === 'pending') return 'Waiting for device confirmation...';
+    if (setpointState === 'failed') return 'Setpoint failed';
+    if (setpointState === 'confirmed') return 'Setpoint confirmed';
+    return 'Setpoint saved';
+  }, [dirty, saving, setpointState]);
 
   const handleRename = async () => {
     const nextName = renameValue.trim();
@@ -212,7 +270,7 @@ export function RoomDetailPage() {
                   backgroundColor: streamState === 'connected' ? 'rgba(18,183,106,0.15)' : 'rgba(247,144,9,0.16)',
                 }}
               >
-                {streamState === 'connected' ? 'Live' : streamState === 'connecting' ? 'Connecting' : 'Reconnecting'}
+                {streamState === 'connected' ? 'Connected' : streamState === 'connecting' ? 'Connecting' : 'Reconnecting'}
               </span>
             </div>
             <ThermostatDial
@@ -220,17 +278,17 @@ export function RoomDetailPage() {
               currentTemperature={zone?.current_temperature_c ?? null}
               humidity={zone?.humidity ?? null}
               freshnessAgeMs={zone?.freshness_age_ms ?? null}
-              online={zone?.online !== false}
+              online={(zone?.online !== false) && freshnessFromAgeMs(zone?.freshness_age_ms).state === 'fresh'}
               fault={zone?.fault ?? null}
               windowOpen={zone?.window_open ?? null}
               roomName={zone?.name}
               statusLabel={statusText}
-              heating={!!zone?.demand}
+              heating={Boolean(zone?.demand ?? zone?.active)}
               thermostatMode={zone?.thermostat_mode ?? zone?.mode ?? null}
               onChange={handleTargetChange}
             />
             <p className="mt-3 text-center text-xs uppercase tracking-[0.22em] text-muted">
-              {saving ? 'Applying automatically...' : dirty ? 'Will apply in a moment' : 'Setpoint saved'}
+              {setpointStatusText}
             </p>
             {saveError && <p className="text-center text-sm mt-2 text-rose-600">{saveError}</p>}
           </section>
@@ -238,6 +296,8 @@ export function RoomDetailPage() {
           <section className="rounded-2xl app-surface shadow-soft p-4 space-y-2">
             <p className="text-sm text-muted">Status</p>
             <p className="text-base font-medium">{statusText}</p>
+            <p className="text-sm text-muted">Heat Signal</p>
+            <p className="text-base">{heatSignalText}</p>
             <p className="text-sm text-muted">Last Update</p>
             <p className="text-base">{zone?.freshness_age_ms == null ? 'Unknown' : `${Math.floor(zone.freshness_age_ms / 1000)}s ago`}</p>
           </section>

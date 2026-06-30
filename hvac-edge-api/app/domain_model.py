@@ -21,6 +21,349 @@ NOTIFICATION_EVENT_TYPES = {
 }
 
 
+def _floats_close(a: float | None, b: float | None, tolerance: float = 0.05) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) <= tolerance
+
+
+def _find_pending_setpoint_command_id(
+    conn: Any,
+    *,
+    device_pk_id: int,
+    zone_id: int,
+    confirmed_target_c: float,
+) -> str | None:
+    rows = conn.execute(
+        """
+        SELECT payload_json
+        FROM event_log
+        WHERE event_type = 'zone_setpoint_changed' AND device_id = ? AND zone_id = ?
+        ORDER BY id DESC
+        LIMIT 25
+        """,
+        (device_pk_id, zone_id),
+    ).fetchall()
+    for row in rows:
+        raw_payload = row["payload_json"]
+        if not raw_payload:
+            continue
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("command_state") != "pending_device_feedback":
+            continue
+        requested = payload.get("target_temperature_c")
+        command_id = payload.get("command_id")
+        if command_id and _floats_close(requested, confirmed_target_c):
+            return str(command_id)
+    return None
+
+
+def _setpoint_command_timeout_ms() -> int:
+    raw = os.getenv("HVAC_EDGE_SETPOINT_PENDING_TIMEOUT_S", "20").strip()
+    try:
+        timeout_s = max(1, int(raw))
+    except ValueError:
+        timeout_s = 20
+    return timeout_s * 1000
+
+
+def _iter_recent_pending_setpoint_events(
+    conn: Any,
+    *,
+    device_pk_id: int,
+    zone_id: int,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT id, payload_json, created_at
+        FROM event_log
+        WHERE event_type = 'zone_setpoint_changed' AND device_id = ? AND zone_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (device_pk_id, zone_id, max(1, int(limit))),
+    ).fetchall()
+    pending_events: list[dict[str, Any]] = []
+    for row in rows:
+        raw_payload = row["payload_json"]
+        if not raw_payload:
+            continue
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("command_state") != "pending_device_feedback":
+            continue
+        command_id = payload.get("command_id")
+        if not command_id:
+            continue
+        pending_events.append(
+            {
+                "id": int(row["id"]),
+                "command_id": str(command_id),
+                "requested_target_temperature_c": payload.get("target_temperature_c"),
+                "created_at": row["created_at"],
+            }
+        )
+    return pending_events
+
+
+def _zone_setpoint_command_state(
+    conn: Any,
+    *,
+    device_pk_id: int,
+    zone_id: int,
+    current_target_c: float | None,
+    now: datetime,
+) -> dict[str, Any]:
+    pending_events = _iter_recent_pending_setpoint_events(
+        conn,
+        device_pk_id=device_pk_id,
+        zone_id=zone_id,
+    )
+    if not pending_events:
+        return {
+            "setpoint_command_state": "confirmed",
+            "setpoint_pending": False,
+            "setpoint_command_id": None,
+            "setpoint_requested_target_c": None,
+            "setpoint_failure_reason": None,
+            "setpoint_command_age_ms": None,
+        }
+
+    feedback_rows = conn.execute(
+        """
+        SELECT payload_json
+        FROM event_log
+        WHERE event_type = 'zone_setpoint_feedback_received' AND device_id = ? AND zone_id = ?
+        ORDER BY id DESC
+        LIMIT 100
+        """,
+        (device_pk_id, zone_id),
+    ).fetchall()
+    feedback_by_command: dict[str, dict[str, Any]] = {}
+    for row in feedback_rows:
+        raw_payload = row["payload_json"]
+        if not raw_payload:
+            continue
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        command_id = payload.get("command_id")
+        if not command_id:
+            continue
+        feedback_by_command[str(command_id)] = payload
+
+    outcome_rows = conn.execute(
+        """
+        SELECT payload_json
+        FROM event_log
+        WHERE event_type = 'setpoint_command_outcome_received' AND device_id = ? AND zone_id = ?
+        ORDER BY id DESC
+        LIMIT 100
+        """,
+        (device_pk_id, zone_id),
+    ).fetchall()
+    outcome_by_command: dict[str, dict[str, Any]] = {}
+    for row in outcome_rows:
+        raw_payload = row["payload_json"]
+        if not raw_payload:
+            continue
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        command_id = payload.get("command_id")
+        if not command_id:
+            continue
+        outcome_by_command[str(command_id)] = payload
+
+    timeout_ms = _setpoint_command_timeout_ms()
+    for candidate in pending_events:
+        command_id = candidate["command_id"]
+        requested_target_c = candidate.get("requested_target_temperature_c")
+        created_dt = _parse_iso_datetime(candidate.get("created_at"))
+        age_ms = None
+        if created_dt is not None:
+            age_ms = max(0, int((now - created_dt).total_seconds() * 1000))
+
+        feedback = feedback_by_command.get(command_id)
+        if feedback and feedback.get("pending_cleared"):
+            return {
+                "setpoint_command_state": "confirmed",
+                "setpoint_pending": False,
+                "setpoint_command_id": command_id,
+                "setpoint_requested_target_c": requested_target_c,
+                "setpoint_failure_reason": None,
+                "setpoint_command_age_ms": age_ms,
+            }
+
+        outcome = outcome_by_command.get(command_id)
+        if outcome:
+            result = str(outcome.get("result") or "").strip().lower()
+            detail = outcome.get("detail")
+            if result in {"confirmed", "accepted"}:
+                if (
+                    current_target_c is not None
+                    and requested_target_c is not None
+                    and _floats_close(float(current_target_c), float(requested_target_c))
+                ):
+                    return {
+                        "setpoint_command_state": "confirmed",
+                        "setpoint_pending": False,
+                        "setpoint_command_id": command_id,
+                        "setpoint_requested_target_c": requested_target_c,
+                        "setpoint_failure_reason": None,
+                        "setpoint_command_age_ms": age_ms,
+                    }
+            elif result:
+                return {
+                    "setpoint_command_state": "failed_device_rejected",
+                    "setpoint_pending": False,
+                    "setpoint_command_id": command_id,
+                    "setpoint_requested_target_c": requested_target_c,
+                    "setpoint_failure_reason": detail or result,
+                    "setpoint_command_age_ms": age_ms,
+                }
+
+        if (
+            age_ms is not None
+            and age_ms >= timeout_ms
+            and current_target_c is not None
+            and requested_target_c is not None
+            and not _floats_close(float(current_target_c), float(requested_target_c))
+        ):
+            return {
+                "setpoint_command_state": "failed_timeout",
+                "setpoint_pending": False,
+                "setpoint_command_id": command_id,
+                "setpoint_requested_target_c": requested_target_c,
+                "setpoint_failure_reason": "device did not report requested target before timeout",
+                "setpoint_command_age_ms": age_ms,
+            }
+
+        return {
+            "setpoint_command_state": "pending_device_feedback",
+            "setpoint_pending": True,
+            "setpoint_command_id": command_id,
+            "setpoint_requested_target_c": requested_target_c,
+            "setpoint_failure_reason": None,
+            "setpoint_command_age_ms": age_ms,
+        }
+
+    return {
+        "setpoint_command_state": "confirmed",
+        "setpoint_pending": False,
+        "setpoint_command_id": None,
+        "setpoint_requested_target_c": None,
+        "setpoint_failure_reason": None,
+        "setpoint_command_age_ms": None,
+    }
+
+
+def ingest_setpoint_command_outcome(
+    device_external_id: str,
+    zone_id: int,
+    *,
+    result: str,
+    detail: str | None = None,
+    requested_target_c: float | None = None,
+    confirmed_target_c: float | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_result = str(result or "").strip().lower()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        device_pk_id = int(device["id"])
+        pending_events = _iter_recent_pending_setpoint_events(
+            conn,
+            device_pk_id=device_pk_id,
+            zone_id=int(zone_id),
+        )
+
+        command_id: str | None = None
+        if requested_target_c is not None:
+            for candidate in pending_events:
+                requested = candidate.get("requested_target_temperature_c")
+                if _floats_close(requested, requested_target_c):
+                    command_id = candidate["command_id"]
+                    break
+        if command_id is None and pending_events:
+            command_id = pending_events[0]["command_id"]
+
+    event_payload: dict[str, Any] = {
+        "device_id": device_external_id,
+        "zone_id": int(zone_id),
+        "result": normalized_result,
+        "detail": detail,
+        "command_id": command_id,
+        "requested_target_temperature_c": requested_target_c,
+        "confirmed_target_temperature_c": confirmed_target_c,
+        "payload": payload or {},
+    }
+
+    outcome_event = log_event(
+        "setpoint_command_outcome_received",
+        domain_id=device.get("domain_id"),
+        site_id=device.get("site_id"),
+        device_pk_id=int(device["id"]),
+        zone_id=int(zone_id),
+        payload=event_payload,
+    )
+
+    # If device confirms the effective target, keep edge zone_state aligned even
+    # when periodic twin ingest is delayed/stale.
+    if normalized_result in {"confirmed", "accepted"} and confirmed_target_c is not None:
+        zone = upsert_zone_state(
+            device_external_id,
+            int(zone_id),
+            target_temperature=float(confirmed_target_c),
+            source="mqtt_setpoint_outcome",
+        )
+        log_event(
+            "zone_setpoint_feedback_received",
+            domain_id=device.get("domain_id"),
+            site_id=device.get("site_id"),
+            device_pk_id=int(device["id"]),
+            zone_id=int(zone_id),
+            payload={
+                "device_id": device_external_id,
+                "zone_id": int(zone_id),
+                "command_id": command_id,
+                "previous_target_temperature_c": None,
+                "confirmed_target_temperature_c": float(confirmed_target_c),
+                "source": "mqtt_setpoint_outcome",
+                "pending_cleared": True,
+                "zone_target_after_update": zone.get("target_temperature_c"),
+            },
+        )
+
+    if normalized_result not in {"confirmed", "accepted"}:
+        log_event(
+            "setpoint_write_failed",
+            domain_id=device.get("domain_id"),
+            site_id=device.get("site_id"),
+            device_pk_id=int(device["id"]),
+            zone_id=int(zone_id),
+            payload={
+                "device_id": device_external_id,
+                "zone_id": int(zone_id),
+                "command_id": command_id,
+                "reason": detail or normalized_result or "failed",
+            },
+        )
+
+    return {
+        "command_id": command_id,
+        "event": outcome_event,
+    }
+
+
 class DomainModelError(ValueError):
     """Domain model validation/lookup errors."""
 
@@ -216,9 +559,21 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
             (device["id"],),
         ).fetchall()
 
+        now = datetime.now(UTC)
+        command_states: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            zid = int(row["zone_id"])
+            command_states[zid] = _zone_setpoint_command_state(
+                conn,
+                device_pk_id=int(device["id"]),
+                zone_id=zid,
+                current_target_c=row["target_temperature"],
+                now=now,
+            )
+
     zones: list[dict[str, Any]] = []
-    now = datetime.now(UTC)
     for row in rows:
+        zone_state = command_states.get(int(row["zone_id"]), {})
         zones.append(
             {
                 "zone_uuid": row["zone_uuid"],
@@ -237,6 +592,12 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
                 "source_timestamp": row["source_timestamp"],
                 "freshness_age_ms": _age_ms(row["updated_at"], now),
                 "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
+                "setpoint_command_state": zone_state.get("setpoint_command_state", "confirmed"),
+                "setpoint_pending": bool(zone_state.get("setpoint_pending", False)),
+                "setpoint_command_id": zone_state.get("setpoint_command_id"),
+                "setpoint_requested_target_c": zone_state.get("setpoint_requested_target_c"),
+                "setpoint_failure_reason": zone_state.get("setpoint_failure_reason"),
+                "setpoint_command_age_ms": zone_state.get("setpoint_command_age_ms"),
             }
         )
     return zones
@@ -650,9 +1011,23 @@ def ingest_device_twin_snapshot(
         last_error=last_error,
     )
 
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        device_pk_id = int(device["id"])
+        device_domain_id = device.get("domain_id")
+        device_site_id = device.get("site_id")
+
     zone_count = 0
+    setpoint_feedback_count = 0
     for zone in zones or []:
         zone_id = int(zone["zone_id"])
+        reported_target_c = zone.get("target_temperature_c")
+        previous_zone = get_device_zone(device_external_id, zone_id)
+        previous_target_c = previous_zone.get("target_temperature_c")
+        zone_demand = zone.get("demand")
+        zone_active = zone.get("active")
+        if zone_demand is None and zone_active is not None:
+            zone_demand = bool(zone_active)
         zone_name = zone.get("name")
         if zone_name is not None:
             normalized_name = str(zone_name).strip()
@@ -663,12 +1038,41 @@ def ingest_device_twin_snapshot(
             zone_id,
             current_temperature=zone.get("current_temperature_c"),
             target_temperature=zone.get("target_temperature_c"),
-            demand=zone.get("demand"),
-            active=zone.get("active"),
+            demand=zone_demand,
+            active=zone_active,
             fault=zone.get("fault"),
             source=source,
             source_timestamp=source_timestamp,
         )
+        if (
+            source != "mobile_api"
+            and reported_target_c is not None
+            and not _floats_close(previous_target_c, reported_target_c)
+        ):
+            with get_connection() as conn:
+                matched_command_id = _find_pending_setpoint_command_id(
+                    conn,
+                    device_pk_id=device_pk_id,
+                    zone_id=zone_id,
+                    confirmed_target_c=float(reported_target_c),
+                )
+            log_event(
+                "zone_setpoint_feedback_received",
+                domain_id=device_domain_id,
+                site_id=device_site_id,
+                device_pk_id=device_pk_id,
+                zone_id=zone_id,
+                payload={
+                    "device_id": device_external_id,
+                    "zone_id": zone_id,
+                    "previous_target_temperature_c": previous_target_c,
+                    "confirmed_target_temperature_c": float(reported_target_c),
+                    "source": source,
+                    "command_id": matched_command_id,
+                    "pending_cleared": matched_command_id is not None,
+                },
+            )
+            setpoint_feedback_count += 1
         zone_count += 1
 
     channel_count = 0
@@ -708,6 +1112,7 @@ def ingest_device_twin_snapshot(
         "device_state": device_state,
         "zone_updates": zone_count,
         "channel_updates": channel_count,
+        "setpoint_feedback_events": setpoint_feedback_count,
         "applied": True,
     }
 
@@ -1130,7 +1535,7 @@ def upsert_zone_state(
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, target_temperature, demand, active, fault FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, target_temperature, demand, active, fault, source_timestamp FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
 
@@ -1139,6 +1544,7 @@ def upsert_zone_state(
         persisted_demand = row["demand"] if demand is None and row is not None else (None if demand is None else int(bool(demand)))
         persisted_active = row["active"] if active is None and row is not None else (None if active is None else int(bool(active)))
         persisted_fault = row["fault"] if fault is None and row is not None else fault
+        persisted_source_timestamp = source_timestamp if source_timestamp is not None else (row["source_timestamp"] if row is not None else now)
 
         conn.execute(
             """
@@ -1151,7 +1557,17 @@ def upsert_zone_state(
                 active = excluded.active,
                 fault = excluded.fault,
                 source_timestamp = excluded.source_timestamp,
-                updated_at = excluded.updated_at,
+                updated_at = CASE
+                    WHEN zone_state.current_temperature IS excluded.current_temperature
+                     AND zone_state.target_temperature IS excluded.target_temperature
+                     AND zone_state.demand IS excluded.demand
+                     AND zone_state.active IS excluded.active
+                     AND zone_state.fault IS excluded.fault
+                     AND zone_state.source_timestamp IS excluded.source_timestamp
+                     AND zone_state.source IS excluded.source
+                    THEN zone_state.updated_at
+                    ELSE excluded.updated_at
+                END,
                 source = excluded.source
             """,
             (
@@ -1162,7 +1578,7 @@ def upsert_zone_state(
                 persisted_demand,
                 persisted_active,
                 persisted_fault,
-                source_timestamp or now,
+                persisted_source_timestamp,
                 now,
                 source,
             ),

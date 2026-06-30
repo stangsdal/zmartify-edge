@@ -273,6 +273,7 @@ class DeviceTwinIngestResult(BaseModel):
     source_timestamp: str | None = None
     zone_updates: int
     channel_updates: int
+    setpoint_feedback_events: int = 0
     device_state: dict | None = None
     applied: bool = True
     skip_reason: str | None = None

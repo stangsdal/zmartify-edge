@@ -46,7 +46,7 @@ export function HomePage() {
     return values.reduce((a, b) => a + b, 0) / values.length;
   }, [zones]);
 
-  const heatingRooms = useMemo(() => zones.filter((z) => z.demand).length, [zones]);
+  const heatingRooms = useMemo(() => zones.filter((z) => (z.demand ?? z.active ?? false)).length, [zones]);
   const offlineRooms = useMemo(() => zones.filter((z) => z.online === false).length, [zones]);
 
   const comfortScore = useMemo(() => {

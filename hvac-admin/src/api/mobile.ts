@@ -52,9 +52,26 @@ export interface MobileZone {
   current_temperature_c?: number;
   target_temperature_c?: number;
   demand?: boolean;
+  active?: boolean;
   online?: boolean;
   fault?: string | null;
   freshness_age_ms?: number | null;
+  setpoint_command_state?: string;
+  setpoint_pending?: boolean;
+  setpoint_command_id?: string | null;
+  setpoint_requested_target_c?: number | null;
+  setpoint_failure_reason?: string | null;
+  setpoint_command_age_ms?: number | null;
+}
+
+export interface MobileSetpointResponse {
+  device_id: string;
+  zone_id: number;
+  target_temperature_c: number;
+  pending: boolean;
+  command_state: string;
+  command_id?: string | null;
+  zone: MobileZone;
 }
 
 export interface MobileDeviceDetail {
@@ -117,7 +134,7 @@ export const mobileApi = {
 
   listEvents: (limit = 25): Promise<{ events: MobileEvent[] }> => apiClient.get(`/mobile/events?limit=${limit}`),
 
-  setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<any> =>
+  setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<MobileSetpointResponse> =>
     apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {
       target_temperature_c: targetTemperatureC,
     }),

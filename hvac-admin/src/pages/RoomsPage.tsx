@@ -11,67 +11,12 @@ interface RoomWithRef extends MobileZone {
   zone_ref: string;
 }
 
-const ROOMS_CACHE_KEY_PREFIX = 'hvac_rooms_cache_v1:';
-const ROOMS_LOAD_METRICS_KEY = 'hvac_rooms_load_metrics_v1';
-
-interface RoomsLoadMetric {
-  at: string;
-  site_id: string;
-  source: 'cache' | 'network';
-  duration_ms: number;
-  room_count: number;
-  success: boolean;
-  error?: string;
-}
-
-const readRoomsCache = (siteId: string): RoomWithRef[] => {
-  try {
-    const raw = localStorage.getItem(`${ROOMS_CACHE_KEY_PREFIX}${siteId}`);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.filter((item): item is RoomWithRef => {
-      return Boolean(item && typeof item.zone_ref === 'string' && typeof item.name === 'string');
-    });
-  } catch {
-    return [];
-  }
-};
-
-const writeRoomsCache = (siteId: string, rooms: RoomWithRef[]): void => {
-  try {
-    localStorage.setItem(`${ROOMS_CACHE_KEY_PREFIX}${siteId}`, JSON.stringify(rooms));
-  } catch {
-    // Ignore quota/cache errors.
-  }
-};
-
-const recordRoomsLoadMetric = (metric: RoomsLoadMetric): void => {
-  try {
-    const raw = localStorage.getItem(ROOMS_LOAD_METRICS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    const list: RoomsLoadMetric[] = Array.isArray(parsed) ? parsed : [];
-    list.push(metric);
-    localStorage.setItem(ROOMS_LOAD_METRICS_KEY, JSON.stringify(list.slice(-120)));
-  } catch {
-    // Ignore telemetry storage errors.
-  }
-};
-
 export function RoomsPage() {
   const history = useHistory();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
-  const [loadingRooms, setLoadingRooms] = useState(false);
-  const [loadError, setLoadError] = useState('');
-  const [setpointError, setSetpointError] = useState('');
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
-  const roomsLoadSeqRef = useRef(0);
 
   const handleSetpointChange = async (room: RoomWithRef, delta: number) => {
     const current = room.target_temperature_c ?? 20;
@@ -82,10 +27,8 @@ export function RoomsPage() {
       setRooms((prev) =>
         prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, target_temperature_c: next } : r))
       );
-      setSetpointError('');
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error || 'Unknown error');
-      setSetpointError(`Setpoint update failed: ${msg}`);
+      console.error('setpoint change failed', error);
     }
   };
 
@@ -142,122 +85,44 @@ export function RoomsPage() {
   };
 
   useEffect(() => {
-    let canceled = false;
     const loadSites = async () => {
       const res = await mobileApi.listSites();
-      if (canceled) return;
       setSites(res.sites || []);
-      if (res.sites?.length) {
-        setSelectedSite(res.sites[0].site_id);
-      } else {
-        setSelectedSite('');
-        setRooms([]);
-      }
+      if (res.sites?.length) setSelectedSite(res.sites[0].site_id);
     };
-    loadSites().catch((error) => {
-      if (canceled) return;
-      const msg = error instanceof Error ? error.message : String(error || 'Unknown error');
-      setLoadError(`Failed to load sites: ${msg}`);
-      setSites([]);
-      setRooms([]);
-    });
-    return () => {
-      canceled = true;
-    };
+    loadSites().catch(console.error);
   }, []);
 
   useEffect(() => {
     if (!selectedSite) return;
-    let canceled = false;
-    roomsLoadSeqRef.current += 1;
-    const loadSeq = roomsLoadSeqRef.current;
-    const loadStartedAt = performance.now();
-
-    const cachedRooms = readRoomsCache(selectedSite);
-    if (cachedRooms.length > 0) {
-      setRooms(cachedRooms);
-      recordRoomsLoadMetric({
-        at: new Date().toISOString(),
-        site_id: selectedSite,
-        source: 'cache',
-        duration_ms: Math.round(performance.now() - loadStartedAt),
-        room_count: cachedRooms.length,
-        success: true,
-      });
-    }
-
     const loadRooms = async () => {
-      const networkStartedAt = performance.now();
-      setLoadingRooms(true);
-      setLoadError('');
-      const siteZones = await mobileApi.getSiteZones(selectedSite);
-      const nextRooms: RoomWithRef[] = (siteZones.devices || []).flatMap((device) =>
+      const site = await mobileApi.getSite(selectedSite);
+      const devices = await Promise.all(site.devices.map((d) => mobileApi.getDevice(d.device_id)));
+      const nextRooms: RoomWithRef[] = devices.flatMap((device) =>
         (device.zones || []).map((zone) => ({
           ...zone,
           zone_ref: zone.zone_uuid || `${device.device_id}:${zone.zone_id}`,
         }))
       );
-
-      if (canceled || loadSeq !== roomsLoadSeqRef.current) return;
       setRooms(nextRooms);
-      writeRoomsCache(selectedSite, nextRooms);
-      recordRoomsLoadMetric({
-        at: new Date().toISOString(),
-        site_id: selectedSite,
-        source: 'network',
-        duration_ms: Math.round(performance.now() - networkStartedAt),
-        room_count: nextRooms.length,
-        success: true,
-      });
-      setLoadingRooms(false);
     };
-    loadRooms().catch((error) => {
-      if (canceled || loadSeq !== roomsLoadSeqRef.current) return;
-      const msg = error instanceof Error ? error.message : String(error || 'Unknown error');
-      recordRoomsLoadMetric({
-        at: new Date().toISOString(),
-        site_id: selectedSite,
-        source: 'network',
-        duration_ms: Math.round(performance.now() - loadStartedAt),
-        room_count: 0,
-        success: false,
-        error: msg,
-      });
-      setLoadError(`Failed to load rooms: ${msg}`);
-      setRooms([]);
-      setLoadingRooms(false);
-    });
-
-    return () => {
-      canceled = true;
-    };
+    loadRooms().catch(console.error);
   }, [selectedSite]);
 
   useEffect(() => {
-    const activeZoneRefs = new Set(rooms.map((room) => room.zone_ref));
-
-    // Open missing subscriptions.
-    activeZoneRefs.forEach((zoneRef) => {
-      if (!socketsRef.current.has(zoneRef)) {
-        subscribeToZoneUpdates(zoneRef);
+    // Subscribe to updates for each room
+    rooms.forEach((room) => {
+      if (!socketsRef.current.has(room.zone_ref)) {
+        subscribeToZoneUpdates(room.zone_ref);
       }
     });
 
-    // Close subscriptions for rooms no longer visible.
-    socketsRef.current.forEach((socket, zoneRef) => {
-      if (!activeZoneRefs.has(zoneRef)) {
-        socket?.close();
-        socketsRef.current.delete(zoneRef);
-      }
-    });
-  }, [rooms]);
-
-  useEffect(() => {
+    // Cleanup sockets when component unmounts or rooms change
     return () => {
       socketsRef.current.forEach((socket) => socket?.close());
       socketsRef.current.clear();
     };
-  }, []);
+  }, [rooms]);
 
   const sortedRooms = useMemo(() => {
     return [...rooms].sort((a, b) => a.name.localeCompare(b.name));
@@ -274,18 +139,6 @@ export function RoomsPage() {
             onChange={setSelectedSite}
           />
 
-          {setpointError ? (
-            <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {setpointError}
-            </div>
-          ) : null}
-
-          {loadError ? (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              {loadError}
-            </div>
-          ) : null}
-
           <div className="grid grid-cols-1 gap-3">
             {sortedRooms.map((room) => (
               <RoomCard
@@ -301,7 +154,6 @@ export function RoomsPage() {
                 }}
               />
             ))}
-            {loadingRooms ? <p className="text-sm text-muted">Loading rooms...</p> : null}
             {!sortedRooms.length ? <p className="text-sm text-muted">No rooms found for this property.</p> : null}
           </div>
         </div>

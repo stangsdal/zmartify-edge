@@ -144,6 +144,68 @@ def test_mobile_setpoint_updates_twin_and_events(monkeypatch, tmp_path: Path):
     assert isinstance(notifs.json(), list)
 
 
+def test_mobile_setpoint_forwarded_stays_pending_until_feedback(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HVAC_EDGE_FORWARD_SETPOINT_TO_MQTT", "1")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-pend01")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
+
+    # Seed current device twin so there is a known applied target to preserve.
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 20.0, "target_temperature_c": 21.0}],
+        },
+    )
+    assert ingest.status_code == 200
+
+    import main
+
+    monkeypatch.setattr(main, "publish_setpoint_command", lambda *_args, **_kwargs: None)
+
+    setpoint = client.post(
+        f"/mobile/zones/{zone_ref}/setpoint",
+        headers=headers,
+        json={"target_temperature_c": 22.5},
+    )
+    assert setpoint.status_code == 200
+    assert setpoint.json()["command_state"] == "pending_device_feedback"
+    assert setpoint.json()["pending"] is True
+    assert isinstance(setpoint.json()["command_id"], str)
+    assert setpoint.json()["command_id"].startswith("sp-")
+    assert setpoint.json()["target_temperature_c"] == 22.5
+    assert setpoint.json()["zone"]["target_temperature_c"] == 21.0
+    command_id = setpoint.json()["command_id"]
+
+    feedback_ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "mqtt_connected": True,
+            "zones": [{"zone_id": 1, "current_temperature_c": 20.2, "target_temperature_c": 22.5}],
+        },
+    )
+    assert feedback_ingest.status_code == 200
+    assert feedback_ingest.json()["setpoint_feedback_events"] >= 1
+
+    current_zone = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert current_zone["target_temperature_c"] == 22.5
+
+    events = client.get("/events/recent", headers=headers)
+    assert events.status_code == 200
+    feedback_events = [evt for evt in events.json() if evt["event_type"] == "zone_setpoint_feedback_received"]
+    assert len(feedback_events) >= 1
+    assert any(evt["payload"].get("command_id") == command_id for evt in feedback_events)
+
+
 def test_events_filtering_by_type_and_device(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
@@ -315,6 +377,7 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     assert zone1.status_code == 200
     assert zone1.json()["current_temperature_c"] == 21.2
     assert zone1.json()["target_temperature_c"] == 22.0
+    assert zone1.json()["demand"] is True
     assert zone1.json()["name"] == "Living Room [1,2]"
 
     channel1 = client.get(f"/devices/{device_id}/channels/1", headers=headers)
@@ -762,3 +825,64 @@ def test_ingest_allows_high_zone_ids_beyond_default_bootstrap(monkeypatch, tmp_p
     zone_8 = client.get(f"/devices/{device_id}/zones/8", headers=headers)
     assert zone_8.status_code == 200
     assert zone_8.json()["current_temperature_c"] == 19.5
+
+
+def test_identical_ingest_keeps_zone_freshness_timestamp(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-112233")
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "zones": [{"zone_id": 4, "current_temperature_c": 22.1, "target_temperature_c": 21.0, "demand": False, "active": False}],
+        },
+    )
+    assert ingest.status_code == 200
+
+    with get_connection() as conn:
+        device_row = conn.execute("SELECT id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        assert device_row is not None
+        device_pk = int(device_row["id"])
+        conn.execute(
+            """
+            UPDATE zone_state
+            SET source_timestamp = 'tick-1234',
+                updated_at = datetime('now', '-10 minutes')
+            WHERE device_id = ? AND zone_id = 4
+            """,
+            (device_pk,),
+        )
+        before = conn.execute(
+            "SELECT updated_at FROM zone_state WHERE device_id = ? AND zone_id = 4",
+            (device_pk,),
+        ).fetchone()
+        assert before is not None
+        before_updated_at = before["updated_at"]
+        conn.commit()
+
+    ingest_same = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "online": True,
+            "zones": [{"zone_id": 4, "current_temperature_c": 22.1, "target_temperature_c": 21.0, "demand": False, "active": False}],
+        },
+    )
+    assert ingest_same.status_code == 200
+
+    with get_connection() as conn:
+        device_row = conn.execute("SELECT id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        assert device_row is not None
+        device_pk = int(device_row["id"])
+        after = conn.execute(
+            "SELECT updated_at FROM zone_state WHERE device_id = ? AND zone_id = 4",
+            (device_pk,),
+        ).fetchone()
+        assert after is not None
+        assert after["updated_at"] == before_updated_at
