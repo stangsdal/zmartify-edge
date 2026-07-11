@@ -30,6 +30,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: `/api/v2` auth/users and mqtt-clients adapter router extraction.
 - Completed: `/api/v2` events/mobile-notifications adapter router extraction.
 - Completed: `/api/v2` device-lifecycle adapter router extraction (discover/claim/push-config/onboarding-status/firmware-refresh).
+- Completed: `/api/v2` device-domain adapter router extraction (zones/channels/ingest/history/freshness).
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
@@ -56,6 +57,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Early validation support added: optional live HVAC smoke tests include edge twin-shape and command-feedback sequence checks.
 - Latest run: direct live HVAC smoke (`RUN_LIVE_HVAC=1`, base `http://192.168.10.57`) completed with 3 passed and 2 skipped (edge-assisted checks not enabled).
 - Latest attempt with edge-assisted flags passed baseline live checks with same 3 passed / 2 skipped, indicating `LIVE_EDGE_*` credentials were still not provided in environment.
+- Added helper script `scripts/run_live_edge_assisted_hvac.sh`; current run fell back to baseline live smoke due missing edge env vars.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 

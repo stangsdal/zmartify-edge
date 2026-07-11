@@ -30,6 +30,10 @@ LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 \
   zmartify-edge-api/tests/test_live_hvac_contract.py
 ```
 
+Helper script:
+
+`./scripts/run_live_edge_assisted_hvac.sh`
+
 ## Evidence To Record Per Run
 
 - Date/time and git commit hash.
@@ -55,3 +59,8 @@ LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 \
 - Command: `RUN_LIVE_HVAC=1 LIVE_HVAC_BASE_URL=http://192.168.10.57 LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 ... pytest -q zmartify-edge-api/tests/test_live_hvac_contract.py`
 - Result: 3 passed, 2 skipped
 - Notes: edge-assisted tests still skipped because `LIVE_EDGE_BASE_URL`, `LIVE_EDGE_BEARER_TOKEN`, and/or `LIVE_EDGE_DEVICE_ID` were empty in shell environment.
+
+- Date: 2026-07-12 (helper script run)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: script correctly reported missing edge env vars and performed baseline live smoke only.

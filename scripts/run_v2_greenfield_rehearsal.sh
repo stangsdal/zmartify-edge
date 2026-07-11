@@ -45,6 +45,9 @@ printf "[phase-2] Run API v2 mobile/events adapter tests\n"
 printf "[phase-2] Run API v2 device-lifecycle adapter tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_api_v2_device_lifecycle.py
 
+printf "[phase-2] Run API v2 device-domain adapter tests\n"
+"$PYTHON_BIN" -m pytest -q tests/test_api_v2_device_domain.py
+
 printf "[phase-4] Run MQTT-related regression tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_mqtt_clients.py tests/test_mqtt_security.py
 
