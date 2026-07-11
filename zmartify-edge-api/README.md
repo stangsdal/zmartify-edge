@@ -75,6 +75,16 @@ docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --build
 
 This sets `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` for both API service variants.
 
+## Core v2 dual-write bridge (transitional)
+
+Registry write paths now perform a best-effort sync into `core_*_v2` tables when those tables exist:
+
+- domain create/rename -> `core_domains_v2`
+- site create -> `core_sites_v2`
+- device create/assign-site/rename/firmware-update -> `core_devices_v2`
+
+This bridge is intentionally non-breaking while legacy sqlite tables remain active source-of-truth.
+
 ## Compose run
 
 ```bash

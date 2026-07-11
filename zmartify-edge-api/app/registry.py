@@ -38,6 +38,164 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _sync_domain_to_core_v2(conn: sqlite3.Connection, domain: dict[str, Any]) -> None:
+    if not _table_exists(conn, "core_domains_v2"):
+        return
+    conn.execute(
+        """
+        INSERT INTO core_domains_v2(uuid, slug, name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(slug) DO UPDATE SET
+            name=excluded.name,
+            uuid=excluded.uuid
+        """,
+        (domain.get("uuid"), domain.get("slug"), domain.get("name")),
+    )
+
+
+def _sync_site_to_core_v2(conn: sqlite3.Connection, site: dict[str, Any]) -> None:
+    if not (_table_exists(conn, "core_domains_v2") and _table_exists(conn, "core_sites_v2")):
+        return
+
+    domain_row = conn.execute(
+        "SELECT uuid, slug, name FROM domains WHERE id = ?",
+        (site.get("domain_id"),),
+    ).fetchone()
+    if domain_row is None:
+        return
+
+    conn.execute(
+        """
+        INSERT INTO core_domains_v2(uuid, slug, name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(slug) DO UPDATE SET
+            name=excluded.name,
+            uuid=excluded.uuid
+        """,
+        (domain_row["uuid"], domain_row["slug"], domain_row["name"]),
+    )
+
+    core_domain = conn.execute(
+        "SELECT id FROM core_domains_v2 WHERE slug = ?",
+        (domain_row["slug"],),
+    ).fetchone()
+    if core_domain is None:
+        return
+
+    conn.execute(
+        """
+        INSERT INTO core_sites_v2(uuid, domain_id, slug, name)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(domain_id, slug) DO UPDATE SET
+            name=excluded.name,
+            uuid=excluded.uuid
+        """,
+        (site.get("uuid"), int(core_domain["id"]), site.get("slug"), site.get("name")),
+    )
+
+
+def _sync_device_to_core_v2(conn: sqlite3.Connection, device: dict[str, Any]) -> None:
+    if not (
+        _table_exists(conn, "core_domains_v2")
+        and _table_exists(conn, "core_sites_v2")
+        and _table_exists(conn, "core_devices_v2")
+    ):
+        return
+
+    core_site_id: int | None = None
+    site_id = device.get("site_id")
+    if site_id is not None:
+        site_row = conn.execute(
+            """
+            SELECT s.uuid, s.slug, s.name, d.uuid AS domain_uuid, d.slug AS domain_slug, d.name AS domain_name
+            FROM sites s
+            JOIN domains d ON d.id = s.domain_id
+            WHERE s.id = ?
+            """,
+            (site_id,),
+        ).fetchone()
+        if site_row is not None:
+            conn.execute(
+                """
+                INSERT INTO core_domains_v2(uuid, slug, name)
+                VALUES (?, ?, ?)
+                ON CONFLICT(slug) DO UPDATE SET
+                    name=excluded.name,
+                    uuid=excluded.uuid
+                """,
+                (site_row["domain_uuid"], site_row["domain_slug"], site_row["domain_name"]),
+            )
+            core_domain = conn.execute(
+                "SELECT id FROM core_domains_v2 WHERE slug = ?",
+                (site_row["domain_slug"],),
+            ).fetchone()
+            if core_domain is not None:
+                conn.execute(
+                    """
+                    INSERT INTO core_sites_v2(uuid, domain_id, slug, name)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(domain_id, slug) DO UPDATE SET
+                        name=excluded.name,
+                        uuid=excluded.uuid
+                    """,
+                    (site_row["uuid"], int(core_domain["id"]), site_row["slug"], site_row["name"]),
+                )
+                core_site = conn.execute(
+                    "SELECT id FROM core_sites_v2 WHERE domain_id = ? AND slug = ?",
+                    (int(core_domain["id"]), site_row["slug"]),
+                ).fetchone()
+                if core_site is not None:
+                    core_site_id = int(core_site["id"])
+
+    conn.execute(
+        """
+        INSERT INTO core_devices_v2(
+            uuid,
+            device_ref,
+            display_name,
+            site_id,
+            product_type,
+            product_model,
+            firmware_version,
+            integration_mode,
+            identity_json,
+            last_seen_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(device_ref) DO UPDATE SET
+            uuid=excluded.uuid,
+            display_name=excluded.display_name,
+            site_id=excluded.site_id,
+            product_type=excluded.product_type,
+            product_model=excluded.product_model,
+            firmware_version=excluded.firmware_version,
+            integration_mode=excluded.integration_mode,
+            identity_json=excluded.identity_json,
+            last_seen_at=excluded.last_seen_at
+        """,
+        (
+            device.get("uuid"),
+            device.get("device_id"),
+            device.get("display_name"),
+            core_site_id,
+            device.get("device_type") or "hvac",
+            None,
+            device.get("firmware_version"),
+            device.get("integration_mode") or "mqtt",
+            None,
+            device.get("last_seen_at"),
+        ),
+    )
+
+
 def create_domain(slug: str, name: str) -> dict[str, Any]:
     try:
         with get_connection() as conn:
@@ -49,7 +207,10 @@ def create_domain(slug: str, name: str) -> dict[str, Any]:
                 "SELECT id, uuid, slug, name, created_at FROM domains WHERE id = ?",
                 (cur.lastrowid,),
             ).fetchone()
-            return _row_to_dict(row) or {}
+            domain = _row_to_dict(row) or {}
+            if domain:
+                _sync_domain_to_core_v2(conn, domain)
+            return domain
     except sqlite3.IntegrityError as exc:
         raise RegistryConflictError("domain slug already exists") from exc
 
@@ -90,7 +251,10 @@ def rename_domain(domain_id: int, name: str) -> dict[str, Any]:
             "SELECT id, uuid, slug, name, created_at FROM domains WHERE id = ?",
             (domain_id,),
         ).fetchone()
-        return _row_to_dict(row) or {}
+        domain = _row_to_dict(row) or {}
+        if domain:
+            _sync_domain_to_core_v2(conn, domain)
+        return domain
 
 
 def create_site(domain_id: int, slug: str, name: str) -> dict[str, Any]:
@@ -111,7 +275,10 @@ def create_site(domain_id: int, slug: str, name: str) -> dict[str, Any]:
             "SELECT id, uuid, domain_id, slug, name, created_at FROM sites WHERE id = ?",
             (cur.lastrowid,),
         ).fetchone()
-        return _row_to_dict(row) or {}
+        site = _row_to_dict(row) or {}
+        if site:
+            _sync_site_to_core_v2(conn, site)
+        return site
 
 
 def list_sites(domain_id: int) -> list[dict[str, Any]]:
@@ -174,6 +341,7 @@ def create_device(
             device = _row_to_dict(row) or {}
             if device:
                 _auto_provision_device_mqtt_client(conn, device)
+                _sync_device_to_core_v2(conn, device)
             return device
     except sqlite3.IntegrityError as exc:
         raise RegistryConflictError("device_id already exists") from exc
@@ -231,12 +399,15 @@ def assign_device_site(device_id: str, site_id: int) -> dict[str, Any]:
             """,
             (device_id,),
         ).fetchone()
+        device_payload = _row_to_dict(row) or {}
+        if device_payload:
+            _sync_device_to_core_v2(conn, device_payload)
         generate_acl_file(conn)
     try:
         reload_broker()
     except MqttUserCommandError as exc:
         raise RegistryOperationError(str(exc)) from exc
-    return _row_to_dict(row) or {}
+    return device_payload
 
 
 def rename_device(device_id: str, display_name: str) -> dict[str, Any]:
@@ -257,7 +428,10 @@ def rename_device(device_id: str, display_name: str) -> dict[str, Any]:
             """,
             (device_id,),
         ).fetchone()
-        return _row_to_dict(row) or {}
+        device_payload = _row_to_dict(row) or {}
+        if device_payload:
+            _sync_device_to_core_v2(conn, device_payload)
+        return device_payload
 
 
 def delete_device(device_id: str) -> None:
@@ -309,7 +483,10 @@ def update_device_firmware_version(device_id: str, firmware_version: str | None)
             """,
             (device_id,),
         ).fetchone()
-        return _row_to_dict(row) or {}
+        device_payload = _row_to_dict(row) or {}
+        if device_payload:
+            _sync_device_to_core_v2(conn, device_payload)
+        return device_payload
 
 
 def ensure_device_admin_token(device_id: str) -> str:

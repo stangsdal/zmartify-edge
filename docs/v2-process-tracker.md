@@ -20,6 +20,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: backend dependency and config scaffolding (`psycopg`, `SQLAlchemy`, `Alembic`, db metadata in `/health`).
 - Completed: Alembic baseline scaffold and first baseline revision.
 - Completed: first SQLAlchemy-managed core v2 tables migration (`core_domains_v2`, `core_sites_v2`, `core_devices_v2`).
+- Completed: transitional dual-write bridge from registry writes into `core_*_v2` when tables exist.
 - Open: migrate active runtime persistence from SQLite to PostgreSQL-backed SQLAlchemy models.
 
 3. Phase 2 - Core platform extraction: `partially started`
@@ -31,6 +32,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: initial versioned schema scaffolds under `contracts/` (device contract, mqtt v2, ota manifest).
 - Completed: backend ingest/command checkpoint validation hooks (`warn` mode default, `enforce` available).
 - Completed: staging compose override for enforce mode (`docker-compose.staging.yml`).
+- Completed: staged compose config merge validation confirms enforce mode resolves for both API services.
 - Open: firmware/adapters contract conformance and strict-mode rollout.
 
 5. Phase 4 - MQTT v2 adapter: `not started`
@@ -78,6 +80,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Start dual-write or migration bridge from current sqlite-backed domain data into `core_*_v2` tables.
-2. Execute staging test run with enforce mode and capture conformance findings per device type.
+1. Backfill existing sqlite domain/site/device rows into `core_*_v2` for current datasets.
+2. Execute live staging test run with enforce mode and capture conformance findings per device type.
 3. Split backend router structure toward `/api/v2` modules while preserving compatibility.
