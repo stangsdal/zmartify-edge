@@ -26,7 +26,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 
 3. Phase 2 - Core platform extraction: `partially started`
 - Existing role/auth/domain/site/device endpoints exist.
-- Open: complete v2 router structure and UUID-first public model.
+- Completed: initial `/api/v2` core router extraction (domains/sites/devices adapters, UUID-first refs).
+- Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
 - Twin ingestion and mobile views exist.
@@ -83,4 +84,4 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 1. Execute full stage-gate rehearsal using clean environment and onboarding-based creation flow.
 2. Run live HVAC contract smoke checks and capture conformance notes.
-3. Split backend router structure toward `/api/v2` modules while preserving compatibility.
+3. Continue splitting backend domains from `main.py` into `/api/v2` modules while preserving compatibility.

@@ -122,6 +122,7 @@ from app.registry import (
     update_device_firmware_version,
     update_device_local_url,
 )
+from app.router_v2_core import create_core_v2_router
 from app.schemas import (
     ChannelMetadataIn,
     ChannelOut,
@@ -185,7 +186,7 @@ app = FastAPI(title="Zmartify Edge API", version="0.1.0")
 _REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
 _REQUIRED_PUBLIC_MQTT_URI = "mqtts://pilot.zmartify.dk:8883"
 
-_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
+_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events", "/api")
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
 
 
@@ -649,6 +650,9 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
         require_any_role(auth_user, allowed_roles)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+app.include_router(create_core_v2_router(_require_roles))
 
 
 def _enforce_admin_user_guardrails(actor_roles: set[str], target_roles: list[str], action: str) -> None:
