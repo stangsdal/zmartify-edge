@@ -3,6 +3,11 @@ import { useMemo } from 'react';
 interface ThermostatDialProps {
   value: number;
   currentTemperature?: number | null;
+  humidity?: number | null;
+  freshnessAgeMs?: number | null;
+  online?: boolean;
+  fault?: string | null;
+  windowOpen?: boolean | null;
   roomName?: string;
   statusLabel?: string;
   heating?: boolean;
