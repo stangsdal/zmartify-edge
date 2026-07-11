@@ -8,6 +8,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Keep features mergeable in small increments.
 - Validate each phase increment with build/tests before commit.
 - Preserve compatibility where possible while moving toward v2 contracts.
+- Use greenfield validation: no legacy data backfill required; run clean onboarding/create flows instead.
 
 ## Phase Status
 
@@ -80,6 +81,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Backfill existing sqlite domain/site/device rows into `core_*_v2` for current datasets.
-2. Execute live staging test run with enforce mode and capture conformance findings per device type.
+1. Execute full stage-gate rehearsal using clean environment and onboarding-based creation flow.
+2. Run live HVAC contract smoke checks and capture conformance notes.
 3. Split backend router structure toward `/api/v2` modules while preserving compatibility.

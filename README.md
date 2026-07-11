@@ -234,6 +234,8 @@ docker compose up -d --build zmartify-edge-api
 ## Documentation
 
 - Full edge setup guide: docs/hvac-edge-setup.md
+- v2 stage-gate test plan: docs/v2-stage-gate-test-plan.md
+- v2 live device test notes: docs/v2-live-device-test-notes.md
 - API implementation: zmartify-edge-api/main.py
 - Backend service notes: zmartify-edge-api/README.md
 - Device integration guide: docs/zmartify-device-integration.md
