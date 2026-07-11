@@ -55,6 +55,7 @@ This repository now includes an Alembic scaffold and baseline revision:
 - `alembic.ini`
 - `alembic/env.py`
 - `alembic/versions/20260712_0001_baseline_transition.py`
+- `alembic/versions/20260712_0002_core_domain_tables.py`
 
 Run baseline migrate command:
 
@@ -63,6 +64,16 @@ alembic upgrade head
 ```
 
 Note: the active runtime data path still uses SQLite access functions while SQLAlchemy/Alembic migration is introduced incrementally.
+
+## Staging contract enforcement
+
+For staging environments, run compose with the staging override to force strict contract checks:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --build
+```
+
+This sets `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` for both API service variants.
 
 ## Compose run
 

@@ -6,6 +6,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.sqlalchemy_db import get_sqlalchemy_database_url
+from app.sqlalchemy_models import Base
 
 
 config = context.config
@@ -13,9 +14,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Baseline migration starts with an empty SQLAlchemy metadata set.
-# Existing SQLite schema remains source-of-truth until full model migration.
-target_metadata = None
+# Transitional SQLAlchemy metadata used for incremental v2 table introduction.
+target_metadata = Base.metadata
 
 
 def _configured_url() -> str:
