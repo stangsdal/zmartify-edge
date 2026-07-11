@@ -14,7 +14,6 @@ import { DomainsPage } from './pages/DomainsPage';
 import { SitesPage } from './pages/SitesPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { DeviceHistoryPage } from './pages/DeviceHistoryPage';
-import { AddDevicePage } from './pages/AddDevicePage';
 import { UsersPage } from './pages/UsersPage';
 import { InvitesPage } from './pages/InvitesPage';
 import { RolesPage } from './pages/RolesPage';
@@ -32,6 +31,12 @@ import { IrrigationZoneDetailPage } from './pages/IrrigationZoneDetailPage';
 import { InsightsWaterPage } from './pages/InsightsWaterPage';
 import { InsightsEnergyPage } from './pages/InsightsEnergyPage';
 import { MorePage } from './pages/MorePage';
+import { OnboardingDiscoverPage } from './pages/OnboardingDiscoverPage';
+import { OnboardingClaimPage } from './pages/OnboardingClaimPage';
+import { OnboardingAssignSitePage } from './pages/OnboardingAssignSitePage';
+import { OnboardingCompletePage } from './pages/OnboardingCompletePage';
+import { SystemsPage } from './pages/SystemsPage';
+import { AutomationsPage } from './pages/AutomationsPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ResponsiveNavigation } from './components/ResponsiveNavigation';
 
@@ -184,6 +189,31 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/onboarding`}
+              render={() => <Redirect to={`${appBase}/onboarding/discover`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/discover`}
+              render={() => requireAuth(<OnboardingDiscoverPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/claim`}
+              render={() => requireAuth(<OnboardingClaimPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/assign-site`}
+              render={() => requireAuth(<OnboardingAssignSitePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/complete`}
+              render={() => requireAuth(<OnboardingCompletePage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/control/hvac/overview`}
               render={() => requireAuth(<RoomsPage />)}
           />
@@ -301,12 +331,17 @@ export function App() {
           <Route
             exact
             path={`${appBase}/systems`}
-              render={() => requireAdmin(<DevicesPage />)}
+              render={() => requireAdmin(<SystemsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/automations`}
+              render={() => requireAdmin(<AutomationsPage />)}
           />
           <Route
             exact
             path={`${appBase}/devices/add`}
-              render={() => requireAdmin(<AddDevicePage />)}
+              render={() => <Redirect to={`${appBase}/onboarding/discover`} />}
           />
           <Route
             exact

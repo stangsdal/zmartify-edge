@@ -31,7 +31,7 @@ export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNav
   const mobileItems: NavItem[] = [
     { label: 'Home', path: `${appBase}/home`, icon: homeOutline },
     { label: 'Control', path: `${appBase}/control/irrigation/overview`, icon: waterOutline },
-    { label: 'Insights', path: `${appBase}/insights/hvac`, icon: analyticsOutline },
+    { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
     { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
     { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
   ];
@@ -42,8 +42,8 @@ export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNav
         { label: 'Sites', path: `${appBase}/sites`, icon: layersOutline },
         { label: 'Systems', path: `${appBase}/systems`, icon: hardwareChipOutline },
         { label: 'Devices', path: `${appBase}/devices`, icon: hardwareChipOutline },
-        { label: 'Automations', path: `${appBase}/settings`, icon: constructOutline },
-        { label: 'Insights', path: `${appBase}/insights/hvac`, icon: analyticsOutline },
+        { label: 'Automations', path: `${appBase}/automations`, icon: constructOutline },
+        { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
         { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
         { label: 'Users', path: `${appBase}/users`, icon: peopleOutline },
         { label: 'Integrations', path: `${appBase}/integrations`, icon: layersOutline },
@@ -52,7 +52,7 @@ export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNav
     : [
         { label: 'Overview', path: `${appBase}/overview`, icon: homeOutline },
         { label: 'Control', path: `${appBase}/control/irrigation/overview`, icon: waterOutline },
-        { label: 'Insights', path: `${appBase}/insights/hvac`, icon: analyticsOutline },
+        { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
         { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
         { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
       ];
