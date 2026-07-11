@@ -74,6 +74,11 @@ export interface MobileSetpointResponse {
   zone: MobileZone;
 }
 
+export interface MobileZoneByRefResponse {
+  device_id: string;
+  zone: MobileZone;
+}
+
 export interface MobileDeviceDetail {
   device_id: string;
   display_name: string;
@@ -131,6 +136,9 @@ export const mobileApi = {
 
   getDeviceFreshness: (deviceId: string): Promise<MobileDeviceFreshness> =>
     apiClient.get(`/mobile/devices/${deviceId}/freshness`),
+
+  getZoneByRef: (zoneRef: string): Promise<MobileZoneByRefResponse> =>
+    apiClient.get(`/mobile/zones/${encodeURIComponent(zoneRef)}`),
 
   listEvents: (limit = 25): Promise<{ events: MobileEvent[] }> => apiClient.get(`/mobile/events?limit=${limit}`),
 

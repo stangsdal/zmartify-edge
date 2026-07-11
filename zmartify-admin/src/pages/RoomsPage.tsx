@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { IonContent, IonPage } from '@ionic/react';
+import { IonContent, IonPage, useIonViewWillLeave } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
@@ -17,6 +17,23 @@ export function RoomsPage() {
   const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const emptyResponseStreakRef = useRef(0);
+
+  const blurActiveElement = () => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) {
+      active.blur();
+    }
+  };
+
+  const navigateWithBlur = (to: string) => {
+    blurActiveElement();
+    history.push(to);
+  };
+
+  useIonViewWillLeave(() => {
+    blurActiveElement();
+  });
 
   const handleSetpointChange = async (room: RoomWithRef, delta: number) => {
     const current = room.target_temperature_c ?? 20;
@@ -95,34 +112,72 @@ export function RoomsPage() {
 
   useEffect(() => {
     if (!selectedSite) return;
+    let cancelled = false;
+
     const loadRooms = async () => {
-      const site = await mobileApi.getSite(selectedSite);
-      const devices = await Promise.all(site.devices.map((d) => mobileApi.getDevice(d.device_id)));
-      const nextRooms: RoomWithRef[] = devices.flatMap((device) =>
+      const siteZones = await mobileApi.getSiteZones(selectedSite);
+      const nextRooms: RoomWithRef[] = (siteZones.devices || []).flatMap((device) =>
         (device.zones || []).map((zone) => ({
           ...zone,
           zone_ref: zone.zone_uuid || `${device.device_id}:${zone.zone_id}`,
         }))
       );
-      setRooms(nextRooms);
+
+      if (cancelled) return;
+
+      setRooms((prev) => {
+        if (nextRooms.length === 0 && prev.length > 0) {
+          // Ignore a single empty response to avoid flicker when backend data briefly lags.
+          emptyResponseStreakRef.current += 1;
+          if (emptyResponseStreakRef.current < 2) {
+            return prev;
+          }
+        } else {
+          emptyResponseStreakRef.current = 0;
+        }
+        return nextRooms;
+      });
     };
+
+    emptyResponseStreakRef.current = 0;
     loadRooms().catch(console.error);
+
+    const intervalId = window.setInterval(() => {
+      loadRooms().catch(console.error);
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      emptyResponseStreakRef.current = 0;
+    };
   }, [selectedSite]);
 
   useEffect(() => {
-    // Subscribe to updates for each room
-    rooms.forEach((room) => {
+    const activeRefs = new Set(rooms.map((room) => room.zone_ref));
+
+    // Subscribe new room streams.
+    for (const room of rooms) {
       if (!socketsRef.current.has(room.zone_ref)) {
         subscribeToZoneUpdates(room.zone_ref);
       }
-    });
+    }
 
-    // Cleanup sockets when component unmounts or rooms change
+    // Unsubscribe removed room streams.
+    for (const [zoneRef, socket] of socketsRef.current.entries()) {
+      if (!activeRefs.has(zoneRef)) {
+        socket?.close();
+        socketsRef.current.delete(zoneRef);
+      }
+    }
+  }, [rooms]);
+
+  useEffect(() => {
     return () => {
       socketsRef.current.forEach((socket) => socket?.close());
       socketsRef.current.clear();
     };
-  }, [rooms]);
+  }, []);
 
   const sortedRooms = useMemo(() => {
     return [...rooms].sort((a, b) => a.name.localeCompare(b.name));
@@ -144,8 +199,8 @@ export function RoomsPage() {
               <RoomCard
                 key={room.zone_ref}
                 zone={room}
-                onOpen={() => history.push(`/app/rooms/${encodeURIComponent(room.zone_ref)}`)}
-                onHistory={() => history.push(`/app/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
+                onOpen={() => navigateWithBlur(`/app/rooms/${encodeURIComponent(room.zone_ref)}`)}
+                onHistory={() => navigateWithBlur(`/app/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
                 onRename={() => {
                   void handleRename(room);
                 }}

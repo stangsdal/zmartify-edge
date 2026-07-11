@@ -23,17 +23,16 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange }
   const state = zoneState(zone);
   return (
     <motion.div
-      whileTap={{ scale: 0.98 }}
       whileHover={{ y: -2 }}
-      className="w-full text-left rounded-2xl p-4 app-surface shadow-soft border border-slate-100 min-h-[120px] cursor-pointer"
+      className="w-full text-left rounded-2xl p-4 app-surface shadow-soft border border-slate-100 min-h-[120px]"
     >
-      <div onClick={onOpen} className="flex items-start justify-between">
+      <button type="button" onClick={onOpen} className="w-full text-left flex items-start justify-between">
         <div>
           <p className="text-base font-semibold">{zone.name}</p>
           <p className="text-xs text-muted mt-1">Target {zone.target_temperature_c?.toFixed(1) ?? '--'}°C</p>
         </div>
         <HealthBadge label={state.label} tone={state.tone} />
-      </div>
+      </button>
       <div className="mt-3 flex items-center gap-3">
         <div className="flex items-center gap-1">
           <IonButton
@@ -44,9 +43,9 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange }
           >
             −
           </IonButton>
-          <div onClick={onOpen}>
+          <button type="button" onClick={onOpen}>
             <TemperatureBadge value={zone.current_temperature_c} />
-          </div>
+          </button>
           <IonButton
             size="small"
             fill="clear"

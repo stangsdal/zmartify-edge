@@ -69,21 +69,9 @@ export function RoomDetailPage() {
     let cancelled = false;
 
     const load = async () => {
-      const sites = await mobileApi.listSites();
-      for (const site of sites.sites || []) {
-        const detail = await mobileApi.getSite(site.site_id);
-        for (const device of detail.devices) {
-          const dev = await mobileApi.getDevice(device.device_id);
-          for (const z of dev.zones || []) {
-            const zref = z.zone_uuid || `${device.device_id}:${z.zone_id}`;
-            if (zref === resolvedRef) {
-              if (cancelled) return;
-              applyIncomingZoneState(z);
-              return;
-            }
-          }
-        }
-      }
+      const response = await mobileApi.getZoneByRef(resolvedRef);
+      if (cancelled) return;
+      applyIncomingZoneState(response.zone);
     };
 
     load().catch(console.error);

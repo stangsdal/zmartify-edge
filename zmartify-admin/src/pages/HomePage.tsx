@@ -32,9 +32,8 @@ export function HomePage() {
   useEffect(() => {
     if (!selectedSite) return;
     const loadZones = async () => {
-      const site = await mobileApi.getSite(selectedSite);
-      const deviceDetails = await Promise.all(site.devices.map((d) => mobileApi.getDevice(d.device_id)));
-      const allZones = deviceDetails.flatMap((d) => d.zones || []);
+      const siteZones = await mobileApi.getSiteZones(selectedSite);
+      const allZones = (siteZones.devices || []).flatMap((d) => d.zones || []);
       setZones(allZones);
     };
     loadZones().catch(console.error);

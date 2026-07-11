@@ -1811,6 +1811,23 @@ def mobile_device_zones(device_id: str, request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+@app.get("/mobile/zones/{zone_ref}")
+def mobile_zone_by_ref(zone_ref: str, request: Request) -> dict:
+    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    try:
+        device_id, zone_id = resolve_zone_ref(zone_ref)
+        site_pk_id = _resolve_device_site_pk_id(device_id)
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+        _enforce_mobile_site_scope(request, site_pk_id)
+        return {
+            "device_id": device_id,
+            "zone": get_device_zone(device_id, zone_id),
+        }
+    except (RegistryNotFoundError, DomainModelError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @app.get("/mobile/devices/{device_id}/channels")
 def mobile_device_channels(device_id: str, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
