@@ -122,7 +122,9 @@ from app.registry import (
     update_device_firmware_version,
     update_device_local_url,
 )
+from app.router_v2_auth_users import create_auth_users_v2_router
 from app.router_v2_core import create_core_v2_router
+from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
 from app.schemas import (
     ChannelMetadataIn,
     ChannelOut,
@@ -653,6 +655,8 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
 
 
 app.include_router(create_core_v2_router(_require_roles))
+app.include_router(create_auth_users_v2_router(_require_roles))
+app.include_router(create_mqtt_clients_v2_router(_require_roles))
 
 
 def _enforce_admin_user_guardrails(actor_roles: set[str], target_roles: list[str], action: str) -> None:

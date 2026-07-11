@@ -27,6 +27,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 3. Phase 2 - Core platform extraction: `partially started`
 - Existing role/auth/domain/site/device endpoints exist.
 - Completed: initial `/api/v2` core router extraction (domains/sites/devices adapters, UUID-first refs).
+- Completed: `/api/v2` auth/users and mqtt-clients adapter router extraction.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
@@ -50,6 +51,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Open: complete remaining UX parity screens and deeper API bindings.
 
 8. Phase 7 - HVAC firmware alignment: `not started`
+- Early validation support added: optional live HVAC smoke tests include edge twin-shape and command-feedback sequence checks.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 

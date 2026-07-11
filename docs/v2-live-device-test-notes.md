@@ -17,6 +17,19 @@ RUN_LIVE_HVAC=1 LIVE_HVAC_BASE_URL=http://192.168.10.57 \
   zmartify-edge-api/tests/test_live_hvac_contract.py
 ```
 
+Optional edge-assisted checks (twin-shape + command-feedback smoke):
+
+```bash
+RUN_LIVE_HVAC=1 \
+LIVE_HVAC_BASE_URL=http://192.168.10.57 \
+LIVE_EDGE_BASE_URL=https://pilot.zmartify.dk \
+LIVE_EDGE_BEARER_TOKEN=<token> \
+LIVE_EDGE_DEVICE_ID=<device_id> \
+LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 \
+  /Users/peter/zmartify-edge/.venv/bin/python -m pytest -q \
+  zmartify-edge-api/tests/test_live_hvac_contract.py
+```
+
 ## Evidence To Record Per Run
 
 - Date/time and git commit hash.
