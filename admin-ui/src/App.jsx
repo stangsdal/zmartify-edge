@@ -35,7 +35,7 @@ export function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1>HVAC Edge</h1>
+        <h1>Zmartify Edge</h1>
         <nav>
           <Link to="/login">Login</Link>
           {hasToken && <Link to="/dashboard">Dashboard</Link>}

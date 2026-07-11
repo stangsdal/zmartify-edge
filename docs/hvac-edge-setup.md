@@ -16,8 +16,8 @@ Use these public endpoints for deployed environments:
 For device onboarding payloads, ensure backend env vars are set accordingly:
 
 ```bash
-HVAC_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-HVAC_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
+ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
+ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
 ```
 
 Note: local IP examples elsewhere in this guide are for LAN diagnostics and direct ESP32 access only.
@@ -109,7 +109,7 @@ Create folders:
 mkdir -p mosquitto/config
 mkdir -p mosquitto/data
 mkdir -p mosquitto/log
-mkdir -p hvac-edge-api
+mkdir -p zmartify-edge-api
 mkdir -p caddy
 ```
 
@@ -231,16 +231,16 @@ services:
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
 
-  hvac-edge-api:
+  zmartify-edge-api:
     image: python:3.12-slim
-    container_name: hvac-edge-api
+    container_name: zmartify-edge-api
     restart: unless-stopped
     working_dir: /app
     command: sh -c "pip install fastapi uvicorn paho-mqtt && uvicorn main:app --host 0.0.0.0 --port 8080"
     ports:
       - "443:8080"
     volumes:
-      - ./hvac-edge-api:/app
+      - ./zmartify-edge-api:/app
     environment:
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
@@ -255,7 +255,7 @@ services:
 Create:
 
 ```bash
-nano hvac-edge-api/main.py
+nano zmartify-edge-api/main.py
 ```
 
 Paste:
@@ -270,7 +270,7 @@ app = FastAPI(title="HVAC Edge API")
 def health():
     return {
         "ok": True,
-        "service": "hvac-edge-api",
+        "service": "zmartify-edge-api",
         "mqtt_host": os.getenv("MQTT_HOST", "mosquitto")
     }
 
@@ -350,162 +350,17 @@ homie/5/test-device/$state ready
 
 ---
 
-## 12. Configure ESP32
+## 12. Device Integration Guide
 
-On the ESP32 side, configure NVS or firmware settings:
+Device onboarding, MQTT topic conventions, and OTA procedures now live in [docs/zmartify-device-integration.md](docs/zmartify-device-integration.md).
 
-```text
-mqtt_enabled = true
-mqtt_uri = mqtt://hvac-edge:1883
-mqtt_username = esp32_hvac
-mqtt_password = Zmartify2019
-mqtt_base = homie/5
-mqtt_qos = 1
-mqtt_retain = true
-```
-
-The ESP32 project already has MQTT scaffolding, but publish functions currently return `ESP_ERR_NOT_SUPPORTED`, so firmware MQTT implementation must be completed before this will publish real data.
+That guide is the source of truth for firmware developers building IoT devices
+against this server.
 
 ---
 
-## 13. Expected ESP32 Topics
+## 13. Legacy Notes
 
-Once ESP32 MQTT is implemented, verify:
-
-```bash
-docker exec -it hvac-mosquitto mosquitto_sub \
-  -h localhost \
-  -u admin \
-  -P '<admin-password>' \
-  -t 'homie/5/#' \
-  -v
-```
-
-Expected examples:
-
-```text
-homie/5/hvac-gateway-aabbccddeeff/$state ready
-homie/5/hvac-gateway-aabbccddeeff/gateway/health ok
-homie/5/hvac-gateway-aabbccddeeff/zone-1/current-temperature 21.4
-homie/5/hvac-gateway-aabbccddeeff/zone-1/target-temperature 22.0
-```
-
-Setpoint command test:
-
-```bash
-docker exec -it hvac-mosquitto mosquitto_pub \
-  -h localhost \
-  -u admin \
-  -P '<admin-password>' \
-  -t 'homie/5/hvac-gateway-aabbccddeeff/zone-1/target-temperature/set' \
-  -m '22.5'
-```
-
-The ESP32 must route this through its existing guarded setpoint write path.
-
----
-
-## 14. Firewall
-
-Enable firewall:
-
-```bash
-sudo ufw allow ssh
-sudo ufw allow 1883/tcp
-sudo ufw allow 8080/tcp
-sudo ufw enable
-sudo ufw status
-```
-
-For production, restrict MQTT to IoT VLAN only.
-
----
-
-## 15. Home Assistant Setup
-
-In Home Assistant:
-
-1. Add MQTT integration.
-2. Broker host: Raspberry Pi IP.
-3. Port: `1883`.
-4. Username: `homeassistant_house`.
-5. Password: matching password.
-6. Subscribe/inspect `homie/5/#`.
-
-Do not expose Mosquitto directly to the internet.
-
----
-
-## 16. Operational Checks
-
-Run:
-
-```bash
-docker compose ps
-docker compose logs --tail=100 mosquitto
-curl http://localhost:8080/health
-```
-
-MQTT retained topic check:
-
-```bash
-docker exec -it hvac-mosquitto mosquitto_sub \
-  -h localhost \
-  -u admin \
-  -P '<admin-password>' \
-  -t 'homie/5/#' \
-  -v \
-  -C 20
-```
-
----
-
-## 17. Backup
-
-Back up:
-
-```bash
-~/hvac-edge/docker-compose.yml
-~/hvac-edge/mosquitto/config
-~/hvac-edge/mosquitto/data
-~/hvac-edge/hvac-edge-api
-```
-
-Simple backup command:
-
-```bash
-tar czf hvac-edge-backup-$(date +%Y%m%d).tar.gz ~/hvac-edge
-```
-
----
-
-## 18. Next Backend Milestones
-
-After MQTT is working:
-
-1. Add SQLite device registry.
-2. Add domain/site/device model.
-3. Add per-device MQTT credentials.
-4. Add per-domain ACL generation.
-5. Add Home Assistant Discovery or Homie-aware bridge.
-6. Add cloud sync agent.
-7. Add iPhone-app-ready command queue.
-8. Add TLS for MQTT.
-9. Add web admin UI.
-10. Add future Matter bridge support.
-
----
-
-## 19. Production Notes
-
-Before production:
-
-* Use unique MQTT credentials per ESP32.
-* Use unique MQTT credentials per smart-home client.
-* Add ACL generation.
-* Add TLS.
-* Add API authentication.
-* Add audit logging.
-* Disable debug endpoints from WAN.
-* Keep HVAC control local-first.
-* Do not require cloud for normal heating operation.
+This file is preserved as a broader deployment reference for Raspberry Pi and
+broker setup. For new device firmware work, use the integration guide above so
+the onboarding flow stays aligned with the current API.

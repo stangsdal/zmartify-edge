@@ -10,8 +10,8 @@ This repository contains:
 
 ## Repository Structure
 
-- hvac-edge-api/: FastAPI backend (public API, onboarding, ACL, registry, mobile APIs)
-- hvac-admin/: Ionic admin/mobile UI
+- zmartify-edge-api/: FastAPI backend (public API, onboarding, ACL, registry, mobile APIs)
+- zmartify-admin/: Ionic admin/mobile UI
 - admin-ui/: operational admin UI
 - mosquitto/: broker config and runtime paths
 - docs/: operations and setup guides
@@ -36,14 +36,14 @@ cd zmartify-edge
 2. Ensure required directories exist.
 
 ```bash
-mkdir -p mosquitto/config mosquitto/data mosquitto/log acme admin-ui/dist hvac-admin/dist
+mkdir -p mosquitto/config mosquitto/data mosquitto/log acme admin-ui/dist zmartify-admin/dist
 ```
 
 3. Build frontend artifacts (if not already present).
 
 ```bash
 cd admin-ui && npm ci && npm run build
-cd ../hvac-admin && npm ci && npm run build
+cd ../zmartify-admin && npm ci && npm run build
 cd ..
 ```
 
@@ -62,25 +62,25 @@ curl -k https://localhost/registry/status
 
 ## Core Environment Variables
 
-Configured in docker-compose.yml for hvac-edge-api:
+Configured in docker-compose.yml for zmartify-edge-api:
 
 - MQTT_HOST=mosquitto
 - MQTT_PORT=1883
-- HVAC_EDGE_DB_PATH=/data/hvac-edge.sqlite
-- HVAC_EDGE_APPLY_MQTT_COMMANDS=1
-- HVAC_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
-- HVAC_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
-- HVAC_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
-- HVAC_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
-- HVAC_EDGE_FORWARD_SETPOINT_TO_MQTT=1
-- HVAC_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-- HVAC_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
+- ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
+- ZMART_EDGE_APPLY_MQTT_COMMANDS=1
+- ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
+- ZMART_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
+- ZMART_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
+- ZMART_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
+- ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
+- ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
+- ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
 - ADMIN_API_TOKEN=<token>
 
 Optional:
 
-- HVAC_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH=1 (enables manual firmware refresh endpoint)
-- HVAC_EDGE_OTA_STAGE_DIR=/data/ota-stage
+- ZMART_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH=1 (enables manual firmware refresh endpoint)
+- ZMART_EDGE_OTA_STAGE_DIR=/data/ota-stage
 
 ## API Overview
 
@@ -215,27 +215,28 @@ Base URL examples:
 
 ```bash
 docker compose ps
-docker compose logs --tail=200 hvac-edge-api
+docker compose logs --tail=200 zmartify-edge-api
 docker compose logs --tail=200 mosquitto
 ```
 
 - Restart API only:
 
 ```bash
-docker compose restart hvac-edge-api
+docker compose restart zmartify-edge-api
 ```
 
 - Rebuild API image:
 
 ```bash
-docker compose up -d --build hvac-edge-api
+docker compose up -d --build zmartify-edge-api
 ```
 
 ## Documentation
 
 - Full edge setup guide: docs/hvac-edge-setup.md
-- API implementation: hvac-edge-api/main.py
-- Backend service notes: hvac-edge-api/README.md
+- API implementation: zmartify-edge-api/main.py
+- Backend service notes: zmartify-edge-api/README.md
+- Device integration guide: docs/zmartify-device-integration.md
 
 ## Notes
 
