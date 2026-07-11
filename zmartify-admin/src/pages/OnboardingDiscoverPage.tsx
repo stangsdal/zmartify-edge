@@ -4,20 +4,13 @@ import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { deviceApi } from '../api/devices';
 import { onboardingFlow } from '../utils/onboardingFlow';
+import { parseApiError } from '../utils/apiError';
 
 export function OnboardingDiscoverPage() {
   const history = useHistory();
   const [baseUrl, setBaseUrl] = useState(() => onboardingFlow.load().baseUrl || 'http://192.168.10.57');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const parseApiError = (raw: unknown): string => {
-    const message = String(raw || 'Unknown error');
-    if (/Network error while calling/i.test(message)) {
-      return 'Unable to reach gateway/backend. Check URL and connectivity.';
-    }
-    return message;
-  };
 
   const discover = async () => {
     try {

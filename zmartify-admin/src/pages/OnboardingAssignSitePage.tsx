@@ -7,6 +7,7 @@ import { deviceApi } from '../api/devices';
 import { AppHeader } from '../components/AppHeader';
 import { Domain, Site } from '../types/api';
 import { onboardingFlow } from '../utils/onboardingFlow';
+import { parseApiError } from '../utils/apiError';
 
 export function OnboardingAssignSitePage() {
   const history = useHistory();
@@ -16,10 +17,14 @@ export function OnboardingAssignSitePage() {
   const [domainId, setDomainId] = useState<number | undefined>(flow.selectedDomainId);
   const [siteId, setSiteId] = useState<number | undefined>(flow.selectedSiteId);
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<any>(flow.claimResult?.onboarding_status || null);
   const [error, setError] = useState('');
 
+  const deviceId = flow.claimResult?.device?.device_id;
+
   useEffect(() => {
-    if (!flow.claimResult?.device?.device_id) {
+    if (!deviceId) {
       history.replace('/app/onboarding/claim');
       return;
     }
@@ -29,7 +34,12 @@ export function OnboardingAssignSitePage() {
         setDomains(rows);
         if (!domainId && rows.length) setDomainId(rows[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(parseApiError(e)));
+
+    deviceApi
+      .getOnboardingStatus(deviceId)
+      .then((next) => setStatus(next))
+      .catch((e) => setError(parseApiError(e)));
   }, []);
 
   useEffect(() => {
@@ -40,11 +50,10 @@ export function OnboardingAssignSitePage() {
         setSites(rows);
         if (!siteId && rows.length) setSiteId(rows[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(parseApiError(e)));
   }, [domainId]);
 
   const assign = async () => {
-    const deviceId = flow.claimResult?.device?.device_id;
     if (!deviceId || !siteId) {
       setError('Device and site are required.');
       return;
@@ -55,9 +64,37 @@ export function OnboardingAssignSitePage() {
       onboardingFlow.patch({ selectedDomainId: domainId, selectedSiteId: siteId });
       history.push('/app/onboarding/complete');
     } catch (e) {
-      setError(String(e));
+      setError(parseApiError(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const refreshStatus = async () => {
+    if (!deviceId) return;
+    try {
+      setBusy(true);
+      const next = await deviceApi.getOnboardingStatus(deviceId);
+      setStatus(next);
+      setError('');
+    } catch (e) {
+      setError(parseApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pushConfigAgain = async () => {
+    if (!deviceId) return;
+    try {
+      setBusy(true);
+      const next = await deviceApi.pushConfig(deviceId, {});
+      setStatus(next);
+      setError('');
+    } catch (e) {
+      setError(parseApiError(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -70,7 +107,16 @@ export function OnboardingAssignSitePage() {
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Step 3 of 4</p>
             <h2 className="text-lg font-semibold mt-1">Confirm site assignment</h2>
-            <p className="text-sm text-muted mt-2">Device: {flow.claimResult?.device?.device_id || 'n/a'}</p>
+            <p className="text-sm text-muted mt-2">Device: {deviceId || 'n/a'}</p>
+
+            {status ? (
+              <div className="text-sm text-muted mt-2">
+                <p>State: {status.state || 'unknown'}</p>
+                <p>MQTT Configured: {status.mqtt_configured ? 'Yes' : 'No'}</p>
+                <p>MQTT Connected: {status.mqtt_connected ? 'Yes' : 'No'}</p>
+                {status.last_error ? <p>Last Error: {String(status.last_error)}</p> : null}
+              </div>
+            ) : null}
 
             <IonItem className="mt-3">
               <IonLabel position="stacked">Domain</IonLabel>
@@ -97,6 +143,12 @@ export function OnboardingAssignSitePage() {
             <div className="mt-4 flex gap-2">
               <IonButton fill="outline" onClick={() => history.push('/app/onboarding/claim')}>
                 Back
+              </IonButton>
+              <IonButton fill="outline" onClick={() => void refreshStatus()} disabled={busy}>
+                Refresh status
+              </IonButton>
+              <IonButton fill="outline" onClick={() => void pushConfigAgain()} disabled={busy}>
+                Push config again
               </IonButton>
               <IonButton onClick={() => void assign()} disabled={saving}>
                 {saving ? 'Saving...' : 'Assign and continue'}

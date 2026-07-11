@@ -4,6 +4,7 @@ import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { deviceApi } from '../api/devices';
 import { onboardingFlow } from '../utils/onboardingFlow';
+import { parseApiError } from '../utils/apiError';
 
 export function OnboardingCompletePage() {
   const history = useHistory();
@@ -35,7 +36,7 @@ export function OnboardingCompletePage() {
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
         }
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(parseApiError(e));
       }
     };
 
@@ -54,7 +55,7 @@ export function OnboardingCompletePage() {
       setStatusText(`${nextStatus.state} · MQTT ${nextStatus.mqtt_connected ? 'connected' : 'not connected'}`);
       setError('');
     } catch (e) {
-      setError(String(e));
+      setError(parseApiError(e));
     } finally {
       setBusy(false);
     }
@@ -70,7 +71,7 @@ export function OnboardingCompletePage() {
       setError('');
       await refreshStatus();
     } catch (e) {
-      setError(String(e));
+      setError(parseApiError(e));
     } finally {
       setBusy(false);
     }

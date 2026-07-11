@@ -7,6 +7,7 @@ import { siteApi } from '../api/sites';
 import { deviceApi } from '../api/devices';
 import { Domain, Site } from '../types/api';
 import { onboardingFlow } from '../utils/onboardingFlow';
+import { parseApiError } from '../utils/apiError';
 
 export function OnboardingClaimPage() {
   const history = useHistory();
@@ -31,7 +32,7 @@ export function OnboardingClaimPage() {
         setDomains(rows);
         if (!domainId && rows.length) setDomainId(rows[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(parseApiError(e)));
   }, []);
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export function OnboardingClaimPage() {
         setSites(rows);
         if (!siteId && rows.length) setSiteId(rows[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(parseApiError(e)));
   }, [domainId]);
 
   const claim = async () => {
@@ -76,7 +77,7 @@ export function OnboardingClaimPage() {
       });
       history.push('/app/onboarding/assign-site');
     } catch (e) {
-      setError(String(e));
+      setError(parseApiError(e));
     } finally {
       setLoading(false);
     }
@@ -96,6 +97,7 @@ export function OnboardingClaimPage() {
                 <p>Device: {flow.discovery.identity.device_id}</p>
                 <p>Firmware: {flow.discovery.identity.firmware_version}</p>
                 <p>State: {flow.discovery.status.state}</p>
+                <p>Mode: {flow.mode === 'new' ? 'New claim' : 'Re-claim existing device'}</p>
               </div>
             ) : null}
 
