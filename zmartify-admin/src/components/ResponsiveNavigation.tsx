@@ -30,10 +30,10 @@ export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNav
 
   const mobileItems: NavItem[] = [
     { label: 'Home', path: `${appBase}/home`, icon: homeOutline },
-    { label: 'Control', path: `${appBase}/control/hvac/overview`, icon: waterOutline },
+    { label: 'Control', path: `${appBase}/control/irrigation/overview`, icon: waterOutline },
     { label: 'Insights', path: `${appBase}/insights/hvac`, icon: analyticsOutline },
     { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
-    { label: 'More', path: `${appBase}/more/settings`, icon: settingsOutline },
+    { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
   ];
 
   const desktopItems: NavItem[] = isAdmin
@@ -51,10 +51,10 @@ export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNav
       ]
     : [
         { label: 'Overview', path: `${appBase}/overview`, icon: homeOutline },
-        { label: 'Control', path: `${appBase}/control/hvac/overview`, icon: waterOutline },
+        { label: 'Control', path: `${appBase}/control/irrigation/overview`, icon: waterOutline },
         { label: 'Insights', path: `${appBase}/insights/hvac`, icon: analyticsOutline },
         { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
-        { label: 'System', path: `${appBase}/settings`, icon: settingsOutline },
+        { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
       ];
 
   return (
