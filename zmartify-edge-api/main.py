@@ -41,6 +41,7 @@ from app.auth import (
     set_user_site_access,
     validate_registration_invite,
 )
+from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
 from app.db import get_connection, get_database_backend, get_database_url, get_db_path, initialize_database
 from app.device_onboarding import (
     DeviceOnboardingError,
@@ -1400,6 +1401,18 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
     if device_token_device_id != device_id:
         _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
+        validate_mqtt_v2_reported_state(
+            {
+                "schema_version": "2.0",
+                "source_timestamp": payload.source_timestamp or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                "firmware_version": payload.firmware_version,
+                "hvac": {
+                    "zones": [item.model_dump(exclude_none=True) for item in payload.zones],
+                    "channels": [item.model_dump(exclude_none=True) for item in payload.channels],
+                },
+            }
+        )
+
         result = ingest_device_twin_snapshot(
             device_id,
             source=payload.source,
@@ -1415,6 +1428,8 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
             for zone in list_device_zones(device_id):
                 _publish_zone_state_update(device_id, zone)
         return result
+    except ContractValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
@@ -1845,6 +1860,20 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
         if should_forward_setpoint_commands():
             try:
                 command_id = f"sp-{uuid.uuid4().hex[:12]}"
+                validate_mqtt_v2_command(
+                    {
+                        "schema_version": "2.0",
+                        "command_id": command_id,
+                        "command_type": "set_zone_setpoint",
+                        "target_ref": zone_ref,
+                        "parameters": {
+                            "device_id": device_id,
+                            "zone_id": zone_id,
+                            "target_temperature_c": requested_target_c,
+                        },
+                        "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    }
+                )
                 publish_setpoint_command(device_id, zone_id, requested_target_c)
                 command_state = "pending_device_feedback"
             except MqttCommandError as exc:
@@ -1884,6 +1913,8 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             "command_id": command_id,
             "zone": zone,
         }
+    except ContractValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:

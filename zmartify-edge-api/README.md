@@ -31,6 +31,7 @@ Environment variables:
 
 - `DATABASE_URL` (new): migration target wiring, used for backend metadata and upcoming SQLAlchemy/Alembic work.
 - `ZMART_EDGE_DB_PATH` (current active runtime): SQLite file path.
+- `ZMART_EDGE_CONTRACT_VALIDATION_MODE`: `off`, `warn` (default), or `enforce`.
 
 Example:
 
@@ -40,6 +41,22 @@ export ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
 ```
 
 Health endpoint now reports both `db_backend` and `database_url_scheme` for rollout visibility.
+
+## Alembic baseline (Phase 1 start)
+
+This repository now includes an Alembic scaffold and baseline revision:
+
+- `alembic.ini`
+- `alembic/env.py`
+- `alembic/versions/20260712_0001_baseline_transition.py`
+
+Run baseline migrate command:
+
+```bash
+alembic upgrade head
+```
+
+Note: the active runtime data path still uses SQLite access functions while SQLAlchemy/Alembic migration is introduced incrementally.
 
 ## Compose run
 

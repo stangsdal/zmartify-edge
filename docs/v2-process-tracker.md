@@ -18,7 +18,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 2. Phase 1 - PostgreSQL and Timescale foundation: `in progress`
 - Completed: compose service scaffold for postgres-timescale and `DATABASE_URL` environment wiring.
 - Completed: backend dependency and config scaffolding (`psycopg`, `SQLAlchemy`, `Alembic`, db metadata in `/health`).
-- Open: migrate active runtime persistence from SQLite to PostgreSQL/Alembic migrations.
+- Completed: Alembic baseline scaffold and first baseline revision.
+- Open: migrate active runtime persistence from SQLite to PostgreSQL-backed SQLAlchemy models.
 
 3. Phase 2 - Core platform extraction: `partially started`
 - Existing role/auth/domain/site/device endpoints exist.
@@ -27,7 +28,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 4. Phase 3 - Device contract and canonical twin: `in progress`
 - Twin ingestion and mobile views exist.
 - Completed: initial versioned schema scaffolds under `contracts/` (device contract, mqtt v2, ota manifest).
-- Open: enforce schema validation in backend/firmware/adapters.
+- Completed: backend ingest/command checkpoint validation hooks (`warn` mode default, `enforce` available).
+- Open: firmware/adapters contract conformance and strict-mode rollout.
 
 5. Phase 4 - MQTT v2 adapter: `not started`
 - Open: add v2 topic mapping and dedicated ingest pipeline.
