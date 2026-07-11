@@ -827,7 +827,7 @@ def test_ingest_allows_high_zone_ids_beyond_default_bootstrap(monkeypatch, tmp_p
     assert zone_8.json()["current_temperature_c"] == 19.5
 
 
-def test_identical_ingest_keeps_zone_freshness_timestamp(monkeypatch, tmp_path: Path):
+def test_identical_ingest_refreshes_zone_freshness_timestamp(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
 
@@ -885,4 +885,4 @@ def test_identical_ingest_keeps_zone_freshness_timestamp(monkeypatch, tmp_path: 
             (device_pk,),
         ).fetchone()
         assert after is not None
-        assert after["updated_at"] == before_updated_at
+        assert after["updated_at"] != before_updated_at

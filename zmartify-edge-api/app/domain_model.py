@@ -991,6 +991,54 @@ def ingest_device_twin_snapshot(
                     """,
                     (device["id"], source, fingerprint, now_iso, "deduplicated"),
                 )
+
+                # Keep freshness moving on heartbeat payloads even when deduplicated.
+                conn.execute(
+                    """
+                    INSERT INTO device_state(device_id, online, mqtt_connected, last_seen_at, source_timestamp, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(device_id) DO UPDATE SET
+                        online = COALESCE(excluded.online, device_state.online),
+                        mqtt_connected = COALESCE(excluded.mqtt_connected, device_state.mqtt_connected),
+                        last_seen_at = excluded.last_seen_at,
+                        source_timestamp = COALESCE(excluded.source_timestamp, device_state.source_timestamp),
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        device["id"],
+                        None if online is None else int(bool(online)),
+                        None if mqtt_connected is None else int(bool(mqtt_connected)),
+                        now_iso,
+                        source_timestamp,
+                        now_iso,
+                    ),
+                )
+
+                for zone in zones or []:
+                    zone_id = int(zone["zone_id"])
+                    conn.execute(
+                        """
+                        UPDATE zone_state
+                        SET updated_at = ?,
+                            source_timestamp = COALESCE(?, source_timestamp),
+                            source = ?
+                        WHERE device_id = ? AND zone_id = ?
+                        """,
+                        (now_iso, source_timestamp, source, device["id"], zone_id),
+                    )
+
+                for channel in channels or []:
+                    channel_id = int(channel["channel_id"])
+                    conn.execute(
+                        """
+                        UPDATE channel_state
+                        SET updated_at = ?,
+                            source_timestamp = COALESCE(?, source_timestamp)
+                        WHERE device_id = ? AND channel_id = ?
+                        """,
+                        (now_iso, source_timestamp, device["id"], channel_id),
+                    )
+
                 conn.commit()
                 return {
                     "device_id": device_external_id,
@@ -1557,17 +1605,7 @@ def upsert_zone_state(
                 active = excluded.active,
                 fault = excluded.fault,
                 source_timestamp = excluded.source_timestamp,
-                updated_at = CASE
-                    WHEN zone_state.current_temperature IS excluded.current_temperature
-                     AND zone_state.target_temperature IS excluded.target_temperature
-                     AND zone_state.demand IS excluded.demand
-                     AND zone_state.active IS excluded.active
-                     AND zone_state.fault IS excluded.fault
-                     AND zone_state.source_timestamp IS excluded.source_timestamp
-                     AND zone_state.source IS excluded.source
-                    THEN zone_state.updated_at
-                    ELSE excluded.updated_at
-                END,
+                updated_at = excluded.updated_at,
                 source = excluded.source
             """,
             (

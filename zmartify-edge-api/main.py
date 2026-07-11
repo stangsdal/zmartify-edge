@@ -182,7 +182,7 @@ except Exception:  # pragma: no cover - optional until dependency is present
 app = FastAPI(title="Zmartify Edge API", version="0.1.0")
 
 _REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
-_REQUIRED_PUBLIC_MQTT_URI = "mqtts://mqtt.pilot.zmartify.dk:8883"
+_REQUIRED_PUBLIC_MQTT_URI = "mqtts://pilot.zmartify.dk:8883"
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
