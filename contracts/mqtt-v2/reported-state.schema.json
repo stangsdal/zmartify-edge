@@ -6,7 +6,11 @@
   "required": ["schema_version", "source_timestamp"],
   "properties": {
     "schema_version": { "type": "string", "const": "2.0" },
-    "source_timestamp": { "type": "string", "format": "date-time" },
+    "source_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
     "firmware_version": { "type": ["string", "null"] },
     "hvac": { "type": ["object", "null"] },
     "irrigation": { "type": ["object", "null"] },

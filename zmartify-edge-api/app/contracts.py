@@ -6,9 +6,10 @@ from functools import lru_cache
 from pathlib import Path
 
 try:
-    from jsonschema import Draft202012Validator, ValidationError
+    from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 except Exception:  # pragma: no cover - dependency may be absent in lightweight dev envs
     Draft202012Validator = None  # type: ignore[assignment]
+    FormatChecker = None  # type: ignore[assignment]
     ValidationError = Exception  # type: ignore[assignment]
 
 
@@ -37,7 +38,8 @@ def _validator(schema_rel_path: str) -> Draft202012Validator:
         raise ContractValidationError(f"schema file not found: {schema_path}")
     with schema_path.open("r", encoding="utf-8") as handle:
         schema = json.load(handle)
-    return Draft202012Validator(schema)
+    checker = FormatChecker() if FormatChecker is not None else None
+    return Draft202012Validator(schema, format_checker=checker)
 
 
 def _render_error(schema_name: str, exc: ValidationError) -> str:

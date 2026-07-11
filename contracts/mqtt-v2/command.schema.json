@@ -10,8 +10,16 @@
     "command_type": { "type": "string", "minLength": 1 },
     "target_ref": { "type": ["string", "null"] },
     "parameters": { "type": "object" },
-    "requested_at": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": ["string", "null"], "format": "date-time" }
+    "requested_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "expires_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    }
   },
   "additionalProperties": true
 }

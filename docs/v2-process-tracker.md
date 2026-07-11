@@ -76,6 +76,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Begin active PostgreSQL migration branch work (SQLAlchemy models + Alembic revision baseline).
-2. Add schema validation checkpoints in ingest and command paths using `contracts/` definitions.
+1. Implement first SQLAlchemy-managed domain tables and migration scripts (beyond baseline).
+2. Roll out `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` in staging and verify firmware/adapters conformance.
 3. Split backend router structure toward `/api/v2` modules while preserving compatibility.

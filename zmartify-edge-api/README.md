@@ -33,6 +33,12 @@ Environment variables:
 - `ZMART_EDGE_DB_PATH` (current active runtime): SQLite file path.
 - `ZMART_EDGE_CONTRACT_VALIDATION_MODE`: `off`, `warn` (default), or `enforce`.
 
+Recommended rollout:
+
+- local/dev: `warn`
+- staging: `enforce`
+- production: `enforce` once firmware/adapters pass conformance checks
+
 Example:
 
 ```bash
