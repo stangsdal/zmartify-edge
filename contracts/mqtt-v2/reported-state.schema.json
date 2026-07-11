@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zmartify/contracts/mqtt-v2/reported-state.schema.json",
+  "title": "Zmartify MQTT v2 Reported State",
+  "type": "object",
+  "required": ["schema_version", "source_timestamp"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0" },
+    "source_timestamp": { "type": "string", "format": "date-time" },
+    "firmware_version": { "type": ["string", "null"] },
+    "hvac": { "type": ["object", "null"] },
+    "irrigation": { "type": ["object", "null"] },
+    "hydraulics": { "type": ["object", "null"] },
+    "power": { "type": ["object", "null"] },
+    "storage": { "type": ["object", "null"] }
+  },
+  "additionalProperties": true
+}

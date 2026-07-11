@@ -15,16 +15,19 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Existing architecture doc exists.
 - Open: capture current API/OpenAPI snapshot and MQTT map as explicit artifacts.
 
-2. Phase 1 - PostgreSQL and Timescale foundation: `not started`
-- Open: add postgres/timescale service, DATABASE_URL wiring, SQLAlchemy/Alembic migration path.
+2. Phase 1 - PostgreSQL and Timescale foundation: `in progress`
+- Completed: compose service scaffold for postgres-timescale and `DATABASE_URL` environment wiring.
+- Completed: backend dependency and config scaffolding (`psycopg`, `SQLAlchemy`, `Alembic`, db metadata in `/health`).
+- Open: migrate active runtime persistence from SQLite to PostgreSQL/Alembic migrations.
 
 3. Phase 2 - Core platform extraction: `partially started`
 - Existing role/auth/domain/site/device endpoints exist.
 - Open: complete v2 router structure and UUID-first public model.
 
-4. Phase 3 - Device contract and canonical twin: `partially started`
+4. Phase 3 - Device contract and canonical twin: `in progress`
 - Twin ingestion and mobile views exist.
-- Open: formalize contracts under contracts/ with versioned schemas.
+- Completed: initial versioned schema scaffolds under `contracts/` (device contract, mqtt v2, ota manifest).
+- Open: enforce schema validation in backend/firmware/adapters.
 
 5. Phase 4 - MQTT v2 adapter: `not started`
 - Open: add v2 topic mapping and dedicated ingest pipeline.
@@ -71,6 +74,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Start Phase 1 branch and implement PostgreSQL/Timescale foundation.
-2. Introduce `contracts/` with versioned JSON schemas (device contract, mqtt, ota).
+1. Begin active PostgreSQL migration branch work (SQLAlchemy models + Alembic revision baseline).
+2. Add schema validation checkpoints in ingest and command paths using `contracts/` definitions.
 3. Split backend router structure toward `/api/v2` modules while preserving compatibility.

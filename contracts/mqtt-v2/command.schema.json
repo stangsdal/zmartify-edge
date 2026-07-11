@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zmartify/contracts/mqtt-v2/command.schema.json",
+  "title": "Zmartify MQTT v2 Command Payload",
+  "type": "object",
+  "required": ["schema_version", "command_id", "command_type", "requested_at"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0" },
+    "command_id": { "type": "string", "format": "uuid" },
+    "command_type": { "type": "string", "minLength": 1 },
+    "target_ref": { "type": ["string", "null"] },
+    "parameters": { "type": "object" },
+    "requested_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "additionalProperties": true
+}

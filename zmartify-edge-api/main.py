@@ -41,7 +41,7 @@ from app.auth import (
     set_user_site_access,
     validate_registration_invite,
 )
-from app.db import get_connection, get_db_path, initialize_database
+from app.db import get_connection, get_database_backend, get_database_url, get_db_path, initialize_database
 from app.device_onboarding import (
     DeviceOnboardingError,
     discover_remote_device,
@@ -766,10 +766,14 @@ def auth_me(request: Request) -> dict:
 
 @app.get("/health")
 def health() -> dict:
+    db_url = get_database_url()
+    db_scheme = db_url.split(":", 1)[0] if ":" in db_url else "sqlite"
     return {
         "ok": True,
         "service": "zmartify-edge-api",
         "db_path": str(get_db_path()),
+        "db_backend": get_database_backend(),
+        "database_url_scheme": db_scheme,
     }
 
 

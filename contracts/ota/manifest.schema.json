@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zmartify/contracts/ota/manifest.schema.json",
+  "title": "Zmartify OTA Manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "product_type",
+    "product_model",
+    "version",
+    "sha256",
+    "size"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0" },
+    "product_type": { "type": "string", "minLength": 1 },
+    "product_model": { "type": "string", "minLength": 1 },
+    "hardware_revisions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "version": { "type": "string", "minLength": 1 },
+    "release_channel": { "type": "string", "default": "stable" },
+    "size": { "type": "integer", "minimum": 1 },
+    "sha256": { "type": "string", "minLength": 64 },
+    "signature": { "type": ["string", "null"] },
+    "release_notes": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

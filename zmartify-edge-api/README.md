@@ -11,6 +11,7 @@ This directory contains the initial backend scaffold for the Raspberry Pi edge m
 - Phase C MQTT client lifecycle endpoints (create/list/get/rotate/enable/disable/delete)
 - Automatic device MQTT client provisioning on device registration
 - Phase D ACL generation from registry state with generation logging
+- Phase 1 foundation scaffolding for PostgreSQL/Timescale (`DATABASE_URL`, compose service, deps)
 
 ## Local run (dev)
 
@@ -21,6 +22,24 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8080
 ```
+
+## Database configuration (transition mode)
+
+Current runtime remains SQLite for compatibility with the existing backend data-access layer.
+
+Environment variables:
+
+- `DATABASE_URL` (new): migration target wiring, used for backend metadata and upcoming SQLAlchemy/Alembic work.
+- `ZMART_EDGE_DB_PATH` (current active runtime): SQLite file path.
+
+Example:
+
+```bash
+export DATABASE_URL=postgresql://zmartify:<secret>@postgres-timescale:5432/zmartify
+export ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
+```
+
+Health endpoint now reports both `db_backend` and `database_url_scheme` for rollout visibility.
 
 ## Compose run
 

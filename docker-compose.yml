@@ -1,4 +1,17 @@
 services:
+  postgres-timescale:
+    image: timescale/timescaledb:2.16.1-pg17
+    container_name: zmartify-postgres-timescale
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=zmartify
+      - POSTGRES_USER=zmartify
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-zmartify-dev-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: hvac-mosquitto
@@ -39,6 +52,7 @@ services:
     environment:
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
+      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
       - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
@@ -53,6 +67,7 @@ services:
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
+      - postgres-timescale
 
   zmartify-edge-api-http:
     build:
@@ -73,6 +88,7 @@ services:
     environment:
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
+      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
       - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
@@ -87,6 +103,8 @@ services:
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
+      - postgres-timescale
 
 volumes:
   hvac-edge-data:
+  postgres-data:
