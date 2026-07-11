@@ -3,15 +3,24 @@ import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { commandsApi } from '../api/commands';
 
 const durations = [5, 10, 15, 20, 30, 45];
+
+interface ZoneCandidate {
+  deviceId: string;
+  zone: MobileZone;
+  zoneRef: string;
+}
 
 export function IrrigationManualPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
-  const [zones, setZones] = useState<MobileZone[]>([]);
+  const [zones, setZones] = useState<ZoneCandidate[]>([]);
   const [selectedZoneRef, setSelectedZoneRef] = useState('');
   const [duration, setDuration] = useState(10);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState('');
 
   useEffect(() => {
     const loadSites = async () => {
@@ -29,22 +38,49 @@ export function IrrigationManualPage() {
     const loadSiteZones = async () => {
       const site = await mobileApi.getSite(selectedSite);
       const detailRows = await Promise.all(site.devices.map((device) => mobileApi.getDevice(device.device_id)));
-      const nextZones = detailRows.flatMap((detail) => detail.zones || []);
+      const nextZones = detailRows.flatMap((detail) =>
+        (detail.zones || []).map((zone) => ({
+          deviceId: detail.device_id,
+          zone,
+          zoneRef: zone.zone_uuid || `${detail.device_id}:${zone.zone_id}`,
+        }))
+      );
       setZones(nextZones);
       if (nextZones.length) {
-        const firstRef = nextZones[0].zone_uuid || `zone:${nextZones[0].zone_id}`;
+        const firstRef = nextZones[0].zoneRef;
         setSelectedZoneRef((prev) => prev || firstRef);
       } else {
         setSelectedZoneRef('');
       }
+      setFeedback('');
     };
     loadSiteZones().catch(console.error);
   }, [selectedSite]);
 
   const selectedZone = useMemo(
-    () => zones.find((zone) => (zone.zone_uuid || `zone:${zone.zone_id}`) === selectedZoneRef) || null,
+    () => zones.find((zone) => zone.zoneRef === selectedZoneRef) || null,
     [selectedZoneRef, zones]
   );
+
+  const runManual = async () => {
+    if (!selectedZone) {
+      setFeedback('Select a zone before starting manual run.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFeedback('');
+    try {
+      const result = await commandsApi.startIrrigationZone(selectedZone.deviceId, selectedZone.zoneRef, duration * 60);
+      const status = typeof result.status === 'string' ? result.status : 'accepted';
+      const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
+      setFeedback(`Manual run command submitted (${status}). Command id: ${commandId}`);
+    } catch (error) {
+      setFeedback(String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <IonPage>
@@ -62,7 +98,7 @@ export function IrrigationManualPage() {
             <p className="text-sm text-muted">Selected zone</p>
             <div className="grid gap-2 mt-2">
               {zones.map((zone) => {
-                const ref = zone.zone_uuid || `zone:${zone.zone_id}`;
+                const ref = zone.zoneRef;
                 const active = ref === selectedZoneRef;
                 return (
                   <button
@@ -71,8 +107,8 @@ export function IrrigationManualPage() {
                     className={`text-left rounded-xl px-3 py-2 border ${active ? 'border-teal-500 bg-teal-50' : 'border-slate-200'}`}
                     onClick={() => setSelectedZoneRef(ref)}
                   >
-                    <p className="font-semibold">{zone.name || `Zone ${zone.zone_id}`}</p>
-                    <p className="text-sm text-muted">{zone.active || zone.demand ? 'Running' : 'Idle'}</p>
+                    <p className="font-semibold">{zone.zone.name || `Zone ${zone.zone.zone_id}`}</p>
+                    <p className="text-sm text-muted">{zone.zone.active || zone.zone.demand ? 'Running' : 'Idle'}</p>
                   </button>
                 );
               })}
@@ -99,12 +135,19 @@ export function IrrigationManualPage() {
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Command preview</p>
             <p className="text-base mt-1 font-semibold">
-              {selectedZone ? `${selectedZone.name || `Zone ${selectedZone.zone_id}`} for ${duration} minutes` : 'Select a zone'}
+              {selectedZone ? `${selectedZone.zone.name || `Zone ${selectedZone.zone.zone_id}`} for ${duration} minutes` : 'Select a zone'}
             </p>
-            <p className="text-sm text-muted mt-2">
-              Live command execution endpoint for irrigation is not available yet in the current backend. This preview is wired to
-              current site and zone data and is ready for command API integration.
-            </p>
+            <button
+              type="button"
+              className="mt-3 rounded-xl bg-teal-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
+              onClick={() => {
+                void runManual();
+              }}
+              disabled={!selectedZone || isSubmitting}
+            >
+              {isSubmitting ? 'Submitting...' : 'Start zone'}
+            </button>
+            {feedback ? <p className="text-sm mt-2 text-muted">{feedback}</p> : null}
           </section>
         </div>
       </IonContent>

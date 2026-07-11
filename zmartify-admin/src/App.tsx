@@ -29,6 +29,8 @@ import { IrrigationHydraulicsPage } from './pages/IrrigationHydraulicsPage';
 import { IrrigationManualPage } from './pages/IrrigationManualPage';
 import { IrrigationWeatherPage } from './pages/IrrigationWeatherPage';
 import { IrrigationZoneDetailPage } from './pages/IrrigationZoneDetailPage';
+import { InsightsWaterPage } from './pages/InsightsWaterPage';
+import { InsightsEnergyPage } from './pages/InsightsEnergyPage';
 import { MorePage } from './pages/MorePage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ResponsiveNavigation } from './components/ResponsiveNavigation';
@@ -152,6 +154,16 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/insights/water`}
+              render={() => requireAuth(<InsightsWaterPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/insights/energy`}
+              render={() => requireAuth(<InsightsEnergyPage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/alerts`}
               render={() => requireAuth(<AlertsPage />)}
           />
@@ -228,7 +240,7 @@ export function App() {
           <Route
             exact
             path={`${appBase}/insights`}
-              render={() => <Redirect to={`${appBase}/insights/hvac`} />}
+              render={() => <Redirect to={`${appBase}/insights/water`} />}
           />
           <Route
             exact
