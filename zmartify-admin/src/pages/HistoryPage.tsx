@@ -153,15 +153,42 @@ export function HistoryPage() {
   const isAtPresent = offsetMs === 0;
   const stepMs = windowMsMap[window];
 
+  const latestTemp = zoneHistory?.temperature_current?.length
+    ? zoneHistory.temperature_current[zoneHistory.temperature_current.length - 1].value
+    : null;
+  const latestSetpoint = zoneHistory?.setpoint?.length
+    ? zoneHistory.setpoint[zoneHistory.setpoint.length - 1].value
+    : null;
+  const demandPct = zoneHistory?.demand?.length
+    ? Math.round(
+        (zoneHistory.demand.filter((point) => Number(point.value) > 0).length / zoneHistory.demand.length) * 100
+      )
+    : 0;
+
   return (
     <IonPage>
       <AppHeader
-        title="History"
-        subtitle={selectedZone ? `Room: ${selectedZone.label}` : 'Temperature and system trends'}
+        title="Insights"
+        subtitle={selectedZone ? `Zone performance: ${selectedZone.label}` : 'Temperature and system trends'}
       />
       <IonContent className="ion-padding">
-        <div className="space-y-4 pb-8">
+        <div className="space-y-4 pb-20 lg:pb-8">
           <SiteSelector options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))} value={siteId} onChange={setSiteId} />
+
+          <section className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
+              <p className="text-xs uppercase tracking-wide text-muted">Current temp</p>
+              <p className="text-2xl font-bold mt-1">{latestTemp === null ? '--' : `${Number(latestTemp).toFixed(1)}°C`}</p>
+            </div>
+            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
+              <p className="text-xs uppercase tracking-wide text-muted">Current setpoint</p>
+              <p className="text-2xl font-bold mt-1">{latestSetpoint === null ? '--' : `${Number(latestSetpoint).toFixed(1)}°C`}</p>
+            </div>
+            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
+              <p className="text-xs uppercase tracking-wide text-muted">Heating demand</p>
+              <p className="text-2xl font-bold mt-1">{demandPct}%</p>
+            </div>
+          </section>
 
           <IonItem className="rounded-2xl overflow-hidden app-surface shadow-soft">
             <IonLabel>Room Source Device</IonLabel>
@@ -212,7 +239,7 @@ export function HistoryPage() {
           </div>
 
           <HistoryChart
-            title={`Room Temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`}
+            title={`Room temperature${selectedZone ? ` - ${selectedZone.label}` : ''}`}
             points={zoneHistory?.temperature_current || []}
             color="#7D85FF"
             mode="line"

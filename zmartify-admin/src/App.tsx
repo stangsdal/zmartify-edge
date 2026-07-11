@@ -24,7 +24,7 @@ import { MqttClientsPage } from './pages/MqttClientsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { BottomNavigation } from './components/BottomNavigation';
+import { ResponsiveNavigation } from './components/ResponsiveNavigation';
 
 export function App() {
   const location = useLocation();
@@ -110,12 +110,17 @@ export function App() {
   return (
     <>
       <OfflineIndicator />
-      <IonTabs>
-        <IonRouterOutlet>
+      <IonTabs className="app-layout-tabs">
+        <IonRouterOutlet className="app-router-outlet">
         <Route exact path={`${appBase}/login`} component={LoginPage} />
           <Route
             exact
             path={`${appBase}/home`}
+              render={() => requireAuth(<HomePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/overview`}
               render={() => requireAuth(<HomePage />)}
           />
           <Route
@@ -135,6 +140,11 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/insights/hvac`}
+              render={() => requireAuth(<HistoryPage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/alerts`}
               render={() => requireAuth(<AlertsPage />)}
           />
@@ -142,6 +152,41 @@ export function App() {
             exact
             path={`${appBase}/settings`}
               render={() => requireAuth(<SettingsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/settings`}
+              render={() => requireAuth(<SettingsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control`}
+              render={() => <Redirect to={`${appBase}/control/hvac/overview`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/hvac/overview`}
+              render={() => requireAuth(<RoomsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/hvac/zones`}
+              render={() => requireAuth(<RoomsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/hvac/zones/:zoneRef`}
+              render={() => requireAuth(<RoomDetailPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/insights`}
+              render={() => <Redirect to={`${appBase}/insights/hvac`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/more`}
+              render={() => <Redirect to={`${appBase}/more/settings`} />}
           />
 
           <Route
@@ -162,6 +207,11 @@ export function App() {
           <Route
             exact
             path={`${appBase}/devices`}
+              render={() => requireAdmin(<DevicesPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/systems`}
               render={() => requireAdmin(<DevicesPage />)}
           />
           <Route
@@ -206,6 +256,11 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/integrations`}
+              render={() => requireAdmin(<MqttClientsPage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/profile`}
               render={() => requireAuth(<ProfilePage />)}
           />
@@ -219,7 +274,7 @@ export function App() {
           <Route exact path={appBase} render={() => <Redirect to={`${appBase}/home`} />} />
       </IonRouterOutlet>
 
-      {!isPublicRoute && <BottomNavigation appBase={appBase} isAdmin={isAdmin} />}
+      {!isPublicRoute && <ResponsiveNavigation appBase={appBase} isAdmin={isAdmin} />}
     </IonTabs>
     </>
   );

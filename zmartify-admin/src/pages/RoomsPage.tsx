@@ -128,18 +128,54 @@ export function RoomsPage() {
     return [...rooms].sort((a, b) => a.name.localeCompare(b.name));
   }, [rooms]);
 
+  const avgTemp = useMemo(() => {
+    const values = sortedRooms
+      .map((room) => room.current_temperature_c)
+      .filter((v): v is number => typeof v === 'number');
+    if (!values.length) return null;
+    return values.reduce((acc, value) => acc + value, 0) / values.length;
+  }, [sortedRooms]);
+
+  const activeRooms = useMemo(
+    () => sortedRooms.filter((room) => room.demand === true || room.active === true).length,
+    [sortedRooms]
+  );
+
+  const offlineRooms = useMemo(() => sortedRooms.filter((room) => room.online === false).length, [sortedRooms]);
+
   return (
     <IonPage>
-      <AppHeader title="Rooms" subtitle="Room-centered comfort controls" />
+      <AppHeader title="Control" subtitle="HVAC zone overview and quick actions" />
       <IonContent className="ion-padding">
-        <div className="space-y-4 pb-8">
+        <div className="space-y-4 pb-20 lg:pb-8">
           <SiteSelector
+            label="Site"
             options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))}
             value={selectedSite}
             onChange={setSelectedSite}
           />
 
-          <div className="grid grid-cols-1 gap-3">
+          <section className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
+              <p className="text-xs uppercase tracking-wide text-muted">Average indoor</p>
+              <p className="text-2xl font-bold mt-1">{avgTemp === null ? '--' : `${avgTemp.toFixed(1)}°C`}</p>
+            </div>
+            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
+              <p className="text-xs uppercase tracking-wide text-muted">Heating now</p>
+              <p className="text-2xl font-bold mt-1">{activeRooms}</p>
+            </div>
+            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
+              <p className="text-xs uppercase tracking-wide text-muted">Offline zones</p>
+              <p className="text-2xl font-bold mt-1">{offlineRooms}</p>
+            </div>
+          </section>
+
+          <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+            <h2 className="text-lg font-semibold">Zones</h2>
+            <p className="text-sm text-muted mt-1">Tap a zone to inspect details, change setpoint and open trend history.</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {sortedRooms.map((room) => (
               <RoomCard
                 key={room.zone_ref}

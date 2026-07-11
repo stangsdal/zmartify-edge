@@ -24,24 +24,53 @@ export function AlertsPage() {
   }, [unreadOnly]);
 
   const unreadCount = useMemo(() => rows.filter((r) => !r.read).length, [rows]);
+  const criticalCount = useMemo(
+    () => rows.filter((r) => priorityFromEventType(String(r.event?.event_type || '')) === 'critical').length,
+    [rows]
+  );
+  const warningCount = useMemo(
+    () => rows.filter((r) => priorityFromEventType(String(r.event?.event_type || '')) === 'warning').length,
+    [rows]
+  );
+  const infoCount = useMemo(
+    () => rows.filter((r) => priorityFromEventType(String(r.event?.event_type || '')) === 'info').length,
+    [rows]
+  );
 
   return (
     <IonPage>
-      <AppHeader title="Alerts" subtitle="Actionable system issues" />
+      <AppHeader title="Alerts" subtitle="Actionable incidents and notifications" />
       <IonContent className="ion-padding">
-        <div className="space-y-4 pb-8">
-          <div className="rounded-2xl app-surface p-4 shadow-soft flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted">Unread Alerts</p>
-              <p className="text-2xl font-bold text-brand-primary">{unreadCount}</p>
+        <div className="space-y-4 pb-20 lg:pb-8">
+          <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm text-muted">Unread</p>
+                <p className="text-2xl font-bold text-brand-primary">{unreadCount}</p>
+              </div>
+              <div className="flex gap-2">
+                <IonButton size="small" fill="outline" onClick={() => setUnreadOnly((v) => !v)}>
+                  {unreadOnly ? 'Show all' : 'Unread only'}
+                </IonButton>
+                <IonButton size="small" onClick={() => notificationsApi.markAllRead().then(load)}>
+                  Mark all read
+                </IonButton>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <IonButton size="small" fill="outline" onClick={() => setUnreadOnly((v) => !v)}>
-                {unreadOnly ? 'Show All' : 'Unread'}
-              </IonButton>
-              <IonButton size="small" onClick={() => notificationsApi.markAllRead().then(load)}>
-                Mark all read
-              </IonButton>
+
+            <div className="grid gap-3 grid-cols-3 mt-4">
+              <div className="rounded-xl p-3 app-system-card app-system-card--hvac">
+                <p className="text-xs uppercase tracking-wide text-muted">Critical</p>
+                <p className="text-xl font-bold mt-1">{criticalCount}</p>
+              </div>
+              <div className="rounded-xl p-3 app-system-card app-system-card--irrigation">
+                <p className="text-xs uppercase tracking-wide text-muted">Warning</p>
+                <p className="text-xl font-bold mt-1">{warningCount}</p>
+              </div>
+              <div className="rounded-xl p-3 app-system-card app-system-card--weather">
+                <p className="text-xs uppercase tracking-wide text-muted">Info</p>
+                <p className="text-xl font-bold mt-1">{infoCount}</p>
+              </div>
             </div>
           </div>
 
