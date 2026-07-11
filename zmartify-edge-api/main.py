@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -127,6 +127,7 @@ from app.router_v2_device_ota import create_device_ota_v2_router
 from app.router_v2_device_lifecycle import create_device_lifecycle_v2_router
 from app.router_v2_device_domain import create_device_domain_v2_router
 from app.router_v2_mobile_events import create_mobile_events_v2_router
+from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
 from app.schemas import (
     ChannelMetadataIn,
@@ -603,6 +604,7 @@ app.include_router(create_core_v2_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mobile_events_v2_router(_require_roles))
+app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
 app.include_router(create_device_lifecycle_v2_router(_require_roles))
 app.include_router(create_device_ota_v2_router(_require_roles))
 app.include_router(
@@ -1302,56 +1304,6 @@ def api_refresh_device_firmware(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="unable to query device /version; provide base_url reachable from edge",
     )
-
-
-@app.websocket("/mobile/ws/zones/{zone_ref}")
-async def mobile_zone_stream(websocket: WebSocket, zone_ref: str) -> None:
-    token = (websocket.query_params.get("token") or "").strip()
-    if not token:
-        await websocket.close(code=4401, reason="missing bearer token")
-        return
-
-    try:
-        auth_user = authenticate_bearer_token(token)
-    except AuthError:
-        auth_user = authenticate_emergency_token(token)
-        if auth_user is None:
-            await websocket.close(code=4403, reason="invalid bearer token")
-            return
-
-    try:
-        require_any_role(auth_user, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    except AuthError:
-        await websocket.close(code=4403, reason="insufficient role permissions")
-        return
-
-    try:
-        device_id, zone_id = resolve_zone_ref(zone_ref)
-        site_pk_id = _resolve_device_site_pk_id(device_id)
-        if site_pk_id is None:
-            await websocket.close(code=4404, reason="device not found")
-            return
-        scoped_site_ids = _mobile_site_scope_ids_for_user(auth_user)
-        if scoped_site_ids is not None and site_pk_id not in scoped_site_ids:
-            await websocket.close(code=4404, reason="site not found")
-            return
-        zone = get_device_zone(device_id, zone_id)
-    except (RegistryNotFoundError, DomainModelError):
-        await websocket.close(code=4404, reason="zone not found")
-        return
-
-    await zone_stream_hub.subscribe(zone_ref, websocket)
-    await websocket.send_json({"type": "zone_update", "zone_ref": zone_ref, "zone": zone})
-
-    try:
-        while True:
-            message = await websocket.receive_text()
-            if message.strip().lower() == "ping":
-                await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await zone_stream_hub.unsubscribe(zone_ref, websocket)
 
 
 @app.get("/mobile/devices/{device_id}/freshness", response_model=DeviceFreshnessOut)
