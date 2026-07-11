@@ -64,3 +64,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: script correctly reported missing edge env vars and performed baseline live smoke only.
+
+- Date: 2026-07-12 (helper script rerun after v2 OTA extraction)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after OTA router extraction.

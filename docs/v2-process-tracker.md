@@ -31,6 +31,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: `/api/v2` events/mobile-notifications adapter router extraction.
 - Completed: `/api/v2` device-lifecycle adapter router extraction (discover/claim/push-config/onboarding-status/firmware-refresh).
 - Completed: `/api/v2` device-domain adapter router extraction (zones/channels/ingest/history/freshness).
+- Completed: `/api/v2` device-ota adapter router extraction (`ota`, `ota/stage`, `ota/poll`, `ota/download`).
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
@@ -58,6 +59,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest run: direct live HVAC smoke (`RUN_LIVE_HVAC=1`, base `http://192.168.10.57`) completed with 3 passed and 2 skipped (edge-assisted checks not enabled).
 - Latest attempt with edge-assisted flags passed baseline live checks with same 3 passed / 2 skipped, indicating `LIVE_EDGE_*` credentials were still not provided in environment.
 - Added helper script `scripts/run_live_edge_assisted_hvac.sh`; current run fell back to baseline live smoke due missing edge env vars.
+- Latest helper-script rerun (after OTA extraction): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -92,4 +94,4 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 1. Execute full stage-gate rehearsal using clean environment and onboarding-based creation flow.
 2. Run live HVAC contract smoke checks and capture conformance notes.
-3. Continue splitting backend domains from `main.py` into `/api/v2` modules while preserving compatibility.
+3. Continue splitting backend domains from `main.py` into `/api/v2` modules while preserving compatibility (next target: mobile websocket stream).
