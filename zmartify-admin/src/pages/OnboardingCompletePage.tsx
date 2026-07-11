@@ -10,6 +10,8 @@ export function OnboardingCompletePage() {
   const flow = onboardingFlow.load();
   const deviceId = flow.claimResult?.device?.device_id;
   const [statusText, setStatusText] = useState('Checking device status...');
+  const [status, setStatus] = useState<any>(flow.claimResult?.onboarding_status || null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -22,11 +24,12 @@ export function OnboardingCompletePage() {
     const poll = async () => {
       try {
         for (let i = 0; i < 15; i += 1) {
-          const status = await deviceApi.getOnboardingStatus(deviceId);
+          const nextStatus = await deviceApi.getOnboardingStatus(deviceId);
           if (cancelled) return;
-          const stateText = `${status.state} · MQTT ${status.mqtt_connected ? 'connected' : 'not connected'}`;
+          setStatus(nextStatus);
+          const stateText = `${nextStatus.state} · MQTT ${nextStatus.mqtt_connected ? 'connected' : 'not connected'}`;
           setStatusText(stateText);
-          if (status.state === 'online' && status.mqtt_connected) {
+          if (nextStatus.state === 'online' && nextStatus.mqtt_connected) {
             return;
           }
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
@@ -42,6 +45,37 @@ export function OnboardingCompletePage() {
     };
   }, [deviceId]);
 
+  const refreshStatus = async () => {
+    if (!deviceId) return;
+    try {
+      setBusy(true);
+      const nextStatus = await deviceApi.getOnboardingStatus(deviceId);
+      setStatus(nextStatus);
+      setStatusText(`${nextStatus.state} · MQTT ${nextStatus.mqtt_connected ? 'connected' : 'not connected'}`);
+      setError('');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pushConfigAgain = async () => {
+    if (!deviceId) return;
+    try {
+      setBusy(true);
+      const nextStatus = await deviceApi.pushConfig(deviceId, {});
+      setStatus(nextStatus);
+      setStatusText(`${nextStatus.state} · MQTT ${nextStatus.mqtt_connected ? 'connected' : 'not connected'}`);
+      setError('');
+      await refreshStatus();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <IonPage>
       <AppHeader title="Onboarding" subtitle="Completed" />
@@ -53,7 +87,23 @@ export function OnboardingCompletePage() {
             <h2 className="text-lg font-semibold mt-1">Device provisioned</h2>
             <p className="text-sm text-muted mt-2">Device ID: {deviceId || 'n/a'}</p>
             <p className="text-sm mt-2">Status: {statusText}</p>
+            {status ? (
+              <div className="text-sm text-muted mt-2">
+                <p>State: {status.state || 'unknown'}</p>
+                <p>MQTT Configured: {status.mqtt_configured ? 'Yes' : 'No'}</p>
+                <p>MQTT Connected: {status.mqtt_connected ? 'Yes' : 'No'}</p>
+                {status.last_error ? <p>Last Error: {String(status.last_error)}</p> : null}
+              </div>
+            ) : null}
             <div className="mt-4 flex gap-2">
+              <IonButton fill="outline" onClick={() => void refreshStatus()} disabled={busy}>
+                Refresh status
+              </IonButton>
+              <IonButton fill="outline" onClick={() => void pushConfigAgain()} disabled={busy}>
+                Push config again
+              </IonButton>
+            </div>
+            <div className="mt-2 flex gap-2">
               <IonButton
                 fill="outline"
                 onClick={() => {
