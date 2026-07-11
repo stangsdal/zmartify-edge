@@ -39,6 +39,9 @@ printf "[phase-2] Run API v2 core routing and UUID-first adapter tests\n"
 printf "[phase-2] Run API v2 auth/users and mqtt client adapter tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_api_v2_auth_mqtt.py
 
+printf "[phase-2] Run API v2 mobile/events adapter tests\n"
+"$PYTHON_BIN" -m pytest -q tests/test_api_v2_mobile_events.py
+
 printf "[phase-4] Run MQTT-related regression tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_mqtt_clients.py tests/test_mqtt_security.py
 
