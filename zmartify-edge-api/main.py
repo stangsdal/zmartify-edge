@@ -186,8 +186,14 @@ _REQUIRED_PUBLIC_MQTT_URI = "mqtts://mqtt.pilot.zmartify.dk:8883"
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
-_OTA_STAGE_ROOT = Path(os.getenv("ZMART_EDGE_OTA_STAGE_DIR", "/data/ota-stage"))
-_ALLOW_MANUAL_FIRMWARE_REFRESH = os.getenv("ZMART_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH", "0").strip() == "1"
+
+
+def _ota_stage_root() -> Path:
+    return Path(os.getenv("ZMART_EDGE_OTA_STAGE_DIR", "/data/ota-stage"))
+
+
+def _allow_manual_firmware_refresh() -> bool:
+    return os.getenv("ZMART_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH", "0").strip() == "1"
 
 
 class ZoneStreamHub:
@@ -396,7 +402,7 @@ def _extract_device_ingest_device_id(path: str) -> str | None:
 
 
 def _ota_stage_dir(device_id: str) -> Path:
-    return _OTA_STAGE_ROOT / device_id
+    return _ota_stage_root() / device_id
 
 
 def _ota_stage_meta_path(device_id: str) -> Path:
@@ -1418,7 +1424,7 @@ def api_refresh_device_firmware(
     base_url: str | None = None,
 ) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    if not _ALLOW_MANUAL_FIRMWARE_REFRESH:
+    if not _allow_manual_firmware_refresh():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     try:
         device = get_device(device_id)

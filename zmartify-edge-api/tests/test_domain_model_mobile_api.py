@@ -514,7 +514,7 @@ def test_mobile_viewer_site_scope_restricts_visible_properties(monkeypatch, tmp_
     assert user.status_code == 201
 
     set_scope = client.post(
-        f"/users/{user.json()['id']}/site-scope",
+        f"/users/{user.json()['id']}/site-access",
         headers=emergency,
         json={"site_ids": [site_b_id]},
     )
