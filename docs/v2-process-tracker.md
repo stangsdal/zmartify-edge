@@ -42,6 +42,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: backend ingest/command checkpoint validation hooks (`warn` mode default, `enforce` available).
 - Completed: staging compose override for enforce mode (`docker-compose.staging.yml`).
 - Completed: staged compose config merge validation confirms enforce mode resolves for both API services.
+- Completed: initial generic realtime websocket endpoint (`/api/v2/ws`) with topic-subscribe protocol handshake and test coverage.
 - Open: firmware/adapters contract conformance and strict-mode rollout.
 
 5. Phase 4 - MQTT v2 adapter: `not started`
@@ -64,6 +65,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after OTA extraction): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after mobile-websocket extraction): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after setpoint-listener extraction): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after realtime websocket endpoint addition): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -98,4 +100,4 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 1. Execute full stage-gate rehearsal using clean environment and onboarding-based creation flow.
 2. Run live HVAC contract smoke checks and capture conformance notes.
-3. Continue splitting backend domains from `main.py` into `/api/v2` modules while preserving compatibility (next target: realtime `/api/v2/ws` topic subscription endpoint from redesign doc section 9).
+3. Expand realtime phase-3 implementation from `/api/v2/ws` handshake to actual domain event fan-out (`device.state.updated`, `event.created`, `notification.created`).

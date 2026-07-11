@@ -127,6 +127,7 @@ from app.router_v2_device_domain import create_device_domain_v2_router
 from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
+from app.router_v2_realtime_ws import create_realtime_ws_v2_router
 from app.setpoint_outcome_listener import create_setpoint_outcome_listener
 from app.schemas import (
     ChannelMetadataIn,
@@ -451,6 +452,7 @@ app.include_router(create_core_v2_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mobile_events_v2_router(_require_roles))
+app.include_router(create_realtime_ws_v2_router())
 app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
 app.include_router(create_device_lifecycle_v2_router(_require_roles))
 app.include_router(create_device_ota_v2_router(_require_roles))
