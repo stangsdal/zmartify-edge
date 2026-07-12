@@ -54,6 +54,7 @@ services:
       - MQTT_PORT=1883
       - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
       - ZMART_EDGE_CONTRACT_VALIDATION_MODE=${ZMART_EDGE_CONTRACT_VALIDATION_MODE:-warn}
+      - ZMART_EDGE_MQTT_TOPIC_STYLE=${ZMART_EDGE_MQTT_TOPIC_STYLE:-legacy}
       - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
@@ -91,6 +92,7 @@ services:
       - MQTT_PORT=1883
       - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
       - ZMART_EDGE_CONTRACT_VALIDATION_MODE=${ZMART_EDGE_CONTRACT_VALIDATION_MODE:-warn}
+      - ZMART_EDGE_MQTT_TOPIC_STYLE=${ZMART_EDGE_MQTT_TOPIC_STYLE:-legacy}
       - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
