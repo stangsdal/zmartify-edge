@@ -45,6 +45,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: initial generic realtime websocket endpoint (`/api/v2/ws`) with topic-subscribe protocol handshake and test coverage.
 - Completed: realtime topic-hub fan-out foundation with publish hooks for `device.state.updated` and `hvac.zone.updated` topics.
 - Completed: deterministic realtime fan-out test strategy (`/api/v2/ws` integration + topic-hub unit test).
+- Completed: event/notification realtime fan-out hooks from domain lifecycle (`event.created`, `notification.created`).
+- Completed: scoped realtime topic filtering for non-admin users (`site:{id}:events`, `user:{id}:notifications`) with unit coverage.
 - Open: firmware/adapters contract conformance and strict-mode rollout.
 
 5. Phase 4 - MQTT v2 adapter: `not started`
@@ -52,7 +54,10 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 
 6. Phase 5 - Irrigation backend: `early stage`
 - UI scaffolding and route architecture are in place.
-- Open: add dedicated irrigation backend model/tables/endpoints.
+- Completed: irrigation foundation migration (`013_irrigation_foundation.sql`) with core zone/program tables.
+- Completed: initial irrigation backend domain and `/api/v2/devices/{device_id}/irrigation/*` router skeleton.
+- Completed: irrigation API skeleton coverage added to stage-gate rehearsal.
+- Open: add irrigation schedules, execution history, and command/feedback integration.
 
 7. Phase 6 - New responsive app shell: `in progress`
 - Completed: responsive nav shell, mobile/tablet/desktop behavior, onboarding flow routes.
@@ -69,6 +74,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after setpoint-listener extraction): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after realtime websocket endpoint addition): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after realtime fan-out foundation): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after realtime scoped fan-out + irrigation skeleton): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -101,6 +107,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Execute full stage-gate rehearsal using clean environment and onboarding-based creation flow.
-2. Run live HVAC contract smoke checks and capture conformance notes.
-3. Expand realtime phase-3 implementation from state fan-out to additional domain event fan-out (`event.created`, `notification.created`) with role/site scoping.
+1. Extend realtime lifecycle to include notification read-state events (`notification.read`, `notification.read_all`) for mobile sync.
+2. Expand irrigation backend from skeleton to schedule/run models and API flows (create/activate/deactivate/execution history).
+3. Start phase-4 MQTT v2 adapter work for irrigation/hvac command and reported-state topic normalization.

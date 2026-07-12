@@ -20,6 +20,15 @@ NOTIFICATION_EVENT_TYPES = {
     "zone_setpoint_changed",
 }
 
+_EVENT_EMIT_HOOK = None
+_NOTIFICATION_EMIT_HOOK = None
+
+
+def set_realtime_emit_hooks(*, event_hook=None, notification_hook=None) -> None:
+    global _EVENT_EMIT_HOOK, _NOTIFICATION_EMIT_HOOK
+    _EVENT_EMIT_HOOK = event_hook
+    _NOTIFICATION_EMIT_HOOK = notification_hook
+
 
 def _floats_close(a: float | None, b: float | None, tolerance: float = 0.05) -> bool:
     if a is None or b is None:
@@ -1411,19 +1420,31 @@ def get_device_history(device_external_id: str, *, window: str = "24h", offset_m
     }
 
 
-def _insert_notifications_for_event(conn: Any, event_id: int, event_type: str) -> None:
+def _insert_notifications_for_event(conn: Any, event_id: int, event_type: str) -> list[dict[str, Any]]:
     if event_type not in NOTIFICATION_EVENT_TYPES:
-        return
+        return []
     users = conn.execute("SELECT id FROM users WHERE enabled = 1").fetchall()
     now = _now_iso()
+    created: list[dict[str, Any]] = []
     for row in users:
+        notification_uuid = _new_uuid()
         conn.execute(
             """
             INSERT INTO notifications(uuid, user_id, event_id, read, created_at)
             VALUES (?, ?, ?, 0, ?)
             """,
-            (_new_uuid(), row["id"], event_id, now),
+            (notification_uuid, row["id"], event_id, now),
         )
+        created.append(
+            {
+                "notification_id": notification_uuid,
+                "user_id": int(row["id"]),
+                "event_id": int(event_id),
+                "read": False,
+                "created_at": now,
+            }
+        )
+    return created
 
 
 def log_event(
@@ -1437,6 +1458,7 @@ def log_event(
 ) -> dict[str, Any]:
     now = _now_iso()
     payload_json = json.dumps(payload or {}, separators=(",", ":"), sort_keys=True)
+    created_notifications: list[dict[str, Any]] = []
     with get_connection() as conn:
         cur = conn.execute(
             """
@@ -1445,13 +1467,45 @@ def log_event(
             """,
             (_new_uuid(), event_type, domain_id, site_id, device_pk_id, zone_id, payload_json, now),
         )
-        _insert_notifications_for_event(conn, int(cur.lastrowid), event_type)
+        created_notifications = _insert_notifications_for_event(conn, int(cur.lastrowid), event_type)
         row = conn.execute(
             "SELECT id, uuid, event_type, domain_id, site_id, device_id, zone_id, payload_json, created_at FROM event_log WHERE id = ?",
             (cur.lastrowid,),
         ).fetchone()
         conn.commit()
-    return _row_to_dict(row) or {}
+    event = _row_to_dict(row) or {}
+    try:
+        payload_dict = json.loads(event.get("payload_json") or "{}")
+    except json.JSONDecodeError:
+        payload_dict = {}
+    event_for_emit = {
+        "event_id": event.get("uuid"),
+        "event_type": event.get("event_type"),
+        "domain_id": event.get("domain_id"),
+        "site_id": event.get("site_id"),
+        "device_id": event.get("device_id"),
+        "zone_id": event.get("zone_id"),
+        "payload": payload_dict,
+        "created_at": event.get("created_at"),
+    }
+
+    if _EVENT_EMIT_HOOK is not None:
+        try:
+            _EVENT_EMIT_HOOK(event_for_emit)
+        except Exception:
+            pass
+    if _NOTIFICATION_EMIT_HOOK is not None and created_notifications:
+        for notification in created_notifications:
+            enriched = {
+                **notification,
+                "event": event_for_emit,
+            }
+            try:
+                _NOTIFICATION_EMIT_HOOK(enriched)
+            except Exception:
+                continue
+
+    return event
 
 
 def upsert_device_state(

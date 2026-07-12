@@ -71,6 +71,7 @@ from app.domain_model import (
     mark_notification_read,
     rename_zone,
     resolve_zone_ref,
+    set_realtime_emit_hooks,
     set_channel_metadata,
     set_channel_zone_links,
     set_zone_metadata,
@@ -128,6 +129,7 @@ from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
 from app.router_v2_realtime_ws import create_realtime_ws_v2_router
+from app.router_v2_irrigation import create_irrigation_v2_router
 from app.realtime_topic_hub import RealtimeTopicHub
 from app.setpoint_outcome_listener import create_setpoint_outcome_listener
 from app.schemas import (
@@ -395,6 +397,59 @@ def _publish_zone_state_update(device_id: str, zone: dict) -> None:
     )
 
 
+def _publish_event_update(event: dict) -> None:
+    site_id = event.get("site_id")
+    event_type = str(event.get("event_type") or "event.created")
+    event_id = event.get("event_id")
+    if site_id is not None:
+        realtime_topic_hub.publish_from_sync(
+            f"site:{int(site_id)}:events",
+            "event.created",
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "site_id": int(site_id),
+                "domain_id": event.get("domain_id"),
+                "device_id": event.get("device_id"),
+                "zone_id": event.get("zone_id"),
+                "payload": event.get("payload") or {},
+                "created_at": event.get("created_at"),
+            },
+        )
+    realtime_topic_hub.publish_from_sync(
+        "events",
+        "event.created",
+        {
+            "event_id": event_id,
+            "event_type": event_type,
+            "site_id": site_id,
+            "domain_id": event.get("domain_id"),
+            "device_id": event.get("device_id"),
+            "zone_id": event.get("zone_id"),
+            "payload": event.get("payload") or {},
+            "created_at": event.get("created_at"),
+        },
+    )
+
+
+def _publish_notification_update(notification: dict) -> None:
+    user_id = notification.get("user_id")
+    if user_id is None:
+        return
+    event = notification.get("event") or {}
+    realtime_topic_hub.publish_from_sync(
+        f"user:{int(user_id)}:notifications",
+        "notification.created",
+        {
+            "notification_id": notification.get("notification_id"),
+            "user_id": int(user_id),
+            "read": bool(notification.get("read", False)),
+            "created_at": notification.get("created_at"),
+            "event": event,
+        },
+    )
+
+
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
     scoped_site_ids = _mobile_site_scope_ids(request)
     if scoped_site_ids is None:
@@ -443,6 +498,7 @@ async def startup_event() -> None:
     ensure_bootstrap_owner()
     zone_stream_hub.set_loop(asyncio.get_running_loop())
     realtime_topic_hub.set_loop(asyncio.get_running_loop())
+    set_realtime_emit_hooks(event_hook=_publish_event_update, notification_hook=_publish_notification_update)
     setpoint_outcome_listener.start()
 
 
@@ -466,6 +522,7 @@ app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mobile_events_v2_router(_require_roles))
 app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
+app.include_router(create_irrigation_v2_router(_require_roles))
 app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
 app.include_router(create_device_lifecycle_v2_router(_require_roles))
 app.include_router(create_device_ota_v2_router(_require_roles))

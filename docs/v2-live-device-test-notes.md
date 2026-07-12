@@ -89,3 +89,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after topic-hub fan-out hooks.
+
+- Date: 2026-07-12 (helper script rerun after realtime scoped fan-out + irrigation skeleton)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after scoped realtime filtering and irrigation backend foundation changes.
