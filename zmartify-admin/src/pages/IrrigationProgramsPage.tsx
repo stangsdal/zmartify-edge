@@ -1,5 +1,5 @@
-import { IonContent, IonPage } from '@ionic/react';
-import { useEffect, useMemo, useState } from 'react';
+import { IonButton, IonContent, IonPage } from '@ionic/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { mobileApi, MobileEvent, MobileSiteSummary, IrrigationProgramSummary, IrrigationScheduleSummary, subscribeRealtimeTopics } from '../api/mobile';
@@ -18,6 +18,107 @@ export function IrrigationProgramsPage() {
   const [selectedSite, setSelectedSite] = useState('');
   const [programRows, setProgramRows] = useState<DeviceProgram[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
+  const [deviceIds, setDeviceIds] = useState<string[]>([]);
+  const [actionFeedback, setActionFeedback] = useState('');
+  const [busyKey, setBusyKey] = useState('');
+  const [newProgramName, setNewProgramName] = useState('');
+
+  const reloadPrograms = useCallback(async (siteId: string) => {
+    const site = await mobileApi.getSite(siteId);
+    setDeviceIds(site.devices.map((device) => device.device_id));
+    const nextRows = await Promise.all(
+      site.devices.map(async (device) => {
+        const programsResponse = await mobileApi.listIrrigationPrograms(device.device_id);
+        return Promise.all(
+          (programsResponse.programs || []).map(async (program) => {
+            const schedulesResponse = await mobileApi.listIrrigationProgramSchedules(device.device_id, program.program_id);
+            return {
+              deviceId: device.device_id,
+              displayName: device.display_name,
+              program,
+              schedules: schedulesResponse.schedules || [],
+            } satisfies DeviceProgram;
+          })
+        );
+      })
+    );
+    setProgramRows(nextRows.flat());
+  }, []);
+
+  const runProgramNow = async (row: DeviceProgram) => {
+    const key = `run:${row.deviceId}:${row.program.program_id}`;
+    setBusyKey(key);
+    setActionFeedback('');
+    try {
+      const result = await mobileApi.startIrrigationProgramRun(row.deviceId, row.program.program_id);
+      const runId = typeof (result.run as Record<string, unknown>)?.run_id === 'string' ? String((result.run as Record<string, unknown>).run_id) : 'n/a';
+      setActionFeedback(`Run started for ${row.program.name} (run ${runId}).`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const toggleProgramEnabled = async (row: DeviceProgram) => {
+    const key = `toggle:${row.deviceId}:${row.program.program_id}`;
+    setBusyKey(key);
+    setActionFeedback('');
+    try {
+      await mobileApi.updateIrrigationProgram(row.deviceId, row.program.program_id, {
+        name: row.program.name,
+        enabled: !row.program.enabled,
+        seasonal_adjustment: row.program.seasonal_adjustment,
+        weather_mode: row.program.weather_mode,
+      });
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`${row.program.name} is now ${row.program.enabled ? 'paused' : 'enabled'}.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const addDefaultSchedule = async (row: DeviceProgram) => {
+    const key = `schedule:${row.deviceId}:${row.program.program_id}`;
+    setBusyKey(key);
+    setActionFeedback('');
+    try {
+      await mobileApi.createIrrigationProgramSchedule(row.deviceId, row.program.program_id, {
+        name: 'Morning window',
+        start_local_time: '06:00',
+        weekdays: [1, 2, 3, 4, 5],
+        enabled: true,
+      });
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`Schedule added to ${row.program.name}.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const createProgram = async () => {
+    const name = newProgramName.trim();
+    if (!name || !deviceIds.length) {
+      setActionFeedback('Provide a program name and ensure a device exists on the site.');
+      return;
+    }
+    setBusyKey('create');
+    setActionFeedback('');
+    try {
+      await mobileApi.createIrrigationProgram(deviceIds[0], { name, enabled: true });
+      setNewProgramName('');
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`Program "${name}" created.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
 
   useEffect(() => {
     const loadSites = async () => {
@@ -35,24 +136,8 @@ export function IrrigationProgramsPage() {
     let cleanup: (() => void) | undefined;
 
     const loadPrograms = async () => {
+      await reloadPrograms(selectedSite);
       const site = await mobileApi.getSite(selectedSite);
-      const nextRows = await Promise.all(
-        site.devices.map(async (device) => {
-          const programsResponse = await mobileApi.listIrrigationPrograms(device.device_id);
-          return Promise.all(
-            (programsResponse.programs || []).map(async (program) => {
-              const schedulesResponse = await mobileApi.listIrrigationProgramSchedules(device.device_id, program.program_id);
-              return {
-                deviceId: device.device_id,
-                displayName: device.display_name,
-                program,
-                schedules: schedulesResponse.schedules || [],
-              } satisfies DeviceProgram;
-            })
-          );
-        })
-      );
-      setProgramRows(nextRows.flat());
 
       cleanup = subscribeRealtimeTopics(
         site.devices.map((device) => `device:${device.device_id}:irrigation`),
@@ -74,7 +159,7 @@ export function IrrigationProgramsPage() {
 
     loadPrograms().catch(console.error);
     return () => cleanup?.();
-  }, [selectedSite]);
+  }, [reloadPrograms, selectedSite]);
 
   const latestRunEvent = useMemo(() => events.find((event) => event.event_type === 'irrigation.run.updated') || null, [events]);
 
@@ -89,6 +174,22 @@ export function IrrigationProgramsPage() {
             value={selectedSite}
             onChange={setSelectedSite}
           />
+
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+            <p className="text-sm text-muted">Create program</p>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              <input
+                className="flex-1 min-w-48 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                placeholder="Program name"
+                value={newProgramName}
+                onChange={(event) => setNewProgramName(event.target.value)}
+              />
+              <IonButton size="small" disabled={busyKey === 'create'} onClick={() => { void createProgram(); }}>
+                {busyKey === 'create' ? 'Creating...' : 'Create'}
+              </IonButton>
+            </div>
+            {actionFeedback ? <p className="text-sm text-muted mt-2">{actionFeedback}</p> : null}
+          </section>
 
           {programRows.map((row) => {
             const scheduleSummary = row.schedules.length
@@ -135,6 +236,32 @@ export function IrrigationProgramsPage() {
                       ? `Latest site run event: ${latestRunEvent.event_type.replace(/_/g, ' ')}`
                       : 'No realtime feedback yet'}
                 </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mt-3">
+                <IonButton
+                  size="small"
+                  disabled={busyKey === `run:${row.deviceId}:${row.program.program_id}`}
+                  onClick={() => { void runProgramNow(row); }}
+                >
+                  Run now
+                </IonButton>
+                <IonButton
+                  size="small"
+                  fill="outline"
+                  disabled={busyKey === `toggle:${row.deviceId}:${row.program.program_id}`}
+                  onClick={() => { void toggleProgramEnabled(row); }}
+                >
+                  {row.program.enabled ? 'Pause' : 'Enable'}
+                </IonButton>
+                <IonButton
+                  size="small"
+                  fill="outline"
+                  disabled={busyKey === `schedule:${row.deviceId}:${row.program.program_id}`}
+                  onClick={() => { void addDefaultSchedule(row); }}
+                >
+                  Add schedule
+                </IonButton>
               </div>
             </section>
           )})}

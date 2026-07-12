@@ -304,4 +304,36 @@ export const mobileApi = {
     programId: string,
   ): Promise<{ device_id: string; program_id: string; schedules: IrrigationScheduleSummary[] }> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules`),
+
+  createIrrigationProgram: (
+    deviceId: string,
+    payload: { name: string; enabled?: boolean; seasonal_adjustment?: number; weather_mode?: string },
+  ): Promise<{ device_id: string; program: IrrigationProgramSummary }> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs`, payload),
+
+  updateIrrigationProgram: (
+    deviceId: string,
+    programId: string,
+    payload: { name: string; enabled: boolean; seasonal_adjustment: number; weather_mode: string },
+  ): Promise<{ device_id: string; program: IrrigationProgramSummary }> =>
+    apiClient.put(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}`, payload),
+
+  createIrrigationProgramSchedule: (
+    deviceId: string,
+    programId: string,
+    payload: { name: string; start_local_time: string; weekdays: number[]; enabled?: boolean },
+  ): Promise<{ device_id: string; program_id: string; schedule: IrrigationScheduleSummary }> =>
+    apiClient.post(
+      `/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules`,
+      payload,
+    ),
+
+  startIrrigationProgramRun: (
+    deviceId: string,
+    programId: string,
+    triggerType = 'manual',
+  ): Promise<{ device_id: string; program_id: string; run: Record<string, unknown> }> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/run`, {
+      trigger_type: triggerType,
+    }),
 };

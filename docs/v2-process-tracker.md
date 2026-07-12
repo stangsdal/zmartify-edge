@@ -82,6 +82,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation manual-run command feedback traces in app shell via realtime topic stream correlation.
 - Completed: per-device irrigation alarm history navigation from Alerts into enriched irrigation detail surface with realtime event history and operations-state snapshots.
 - Completed: irrigation programs and hydraulics/power app-shell surfaces now consume real backend program/schedule data and realtime overview/status traces.
+- Completed: irrigation program management actions in app shell (create program, enable/pause toggle, add schedule, run now) bound to v2 program endpoints.
 - Open: complete remaining UX parity screens and deeper API bindings.
 
 8. Phase 7 - HVAC firmware alignment: `not started`
@@ -107,6 +108,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation command feedback trace UI increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation alert-navigation/detail-history increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation programs + hydraulics parity increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after irrigation program actions increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -140,5 +142,5 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 ## Next Process-Aligned Steps
 
 1. Expand irrigation outcome taxonomy (run-step/valve/hydraulics/power alarms) and align firmware publish payloads to strict typed events.
-2. Finish the remaining irrigation UX parity gaps around editing/program actions and richer schedule management.
-3. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.
+2. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.
+3. Start Phase 9 production-hardening checklist items that do not depend on firmware (backup/restore drill, enforce-mode default rollout plan).
