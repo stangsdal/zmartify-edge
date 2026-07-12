@@ -105,6 +105,8 @@ services:
       - ZMART_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
       - ZMART_EDGE_DRY_RUN_ACL_WRITE=0
       - ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
+      # Listener runs only in the primary HTTPS service to avoid duplicate outcome ingestion.
+      - ZMART_EDGE_ENABLE_SETPOINT_OUTCOME_LISTENER=0
       - ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
       - ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://pilot.zmartify.dk:8883
       - ZMART_EDGE_ENABLE_EMERGENCY_TOKEN=${ZMART_EDGE_ENABLE_EMERGENCY_TOKEN:-0}
