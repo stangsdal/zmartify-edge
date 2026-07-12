@@ -44,6 +44,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: backend ingest/command checkpoint validation hooks (`warn` mode default, `enforce` available).
 - Completed: staging compose override for enforce mode (`docker-compose.staging.yml`).
 - Completed: staged compose config merge validation confirms enforce mode resolves for both API services.
+- Completed: production flipped to `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` on 2026-07-12 after 2h of warn-mode traffic showed zero contract violations; live twin ingest verified under enforce (HTTP 200, freshness moving).
 - Completed: initial generic realtime websocket endpoint (`/api/v2/ws`) with topic-subscribe protocol handshake and test coverage.
 - Completed: realtime topic-hub fan-out foundation with publish hooks for `device.state.updated` and `hvac.zone.updated` topics.
 - Completed: deterministic realtime fan-out test strategy (`/api/v2/ws` integration + topic-hub unit test).
@@ -96,6 +97,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: production edge deployed from merged `main` (b426a9a + fixes) with `ZMART_EDGE_MQTT_TOPIC_STYLE=dual`, contracts volume mount, regenerated ACL, and broker restart for client resubscribe.
 - Completed: live end-to-end v2 loop validated on 2026-07-12: dual-published setpoint command -> firmware v0.2.0 -> v2 `setpoint-outcome` ingested by edge (`setpoint_command_outcome_received` events with source `mqtt_v2_setpoint_outcome`, result `confirmed`, command_id echoed).
 - Completed: duplicate outcome ingestion resolved — setpoint listener now runs only in the primary HTTPS API service (`ZMART_EDGE_ENABLE_SETPOINT_OUTCOME_LISTENER=0` on the http service); re-validated live with exactly one event per topic source.
+- Completed: firmware v0.2.1 (commit 2d03a7b) fixes twin-push identity regression from the repo rename — device id now read from provisioned NVS `mqtt_client_id` with MAC fallback; twin pushes restored to HTTP 200 under enforce mode.
 - Early validation support added: optional live HVAC smoke tests include edge twin-shape and command-feedback sequence checks.
 - Latest run: direct live HVAC smoke (`RUN_LIVE_HVAC=1`, base `http://192.168.10.57`) completed with 3 passed and 2 skipped (edge-assisted checks not enabled).
 - Latest attempt with edge-assisted flags passed baseline live checks with same 3 passed / 2 skipped, indicating `LIVE_EDGE_*` credentials were still not provided in environment.

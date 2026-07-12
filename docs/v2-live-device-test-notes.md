@@ -183,3 +183,8 @@ Helper script:
 - Date: 2026-07-12 (listener dedup validation)
 - Commands: disabled listener in http service, recreated container, re-published no-op setpoint command.
 - Result: exactly one `setpoint_command_outcome_received` per topic source (one `mqtt_v2_setpoint_outcome`, one `mqtt_last_setpoint_command`) — duplication resolved; both sources present as expected in dual mode.
+
+- Date: 2026-07-12 (enforce-mode flip + firmware v0.2.1 identity fix)
+- Commands: set `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` in host .env and recreated API containers; discovered twin-push 403s caused by v0.2.0 repo-rename identity drift (`zmartify-hvac-ahc9000-*` vs registered `hvac-gateway-*`); shipped firmware v0.2.1 via OTA reading device id from NVS `mqtt_client_id`.
+- Result: v0.2.1 live, twin pushes HTTP 200 under enforce mode (success 2/2 after boot), AHC9000 detected, zero contract violations.
+- Notes: enforce mode is now the production default; the twin-push regression existed since the v0.2.0 OTA (~90 min) and HVAC state freshness was stale during that window.
