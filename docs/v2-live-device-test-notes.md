@@ -174,3 +174,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after the `edge-db-backup` compose sidecar was added; compose config validated including stage-gate merge check.
+
+- Date: 2026-07-12 (production deployment + live v2 loop validation)
+- Commands: host deploy of merged `main` (dual topic style, contracts mount, ACL regeneration, mosquitto restart), then `publish_setpoint_command("hvac-gateway-1cdbd47a254c", 1, 16.0)` from the API container.
+- Result: `setpoint_command_outcome_received` events logged with source `mqtt_v2_setpoint_outcome`, result `confirmed`, command_id `sp-29b30c570ebc` echoed by firmware v0.2.0; legacy `mqtt_last_setpoint_command` path ran in parallel.
+- Notes: first full production validation of the v2 MQTT contract loop (edge -> firmware -> edge). Known follow-up: outcomes are ingested twice because both API containers run the listener.
