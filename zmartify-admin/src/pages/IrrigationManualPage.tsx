@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
 import { commandsApi } from '../api/commands';
 
 const durations = [5, 10, 15, 20, 30, 45];
@@ -21,6 +21,8 @@ export function IrrigationManualPage() {
   const [duration, setDuration] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [lastCommandId, setLastCommandId] = useState('');
+  const [traceRows, setTraceRows] = useState<MobileEvent[]>([]);
 
   useEffect(() => {
     const loadSites = async () => {
@@ -57,10 +59,48 @@ export function IrrigationManualPage() {
     loadSiteZones().catch(console.error);
   }, [selectedSite]);
 
+  useEffect(() => {
+    if (!selectedSite) return;
+
+    let cleanup: (() => void) | undefined;
+    const connectRealtime = async () => {
+      const site = await mobileApi.getSite(selectedSite);
+      const topics = site.devices.map((device) => `device:${device.device_id}:irrigation`);
+      cleanup = subscribeRealtimeTopics(topics, (event) => {
+        const receivedAt = new Date().toISOString();
+        setTraceRows((prev) => {
+          const next: MobileEvent = {
+            event_id: `rt-manual-${receivedAt}-${event.event_type}`,
+            event_type: event.event_type,
+            created_at: receivedAt,
+            device_id: typeof event.payload?.device_id === 'string' ? event.payload.device_id : undefined,
+            payload: event.payload,
+          };
+          return [next, ...prev].slice(0, 25);
+        });
+      });
+    };
+
+    connectRealtime().catch(console.error);
+    return () => cleanup?.();
+  }, [selectedSite]);
+
   const selectedZone = useMemo(
     () => zones.find((zone) => zone.zoneRef === selectedZoneRef) || null,
     [selectedZoneRef, zones]
   );
+
+  const matchingTraceRows = useMemo(() => {
+    if (!selectedZone) return traceRows.slice(0, 8);
+    return traceRows
+      .filter((row) => {
+        const payload = row.payload || {};
+        const sameDevice = !row.device_id || row.device_id === selectedZone.deviceId;
+        const sameCommand = !lastCommandId || payload.command_id === lastCommandId;
+        return sameDevice && (sameCommand || row.event_type.includes('irrigation'));
+      })
+      .slice(0, 8);
+  }, [lastCommandId, selectedZone, traceRows]);
 
   const runManual = async () => {
     if (!selectedZone) {
@@ -74,6 +114,7 @@ export function IrrigationManualPage() {
       const result = await commandsApi.startIrrigationZone(selectedZone.deviceId, selectedZone.zoneRef, duration * 60);
       const status = typeof result.status === 'string' ? result.status : 'accepted';
       const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
+      setLastCommandId(commandId === 'n/a' ? '' : commandId);
       setFeedback(`Manual run command submitted (${status}). Command id: ${commandId}`);
     } catch (error) {
       setFeedback(String(error));
@@ -148,6 +189,31 @@ export function IrrigationManualPage() {
               {isSubmitting ? 'Submitting...' : 'Start zone'}
             </button>
             {feedback ? <p className="text-sm mt-2 text-muted">{feedback}</p> : null}
+          </section>
+
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+            <p className="text-sm text-muted">Feedback trace</p>
+            <div className="space-y-2 mt-2">
+              {matchingTraceRows.map((row) => {
+                const payload = row.payload || {};
+                const detail = [
+                  typeof payload.action === 'string' ? payload.action : null,
+                  typeof payload.detail === 'string' ? payload.detail : null,
+                  typeof payload.result === 'string' ? `result ${payload.result}` : null,
+                  typeof payload.command_id === 'string' ? `cmd ${payload.command_id}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ');
+                return (
+                  <div key={row.event_id} className="rounded-xl border border-slate-200 px-3 py-2">
+                    <p className="text-sm font-semibold">{row.event_type.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-muted mt-1">{detail || 'Realtime irrigation feedback'}</p>
+                    <p className="text-xs text-muted mt-1">{new Date(row.created_at).toLocaleString()}</p>
+                  </div>
+                );
+              })}
+              {!matchingTraceRows.length ? <p className="text-sm text-muted">No feedback events received yet.</p> : null}
+            </div>
           </section>
         </div>
       </IonContent>
