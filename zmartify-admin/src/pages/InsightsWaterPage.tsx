@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
+import { mobileApi, MobileEvent, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 
 const parseNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -37,6 +37,7 @@ export function InsightsWaterPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
   const [events, setEvents] = useState<MobileEvent[]>([]);
+  const [overview, setOverview] = useState<any | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -51,13 +52,72 @@ export function InsightsWaterPage() {
     load().catch(console.error);
   }, []);
 
+  useEffect(() => {
+    if (!selectedSite) return;
+
+    let cleanup: (() => void) | undefined;
+
+    const loadOverviewAndRealtime = async () => {
+      const [site, irrigationOverview] = await Promise.all([
+        mobileApi.getSite(selectedSite),
+        mobileApi.getIrrigationOverview(selectedSite),
+      ]);
+      setOverview(irrigationOverview);
+
+      const topics = site.devices.map((device) => `device:${device.device_id}:irrigation`);
+      cleanup = subscribeRealtimeTopics(topics, (event) => {
+        const receivedAt = new Date().toISOString();
+        setEvents((prev) => [
+          {
+            event_id: `rt-water-${receivedAt}-${event.event_type}`,
+            event_type: event.event_type,
+            created_at: receivedAt,
+            device_id: typeof event.payload?.device_id === 'string' ? event.payload.device_id : undefined,
+            payload: event.payload,
+          },
+          ...prev,
+        ].slice(0, 200));
+
+        if (event.event_type === 'irrigation.status.updated' || event.event_type === 'irrigation.run.updated') {
+          mobileApi
+            .getIrrigationOverview(selectedSite)
+            .then(setOverview)
+            .catch(console.error);
+        }
+      });
+    };
+
+    loadOverviewAndRealtime().catch(console.error);
+
+    return () => {
+      cleanup?.();
+    };
+  }, [selectedSite]);
+
   const metrics = useMemo(() => {
-    const dailyWater = readMetric(events, ['water_liters', 'water_today_liters'], 1284);
-    const flow = readMetric(events, ['flow_lpm', 'flow'], 31.2);
-    const pressure = readMetric(events, ['pressure_bar', 'pressure'], 3.6);
+    const devices = Array.isArray(overview?.devices) ? overview.devices : [];
+    const flowValues = devices
+      .map((device: any) => parseNumber(device?.hydraulics?.flow_lpm))
+      .filter((value: number | null): value is number => value != null);
+    const pressureValues = devices
+      .map((device: any) => parseNumber(device?.hydraulics?.pressure_bar))
+      .filter((value: number | null): value is number => value != null);
+    const waterValues = devices
+      .map((device: any) => parseNumber(device?.hydraulics?.water_liters))
+      .filter((value: number | null): value is number => value != null);
+
+    const dailyWater = waterValues.length
+      ? waterValues.reduce((sum: number, value: number) => sum + value, 0)
+      : readMetric(events, ['water_liters', 'water_today_liters'], 1284);
+    const flow = flowValues.length
+      ? flowValues.reduce((sum: number, value: number) => sum + value, 0) / flowValues.length
+      : readMetric(events, ['flow_lpm', 'flow'], 31.2);
+    const pressure = pressureValues.length
+      ? pressureValues.reduce((sum: number, value: number) => sum + value, 0) / pressureValues.length
+      : readMetric(events, ['pressure_bar', 'pressure'], 3.6);
     const runtime = Math.max(5, Math.round(dailyWater / Math.max(flow, 1)));
     return { dailyWater, flow, pressure, runtime };
-  }, [events]);
+  }, [events, overview]);
 
   return (
     <IonPage>

@@ -96,6 +96,79 @@ export interface MobileEvent {
   payload?: Record<string, unknown>;
 }
 
+export interface RealtimeTopicEvent {
+  type: 'event';
+  topic: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+}
+
+const toRealtimeWsBase = (): string => {
+  const rawBase = (localStorage.getItem('api_base_url') || window.location.origin || '').trim();
+  if (!rawBase) return '';
+  if (rawBase.startsWith('https://')) return rawBase.replace('https://', 'wss://');
+  if (rawBase.startsWith('http://')) return rawBase.replace('http://', 'ws://');
+  return window.location.protocol === 'https:' ? `wss://${rawBase}` : `ws://${rawBase}`;
+};
+
+export const subscribeRealtimeTopics = (
+  topics: string[],
+  onEvent: (event: RealtimeTopicEvent) => void,
+): (() => void) => {
+  const token = apiClient.getAuthToken();
+  const wsBase = toRealtimeWsBase();
+  const uniqueTopics = Array.from(new Set(topics.filter((topic) => topic && topic.trim().length > 0)));
+  if (!token || !wsBase || uniqueTopics.length === 0) {
+    return () => undefined;
+  }
+
+  let socket: WebSocket | null = null;
+  let reconnectTimer: number | null = null;
+  let stopped = false;
+
+  const connect = () => {
+    socket = new WebSocket(`${wsBase}/api/v2/ws?token=${encodeURIComponent(token)}`);
+
+    socket.onopen = () => {
+      socket?.send(
+        JSON.stringify({
+          type: 'subscribe',
+          topics: uniqueTopics,
+        }),
+      );
+    };
+
+    socket.onmessage = (message) => {
+      try {
+        const payload = JSON.parse(message.data);
+        if (payload?.type !== 'event') return;
+        onEvent(payload as RealtimeTopicEvent);
+      } catch {
+        // Ignore malformed messages.
+      }
+    };
+
+    socket.onclose = () => {
+      if (stopped) return;
+      reconnectTimer = window.setTimeout(connect, 2000);
+    };
+
+    socket.onerror = () => {
+      socket?.close();
+    };
+  };
+
+  connect();
+
+  return () => {
+    stopped = true;
+    if (reconnectTimer != null) {
+      window.clearTimeout(reconnectTimer);
+    }
+    socket?.close();
+  };
+};
+
 export interface MobileDeviceFreshness {
   device_id: string;
   device: {
@@ -133,6 +206,8 @@ export const mobileApi = {
     apiClient.get(`/mobile/devices/${deviceId}/freshness`),
 
   listEvents: (limit = 25): Promise<{ events: MobileEvent[] }> => apiClient.get(`/mobile/events?limit=${limit}`),
+
+  getIrrigationOverview: (siteId: string): Promise<any> => apiClient.get(`/sites/${encodeURIComponent(siteId)}/irrigation/overview`),
 
   setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<MobileSetpointResponse> =>
     apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {

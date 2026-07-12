@@ -7,7 +7,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from app.contracts import ContractValidationError, validate_mqtt_v2_setpoint_command_outcome
+from app.contracts import ContractValidationError
+from app.mqtt_v2_ingest import parse_mqtt_v2_setpoint_outcome_payload
 from app.mqtt_v2_topics import outcome_subscription_topics, parse_setpoint_outcome_topic
 
 
@@ -88,25 +89,18 @@ class SetpointOutcomeMqttListener:
             return
 
         try:
-            validate_mqtt_v2_setpoint_command_outcome(data)
+            normalized = parse_mqtt_v2_setpoint_outcome_payload(data)
         except ContractValidationError:
             return
 
-        result = str(data.get("result") or "").strip().lower()
-        if not result:
-            return
-
-        requested = data.get("requested_target_temperature_c")
-        confirmed = data.get("confirmed_target_temperature_c")
-        detail = data.get("detail")
         self._ingest_setpoint_command_outcome(
             device_id,
             zone_id,
-            result=result,
-            detail=str(detail) if detail is not None else None,
-            requested_target_c=float(requested) if isinstance(requested, (int, float)) else None,
-            confirmed_target_c=float(confirmed) if isinstance(confirmed, (int, float)) else None,
-            payload={"source": "mqtt_v2_setpoint_outcome", "raw": data},
+            result=normalized["result"],
+            detail=normalized["detail"],
+            requested_target_c=normalized["requested_target_c"],
+            confirmed_target_c=normalized["confirmed_target_c"],
+            payload={"source": "mqtt_v2_setpoint_outcome", "raw": normalized["raw"]},
         )
 
     def _on_connect(self, client, userdata, _flags, _rc):

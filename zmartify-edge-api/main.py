@@ -130,6 +130,7 @@ from app.router_v2_device_domain import create_device_domain_v2_router
 from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
+from app.router_v2_mqtt_ingest import create_mqtt_ingest_v2_router
 from app.router_v2_realtime_ws import create_realtime_ws_v2_router
 from app.router_v2_irrigation import create_irrigation_v2_router
 from app.realtime_topic_hub import RealtimeTopicHub
@@ -606,6 +607,7 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
 app.include_router(create_core_v2_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
+app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
 app.include_router(create_mobile_events_v2_router(_require_roles))
 app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
 app.include_router(create_irrigation_v2_router(_require_roles))

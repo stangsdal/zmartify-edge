@@ -3,7 +3,7 @@ import { IonContent, IonPage } from '@ionic/react';
 import { motion } from 'framer-motion';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
 import { notificationsApi } from '../api/notifications';
 
 export function HomePage() {
@@ -36,8 +36,32 @@ export function HomePage() {
       const deviceDetails = await Promise.all(site.devices.map((d) => mobileApi.getDevice(d.device_id)));
       const allZones = deviceDetails.flatMap((d) => d.zones || []);
       setZones(allZones);
+
+      const topics = site.devices.map((device) => `device:${device.device_id}:irrigation`);
+      const unsubscribe = subscribeRealtimeTopics(topics, (event) => {
+        const receivedAt = new Date().toISOString();
+        const nextEvent: MobileEvent = {
+          event_id: `rt-${receivedAt}-${event.event_type}`,
+          event_type: event.event_type,
+          created_at: receivedAt,
+          device_id: typeof event.payload?.device_id === 'string' ? event.payload.device_id : undefined,
+          payload: event.payload,
+        };
+        setEvents((prev) => [nextEvent, ...prev].slice(0, 20));
+      });
+      return unsubscribe;
     };
-    loadZones().catch(console.error);
+
+    let cleanup: (() => void) | undefined;
+    loadZones()
+      .then((unsubscribe) => {
+        cleanup = unsubscribe;
+      })
+      .catch(console.error);
+
+    return () => {
+      cleanup?.();
+    };
   }, [selectedSite]);
 
   const indoorAverage = useMemo(() => {
@@ -71,9 +95,12 @@ export function HomePage() {
       };
     }
 
+    const action = typeof runningEvent.payload?.action === 'string' ? runningEvent.payload.action : '';
+    const status = action.startsWith('rain_delay') ? 'Delayed' : action ? 'Active' : 'Active';
+
     return {
-      status: 'Active',
-      detail: runningEvent.event_type.replace(/_/g, ' '),
+      status,
+      detail: action || runningEvent.event_type.replace(/_/g, ' '),
       todayWaterLiters: Math.max(120, events.length * 64),
     };
   }, [events]);

@@ -90,6 +90,9 @@ printf "[phase-4] Run MQTT v2 command contract publish tests\n"
 printf "[phase-4] Run MQTT v2 outcome contract validation tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_contracts_mqtt_v2_outcome.py
 
+printf "[phase-4] Run MQTT v2 ingest routing/service tests\n"
+"$PYTHON_BIN" -m pytest -q tests/test_api_v2_mqtt_ingest.py
+
 if [[ "${RUN_LIVE_HVAC:-0}" == "1" ]]; then
   printf "[phase-7-smoke] Running optional live HVAC contract tests\n"
   "$PYTHON_BIN" -m pytest -q tests/test_live_hvac_contract.py
