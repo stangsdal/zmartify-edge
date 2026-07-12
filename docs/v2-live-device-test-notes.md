@@ -159,3 +159,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after program management actions (create/toggle/schedule/run) were bound to v2 endpoints in the app shell.
+
+- Date: 2026-07-12 (helper script rerun after irrigation outcome taxonomy increment)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after typed outcome categories and run/valve side-effects were added to the mqtt-v2 irrigation ingest path.

@@ -59,7 +59,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: v2 setpoint outcome payload contract schema + runtime validation wired into listener ingest path.
 - Completed: dedicated v2 ingest routing/service layer for reported-state and setpoint-outcome ingestion, including regression coverage.
 - Completed: initial irrigation outcome schema + ingest endpoint (`irrigation-outcome.schema.json`, `/api/v2/devices/{id}/ingest/mqtt/irrigation/outcome`) with alarm-to-event mapping.
-- Open: deeper firmware topic alignment and richer typed irrigation outcome taxonomy.
+- Completed: typed irrigation outcome taxonomy (run/valve/hydraulics/power/weather categories) with side-effects: run completion mapping and valve fault propagation into output state.
+- Open: deeper firmware topic alignment for irrigation outcome publishing.
 
 6. Phase 5 - Irrigation backend: `early stage`
 - UI scaffolding and route architecture are in place.
@@ -109,6 +110,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation alert-navigation/detail-history increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation programs + hydraulics parity increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation program actions increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after irrigation outcome taxonomy increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -141,6 +143,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Expand irrigation outcome taxonomy (run-step/valve/hydraulics/power alarms) and align firmware publish payloads to strict typed events.
-2. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.
-3. Start Phase 9 production-hardening checklist items that do not depend on firmware (backup/restore drill, enforce-mode default rollout plan).
+1. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.
+2. Start Phase 9 production-hardening checklist items that do not depend on firmware (backup/restore drill, enforce-mode default rollout plan).
+3. Align firmware publish payloads (Phase 7/8) with the typed outcome taxonomy once live device credentials are available.

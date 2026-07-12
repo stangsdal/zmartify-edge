@@ -13,6 +13,7 @@ from app.db import get_connection
 from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_command_outcome, list_device_zones
 from app.domain_model import log_event
 from app.irrigation_domain import (
+    complete_irrigation_run,
     set_irrigation_rain_delay,
     upsert_irrigation_hydraulics_state,
     upsert_irrigation_output_state,
@@ -234,10 +235,48 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     severity = str(outcome.get("severity") or "info").strip().lower()
     result = str(outcome.get("result") or "").strip().lower()
     detail = str(outcome.get("detail") or "").strip() or None
+    category = classify_irrigation_outcome_event_type(normalized_event_type)
+    is_failure = severity in {"alarm", "critical"} or result in {"failed", "fault", "error"}
 
     mapped_event_type = "irrigation_status_feedback"
-    if severity in {"alarm", "critical"} or result in {"failed", "fault", "error"}:
+    if is_failure:
         mapped_event_type = "controller_fault"
+
+    side_effects: list[str] = []
+    outcome_payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
+
+    run_id = str(outcome.get("run_id") or "").strip()
+    if category == "run" and run_id:
+        terminal_status = None
+        if normalized_event_type.endswith(".completed") or result == "completed":
+            terminal_status = "completed"
+        elif is_failure or normalized_event_type.endswith((".failed", ".aborted")):
+            terminal_status = "failed"
+        if terminal_status is not None:
+            try:
+                complete_irrigation_run(device_id, run_id, status=terminal_status)
+                side_effects.append(f"run.{terminal_status}")
+            except RegistryNotFoundError:
+                pass
+
+    if category == "valve":
+        local_ref = str(outcome_payload.get("local_ref") or outcome_payload.get("output_ref") or "").strip()
+        if local_ref:
+            output_name = str(outcome_payload.get("name") or local_ref).strip() or local_ref
+            try:
+                upsert_irrigation_output_state(
+                    device_id,
+                    local_ref=local_ref,
+                    name=output_name,
+                    enabled=bool(outcome_payload.get("enabled", True)),
+                    active=bool(outcome_payload.get("active", False)),
+                    fault=(detail or result or "fault") if is_failure else None,
+                    is_master_valve=bool(outcome_payload.get("is_master_valve", False)),
+                    metadata={"last_outcome_event": normalized_event_type},
+                )
+                side_effects.append("output.fault" if is_failure else "output.updated")
+            except RegistryNotFoundError:
+                pass
 
     context = _resolve_device_context(device_id)
     event = log_event(
@@ -249,12 +288,14 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
         payload={
             "device_id": device_id,
             "event_type": normalized_event_type,
+            "category": category,
             "severity": severity,
             "result": result or None,
             "detail": detail,
             "run_id": outcome.get("run_id"),
             "program_id": outcome.get("program_id"),
-            "payload": outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {},
+            "side_effects": side_effects,
+            "payload": outcome_payload,
             "source": "mqtt_v2_irrigation_outcome_ingest",
         },
     )
@@ -262,5 +303,33 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     return {
         "device_id": device_id,
         "mapped_event_type": mapped_event_type,
+        "category": category,
+        "side_effects": side_effects,
         "event": event,
     }
+
+
+_OUTCOME_CATEGORY_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("run.", "run"),
+    ("step.", "run"),
+    ("valve.", "valve"),
+    ("output.", "valve"),
+    ("master_valve.", "valve"),
+    ("hydraulics.", "hydraulics"),
+    ("flow.", "hydraulics"),
+    ("pressure.", "hydraulics"),
+    ("water.", "hydraulics"),
+    ("power.", "power"),
+    ("transformer.", "power"),
+    ("weather.", "weather"),
+    ("rain.", "weather"),
+    ("pump.", "hydraulics"),
+)
+
+
+def classify_irrigation_outcome_event_type(event_type: str) -> str:
+    normalized = str(event_type or "").strip().lower()
+    for prefix, category in _OUTCOME_CATEGORY_PREFIXES:
+        if normalized.startswith(prefix):
+            return category
+    return "generic"
