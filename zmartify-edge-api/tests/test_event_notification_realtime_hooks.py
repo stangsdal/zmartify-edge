@@ -5,7 +5,13 @@ from pathlib import Path
 from app import db
 from app.auth import ensure_bootstrap_owner
 from app.db import initialize_database
-from app.domain_model import log_event, set_realtime_emit_hooks
+from app.domain_model import (
+    list_notifications_for_user,
+    log_event,
+    mark_all_notifications_read,
+    mark_notification_read,
+    set_realtime_emit_hooks,
+)
 
 
 def _setup_db(monkeypatch, tmp_path: Path) -> None:
@@ -74,3 +80,33 @@ def test_log_event_emits_event_and_notifications(monkeypatch, tmp_path: Path):
     for emitted_notification in captured_notifications:
         assert emitted_notification["event"]["event_type"] == "zone_setpoint_changed"
         assert emitted_notification["read"] is False
+
+
+def test_notification_read_and_read_all_emit_state_events(monkeypatch, tmp_path: Path):
+    _setup_db(monkeypatch, tmp_path)
+    seeded_user_ids = _seed_users()
+
+    state_events: list[dict] = []
+
+    def _state_hook(payload: dict) -> None:
+        state_events.append(payload)
+
+    set_realtime_emit_hooks(notification_state_hook=_state_hook)
+    try:
+        log_event("zone_setpoint_changed", payload={"zone_id": 1})
+        log_event("zone_setpoint_changed", payload={"zone_id": 2})
+        first_user = seeded_user_ids[0]
+        notifications = list_notifications_for_user(first_user, limit=20)
+        assert len(notifications) >= 1
+        target_notification_id = notifications[0]["notification_id"]
+
+        updated = mark_notification_read(target_notification_id, user_id=first_user, read=True)
+        assert updated["read"] is True
+
+        updated_count = mark_all_notifications_read(user_id=first_user)
+        assert updated_count >= 0
+    finally:
+        set_realtime_emit_hooks(notification_state_hook=None)
+
+    assert any(item.get("event_type") == "notification.read" for item in state_events)
+    assert any(item.get("event_type") == "notification.read_all" for item in state_events)

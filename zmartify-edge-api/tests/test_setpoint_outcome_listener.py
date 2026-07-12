@@ -13,6 +13,11 @@ def test_parse_zone_topic_valid_and_invalid():
     parsed = SetpointOutcomeMqttListener._parse_zone_topic("homie/5/device-a/zone-3/last-setpoint-command")
     assert parsed == ("device-a", 3)
 
+    parsed_v2 = SetpointOutcomeMqttListener._parse_zone_topic(
+        "zmartify/v2/devices/device-a/events/hvac/zones/3/setpoint-outcome"
+    )
+    assert parsed_v2 == ("device-a", 3)
+
     assert SetpointOutcomeMqttListener._parse_zone_topic("homie/5/device-a/nope/last-setpoint-command") is None
     assert SetpointOutcomeMqttListener._parse_zone_topic("homie/5/device-a/zone-0/last-setpoint-command") is None
     assert SetpointOutcomeMqttListener._parse_zone_topic("bad") is None

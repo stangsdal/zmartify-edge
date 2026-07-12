@@ -7,6 +7,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from app.mqtt_v2_topics import outcome_subscription_topics, parse_setpoint_outcome_topic
+
 
 class SetpointOutcomeMqttListener:
     def __init__(
@@ -51,19 +53,7 @@ class SetpointOutcomeMqttListener:
 
     @staticmethod
     def _parse_zone_topic(topic: str) -> tuple[str, int] | None:
-        parts = topic.split("/")
-        if len(parts) < 5:
-            return None
-        node = parts[3]
-        if not node.startswith("zone-"):
-            return None
-        try:
-            zone_id = int(node[5:])
-        except ValueError:
-            return None
-        if zone_id <= 0:
-            return None
-        return parts[2], zone_id
+        return parse_setpoint_outcome_topic(topic)
 
     def _handle_last_setpoint_command(self, device_id: str, zone_id: int, payload_text: str) -> None:
         try:
@@ -91,8 +81,8 @@ class SetpointOutcomeMqttListener:
         device_id = str(userdata or "").strip()
         if not device_id:
             return
-        base = self._base_topic()
-        client.subscribe(f"{base}/{device_id}/+/last-setpoint-command", qos=1)
+        for topic in outcome_subscription_topics(device_id):
+            client.subscribe(topic, qos=1)
 
     def _on_message(self, _client, _userdata, msg):
         topic = str(msg.topic or "")

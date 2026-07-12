@@ -94,10 +94,77 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     program = create_program.json()["program"]
     assert program["name"] == "Morning Cycle"
     assert program["enabled"] is True
+    program_id = str(program["program_id"])
+
+    get_program = client.get(f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}", headers=headers)
+    assert get_program.status_code == 200
+    assert get_program.json()["program"]["program_id"] == program_id
+
+    update_program = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}",
+        headers=headers,
+        json={
+            "name": "Morning Cycle Updated",
+            "enabled": False,
+            "seasonal_adjustment": 1.1,
+            "weather_mode": "manual_override",
+        },
+    )
+    assert update_program.status_code == 200
+    assert update_program.json()["program"]["name"] == "Morning Cycle Updated"
+    assert update_program.json()["program"]["enabled"] is False
+
+    schedules_empty = client.get(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules",
+        headers=headers,
+    )
+    assert schedules_empty.status_code == 200
+    assert schedules_empty.json()["schedules"] == []
+
+    create_schedule = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules",
+        headers=headers,
+        json={
+            "name": "Weekday AM",
+            "start_local_time": "06:30",
+            "weekdays": [1, 2, 3, 4, 5],
+            "enabled": True,
+        },
+    )
+    assert create_schedule.status_code == 200
+    assert create_schedule.json()["schedule"]["name"] == "Weekday AM"
+
+    run_start = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run",
+        headers=headers,
+        json={"trigger_type": "manual"},
+    )
+    assert run_start.status_code == 200
+    run_id = run_start.json()["run"]["run_id"]
+    assert isinstance(run_start.json()["run"].get("steps"), list)
+
+    list_runs = client.get(f"/api/v2/devices/{device_id}/irrigation/runs", headers=headers)
+    assert list_runs.status_code == 200
+    assert len(list_runs.json()["runs"]) >= 1
+
+    complete_run = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/runs/{run_id}/complete",
+        headers=headers,
+    )
+    assert complete_run.status_code == 200
+    assert complete_run.json()["run"]["status"] == "completed"
 
     list_programs = client.get(f"/api/v2/devices/{device_id}/irrigation/programs", headers=headers)
     assert list_programs.status_code == 200
     assert len(list_programs.json()["programs"]) == 1
+
+    delete_program = client.delete(f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}", headers=headers)
+    assert delete_program.status_code == 200
+    assert delete_program.json()["deleted"] is True
+
+    list_programs_after_delete = client.get(f"/api/v2/devices/{device_id}/irrigation/programs", headers=headers)
+    assert list_programs_after_delete.status_code == 200
+    assert list_programs_after_delete.json()["programs"] == []
 
 
 def test_irrigation_v2_404_on_unknown_device(monkeypatch, tmp_path: Path):

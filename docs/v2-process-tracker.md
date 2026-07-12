@@ -47,17 +47,21 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: deterministic realtime fan-out test strategy (`/api/v2/ws` integration + topic-hub unit test).
 - Completed: event/notification realtime fan-out hooks from domain lifecycle (`event.created`, `notification.created`).
 - Completed: scoped realtime topic filtering for non-admin users (`site:{id}:events`, `user:{id}:notifications`) with unit coverage.
+- Completed: notification read-state realtime fan-out (`notification.read`, `notification.read_all`) from notification lifecycle updates.
 - Open: firmware/adapters contract conformance and strict-mode rollout.
 
-5. Phase 4 - MQTT v2 adapter: `not started`
-- Open: add v2 topic mapping and dedicated ingest pipeline.
+5. Phase 4 - MQTT v2 adapter: `early stage`
+- Completed: topic normalization helper for legacy/v2/dual command and outcome topic paths.
+- Completed: setpoint outcome listener parsing/subscription support for both legacy and v2 topic styles.
+- Open: payload-level v2 command/outcome schema alignment and dedicated ingest routing.
 
 6. Phase 5 - Irrigation backend: `early stage`
 - UI scaffolding and route architecture are in place.
 - Completed: irrigation foundation migration (`013_irrigation_foundation.sql`) with core zone/program tables.
 - Completed: initial irrigation backend domain and `/api/v2/devices/{device_id}/irrigation/*` router skeleton.
 - Completed: irrigation API skeleton coverage added to stage-gate rehearsal.
-- Open: add irrigation schedules, execution history, and command/feedback integration.
+- Completed: irrigation schedules and run-history foundation (`014_irrigation_schedules_and_runs.sql`) with API routes for schedule creation/listing and manual program runs.
+- Open: add irrigation output/master-valve/hydraulics models and real command/feedback execution pipeline.
 
 7. Phase 6 - New responsive app shell: `in progress`
 - Completed: responsive nav shell, mobile/tablet/desktop behavior, onboarding flow routes.
@@ -75,6 +79,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after realtime websocket endpoint addition): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after realtime fan-out foundation): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after realtime scoped fan-out + irrigation skeleton): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after realtime read-state + irrigation schedules/runs + mqtt topic normalization): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -107,6 +112,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Extend realtime lifecycle to include notification read-state events (`notification.read`, `notification.read_all`) for mobile sync.
-2. Expand irrigation backend from skeleton to schedule/run models and API flows (create/activate/deactivate/execution history).
-3. Start phase-4 MQTT v2 adapter work for irrigation/hvac command and reported-state topic normalization.
+1. Add payload-level MQTT v2 command/outcome contract objects and dual-publish compatibility validation on live firmware.
+2. Expand irrigation domain with outputs/master-valve/hydraulics/weather and run-step execution state updates from telemetry.
+3. Add realtime irrigation run/status events and mobile consumption paths (`irrigation.run.updated`, alarm fan-out, per-site overview).

@@ -22,12 +22,14 @@ NOTIFICATION_EVENT_TYPES = {
 
 _EVENT_EMIT_HOOK = None
 _NOTIFICATION_EMIT_HOOK = None
+_NOTIFICATION_STATE_EMIT_HOOK = None
 
 
-def set_realtime_emit_hooks(*, event_hook=None, notification_hook=None) -> None:
-    global _EVENT_EMIT_HOOK, _NOTIFICATION_EMIT_HOOK
+def set_realtime_emit_hooks(*, event_hook=None, notification_hook=None, notification_state_hook=None) -> None:
+    global _EVENT_EMIT_HOOK, _NOTIFICATION_EMIT_HOOK, _NOTIFICATION_STATE_EMIT_HOOK
     _EVENT_EMIT_HOOK = event_hook
     _NOTIFICATION_EMIT_HOOK = notification_hook
+    _NOTIFICATION_STATE_EMIT_HOOK = notification_state_hook
 
 
 def _floats_close(a: float | None, b: float | None, tolerance: float = 0.05) -> bool:
@@ -1974,10 +1976,11 @@ def list_notifications_for_user(user_id: int, *, limit: int = 100) -> list[dict[
 
 
 def mark_notification_read(notification_uuid: str, *, user_id: int, read: bool = True) -> dict[str, Any]:
+    previous_read_value: int | None = None
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT n.id
+            SELECT n.id, n.read
             FROM notifications n
             WHERE n.uuid = ? AND n.user_id = ?
             """,
@@ -1985,6 +1988,7 @@ def mark_notification_read(notification_uuid: str, *, user_id: int, read: bool =
         ).fetchone()
         if row is None:
             raise RegistryNotFoundError("notification not found")
+        previous_read_value = int(row["read"])
 
         conn.execute(
             """
@@ -1999,12 +2003,33 @@ def mark_notification_read(notification_uuid: str, *, user_id: int, read: bool =
     notifications = list_notifications_for_user(user_id, limit=500)
     for notification in notifications:
         if notification["notification_id"] == notification_uuid:
+            if _NOTIFICATION_STATE_EMIT_HOOK is not None and (previous_read_value != int(bool(read))):
+                try:
+                    _NOTIFICATION_STATE_EMIT_HOOK(
+                        {
+                            "event_type": "notification.read" if read else "notification.unread",
+                            "user_id": user_id,
+                            "notification": notification,
+                        }
+                    )
+                except Exception:
+                    pass
             return notification
     raise RegistryNotFoundError("notification not found")
 
 
 def mark_all_notifications_read(*, user_id: int) -> int:
+    changed_notification_ids: list[str] = []
     with get_connection() as conn:
+        pending_rows = conn.execute(
+            """
+            SELECT uuid
+            FROM notifications
+            WHERE user_id = ? AND read = 0
+            """,
+            (user_id,),
+        ).fetchall()
+        changed_notification_ids = [str(row["uuid"]) for row in pending_rows]
         cur = conn.execute(
             """
             UPDATE notifications
@@ -2014,4 +2039,16 @@ def mark_all_notifications_read(*, user_id: int) -> int:
             (user_id,),
         )
         conn.commit()
+    if _NOTIFICATION_STATE_EMIT_HOOK is not None and changed_notification_ids:
+        try:
+            _NOTIFICATION_STATE_EMIT_HOOK(
+                {
+                    "event_type": "notification.read_all",
+                    "user_id": user_id,
+                    "updated": int(cur.rowcount or 0),
+                    "notification_ids": changed_notification_ids,
+                }
+            )
+        except Exception:
+            pass
     return int(cur.rowcount or 0)

@@ -450,6 +450,29 @@ def _publish_notification_update(notification: dict) -> None:
     )
 
 
+def _publish_notification_state_update(state_event: dict) -> None:
+    user_id = state_event.get("user_id")
+    if user_id is None:
+        return
+    event_type = str(state_event.get("event_type") or "notification.updated")
+    payload: dict = {
+        "user_id": int(user_id),
+        "event_type": event_type,
+    }
+    if state_event.get("notification") is not None:
+        payload["notification"] = state_event.get("notification")
+    if state_event.get("notification_ids") is not None:
+        payload["notification_ids"] = list(state_event.get("notification_ids") or [])
+    if state_event.get("updated") is not None:
+        payload["updated"] = int(state_event.get("updated") or 0)
+
+    realtime_topic_hub.publish_from_sync(
+        f"user:{int(user_id)}:notifications",
+        event_type,
+        payload,
+    )
+
+
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
     scoped_site_ids = _mobile_site_scope_ids(request)
     if scoped_site_ids is None:
@@ -498,7 +521,11 @@ async def startup_event() -> None:
     ensure_bootstrap_owner()
     zone_stream_hub.set_loop(asyncio.get_running_loop())
     realtime_topic_hub.set_loop(asyncio.get_running_loop())
-    set_realtime_emit_hooks(event_hook=_publish_event_update, notification_hook=_publish_notification_update)
+    set_realtime_emit_hooks(
+        event_hook=_publish_event_update,
+        notification_hook=_publish_notification_update,
+        notification_state_hook=_publish_notification_state_update,
+    )
     setpoint_outcome_listener.start()
 
 
