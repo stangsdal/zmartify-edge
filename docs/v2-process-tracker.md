@@ -67,6 +67,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: site irrigation overview endpoint (`/api/v2/sites/{site_id}/irrigation/overview`).
 - Completed: irrigation operations-state foundation (`015_irrigation_operations_state.sql`) with output/master-valve records, hydraulics/power/weather state, rain-delay API endpoints, and regression coverage.
 - Completed: irrigation status/alarm realtime fan-out for operations-state mutations (`irrigation.status.updated` on output/hydraulics/power/weather/rain-delay updates).
+- Completed: site irrigation overview now includes per-device operations-state summary (outputs activity/faults + hydraulics/power/weather + rain-delay snapshot).
 - Open: connect operations-state API writes to real command/feedback execution pipeline beyond persisted state snapshots.
 
 7. Phase 6 - New responsive app shell: `in progress`
@@ -90,6 +91,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after mqtt-v2 outcome contract increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation operations-state increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation status-fanout increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after irrigation overview operations-state expansion): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -123,5 +125,5 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 ## Next Process-Aligned Steps
 
 1. Connect operations-state endpoints to real command/feedback execution telemetry pipeline (not only persisted API writes).
-2. Extend mobile/site irrigation overview payloads to include operations-state and alarms surfaced by realtime fan-out.
+2. Expose/consume irrigation realtime status topics in mobile app screens on top of the enriched site overview payload.
 3. Introduce dedicated mqtt-v2 ingest routing/service layer beyond listener compatibility hooks.

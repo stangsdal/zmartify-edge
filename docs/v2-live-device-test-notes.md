@@ -119,3 +119,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after irrigation status/alarm realtime fan-out hooks.
+
+- Date: 2026-07-12 (helper script rerun after irrigation overview operations-state expansion)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after per-device operations-state summary expansion on site overview API.

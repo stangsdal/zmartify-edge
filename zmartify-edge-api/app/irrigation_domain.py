@@ -536,6 +536,90 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
             tuple(device_ids),
         ).fetchone()
 
+        device_summaries: list[dict[str, Any]] = []
+        for row in device_rows:
+            device_pk_id = int(row["id"])
+
+            output_counts_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_count,
+                    SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active_count,
+                    SUM(CASE WHEN fault IS NOT NULL AND fault != '' THEN 1 ELSE 0 END) AS fault_count
+                FROM irrigation_outputs
+                WHERE device_id = ?
+                """,
+                (device_pk_id,),
+            ).fetchone()
+
+            hydraulics = conn.execute(
+                """
+                SELECT flow_lpm, pressure_bar, water_liters, source_timestamp, updated_at
+                FROM irrigation_hydraulics_state
+                WHERE device_id = ?
+                """,
+                (device_pk_id,),
+            ).fetchone()
+            power = conn.execute(
+                """
+                SELECT voltage_rms_v, current_rms_a, real_power_w, power_factor, source_timestamp, updated_at
+                FROM irrigation_power_state
+                WHERE device_id = ?
+                """,
+                (device_pk_id,),
+            ).fetchone()
+            weather = conn.execute(
+                """
+                SELECT temperature_c, rain_mm, wind_mps, eto_mm, source_timestamp, updated_at
+                FROM irrigation_weather_state
+                WHERE device_id = ?
+                """,
+                (device_pk_id,),
+            ).fetchone()
+            rain_delay = _active_rain_delay_for_device(conn, device_pk_id)
+
+            device_summaries.append(
+                {
+                    "device_id": row["device_id"],
+                    "display_name": row["display_name"],
+                    "outputs": {
+                        "total": int(output_counts_row["total_count"] if output_counts_row is not None and output_counts_row["total_count"] is not None else 0),
+                        "active": int(output_counts_row["active_count"] if output_counts_row is not None and output_counts_row["active_count"] is not None else 0),
+                        "faulted": int(output_counts_row["fault_count"] if output_counts_row is not None and output_counts_row["fault_count"] is not None else 0),
+                    },
+                    "hydraulics": None
+                    if hydraulics is None
+                    else {
+                        "flow_lpm": hydraulics["flow_lpm"],
+                        "pressure_bar": hydraulics["pressure_bar"],
+                        "water_liters": hydraulics["water_liters"],
+                        "source_timestamp": hydraulics["source_timestamp"],
+                        "updated_at": hydraulics["updated_at"],
+                    },
+                    "power": None
+                    if power is None
+                    else {
+                        "voltage_rms_v": power["voltage_rms_v"],
+                        "current_rms_a": power["current_rms_a"],
+                        "real_power_w": power["real_power_w"],
+                        "power_factor": power["power_factor"],
+                        "source_timestamp": power["source_timestamp"],
+                        "updated_at": power["updated_at"],
+                    },
+                    "weather": None
+                    if weather is None
+                    else {
+                        "temperature_c": weather["temperature_c"],
+                        "rain_mm": weather["rain_mm"],
+                        "wind_mps": weather["wind_mps"],
+                        "eto_mm": weather["eto_mm"],
+                        "source_timestamp": weather["source_timestamp"],
+                        "updated_at": weather["updated_at"],
+                    },
+                    "rain_delay": rain_delay,
+                }
+            )
+
     return {
         "site_id": site["site_id"],
         "site_name": site["site_name"],
@@ -543,13 +627,7 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
         "zone_count": int(zone_count_row["count"] if zone_count_row is not None else 0),
         "program_count": int(program_count_row["count"] if program_count_row is not None else 0),
         "active_run_count": int(active_run_row["count"] if active_run_row is not None else 0),
-        "devices": [
-            {
-                "device_id": row["device_id"],
-                "display_name": row["display_name"],
-            }
-            for row in device_rows
-        ],
+        "devices": device_summaries,
     }
 
 

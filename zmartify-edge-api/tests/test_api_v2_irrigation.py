@@ -170,6 +170,16 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert weather.status_code == 200
     assert weather.json()["rain_delay"] is not None
 
+    overview_with_ops = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
+    assert overview_with_ops.status_code == 200
+    overview_device = overview_with_ops.json()["devices"][0]
+    assert overview_device["outputs"]["total"] == 2
+    assert overview_device["outputs"]["active"] == 1
+    assert overview_device["hydraulics"]["pressure_bar"] == 2.4
+    assert overview_device["power"]["real_power_w"] == 160.0
+    assert overview_device["weather"]["temperature_c"] == 18.5
+    assert overview_device["rain_delay"] is not None
+
     list_programs_empty = client.get(f"/api/v2/devices/{device_id}/irrigation/programs", headers=headers)
     assert list_programs_empty.status_code == 200
     assert list_programs_empty.json()["programs"] == []
