@@ -2,21 +2,22 @@ import { IonContent, IonPage } from '@ionic/react';
 import { useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { mobileApi, MobileEvent, MobileSiteSummary, IrrigationProgramSummary, IrrigationScheduleSummary, subscribeRealtimeTopics } from '../api/mobile';
 
-type SynthProgram = {
-  name: string;
-  enabled: boolean;
-  startTime: string;
-  days: string;
-  seasonalAdjust: string;
-  estimate: string;
+type DeviceProgram = {
+  deviceId: string;
+  displayName: string;
+  program: IrrigationProgramSummary;
+  schedules: IrrigationScheduleSummary[];
 };
+
+const weekdayLabel = (weekday: number): string => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekday] || String(weekday);
 
 export function IrrigationProgramsPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
-  const [zones, setZones] = useState<MobileZone[]>([]);
+  const [programRows, setProgramRows] = useState<DeviceProgram[]>([]);
+  const [events, setEvents] = useState<MobileEvent[]>([]);
 
   useEffect(() => {
     const loadSites = async () => {
@@ -31,36 +32,51 @@ export function IrrigationProgramsPage() {
 
   useEffect(() => {
     if (!selectedSite) return;
-    const loadSiteZones = async () => {
+    let cleanup: (() => void) | undefined;
+
+    const loadPrograms = async () => {
       const site = await mobileApi.getSite(selectedSite);
-      const detailRows = await Promise.all(site.devices.map((device) => mobileApi.getDevice(device.device_id)));
-      setZones(detailRows.flatMap((detail) => detail.zones || []));
+      const nextRows = await Promise.all(
+        site.devices.map(async (device) => {
+          const programsResponse = await mobileApi.listIrrigationPrograms(device.device_id);
+          return Promise.all(
+            (programsResponse.programs || []).map(async (program) => {
+              const schedulesResponse = await mobileApi.listIrrigationProgramSchedules(device.device_id, program.program_id);
+              return {
+                deviceId: device.device_id,
+                displayName: device.display_name,
+                program,
+                schedules: schedulesResponse.schedules || [],
+              } satisfies DeviceProgram;
+            })
+          );
+        })
+      );
+      setProgramRows(nextRows.flat());
+
+      cleanup = subscribeRealtimeTopics(
+        site.devices.map((device) => `device:${device.device_id}:irrigation`),
+        (event) => {
+          const receivedAt = new Date().toISOString();
+          setEvents((prev) => [
+            {
+              event_id: `rt-program-${receivedAt}-${event.event_type}`,
+              event_type: event.event_type,
+              created_at: receivedAt,
+              device_id: typeof event.payload?.device_id === 'string' ? event.payload.device_id : undefined,
+              payload: event.payload,
+            },
+            ...prev,
+          ].slice(0, 30));
+        }
+      );
     };
-    loadSiteZones().catch(console.error);
+
+    loadPrograms().catch(console.error);
+    return () => cleanup?.();
   }, [selectedSite]);
 
-  const programs = useMemo<SynthProgram[]>(() => {
-    const baseZones = zones.slice(0, Math.max(2, Math.min(6, zones.length)));
-    const zoneFactor = Math.max(1, baseZones.length);
-    return [
-      {
-        name: 'Morning program',
-        enabled: true,
-        startTime: '05:30',
-        days: 'Mon Tue Wed Thu Fri Sat',
-        seasonalAdjust: `${Math.max(65, 100 - zoneFactor * 3)}%`,
-        estimate: `${(zoneFactor * 210).toLocaleString()} L`,
-      },
-      {
-        name: 'Evening recovery',
-        enabled: zoneFactor > 2,
-        startTime: '20:45',
-        days: 'Tue Thu Sat',
-        seasonalAdjust: `${Math.max(55, 90 - zoneFactor * 2)}%`,
-        estimate: `${(zoneFactor * 110).toLocaleString()} L`,
-      },
-    ];
-  }, [zones]);
+  const latestRunEvent = useMemo(() => events.find((event) => event.event_type === 'irrigation.run.updated') || null, [events]);
 
   return (
     <IonPage>
@@ -74,40 +90,58 @@ export function IrrigationProgramsPage() {
             onChange={setSelectedSite}
           />
 
-          {programs.map((program) => (
-            <section key={program.name} className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+          {programRows.map((row) => {
+            const scheduleSummary = row.schedules.length
+              ? row.schedules.map((schedule) => `${schedule.start_local_time} • ${schedule.weekdays.map(weekdayLabel).join(' ')}`).join(' | ')
+              : 'No schedules defined';
+            const latestForDevice = events.find((event) => event.device_id === row.deviceId);
+            const estimateLiters = Math.max(60, Math.round(row.program.seasonal_adjustment * Math.max(1, row.schedules.length) * 120));
+            return (
+            <section key={`${row.deviceId}:${row.program.program_id}`} className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold">{program.name}</h2>
-                  <p className="text-sm text-muted">Start {program.startTime} • {program.days}</p>
+                  <h2 className="text-lg font-semibold">{row.program.name}</h2>
+                  <p className="text-sm text-muted">{row.displayName} • {scheduleSummary}</p>
                 </div>
                 <span
                   className="inline-flex rounded-full px-3 py-1 text-xs font-semibold"
                   style={{
-                    color: program.enabled ? '#067647' : '#b54708',
-                    backgroundColor: program.enabled ? 'rgba(18,183,106,0.15)' : 'rgba(247,144,9,0.16)',
+                    color: row.program.enabled ? '#067647' : '#b54708',
+                    backgroundColor: row.program.enabled ? 'rgba(18,183,106,0.15)' : 'rgba(247,144,9,0.16)',
                   }}
                 >
-                  {program.enabled ? 'Enabled' : 'Paused'}
+                  {row.program.enabled ? 'Enabled' : 'Paused'}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mt-4">
                 <div className="rounded-xl p-3 app-system-card app-system-card--weather">
                   <p className="text-xs uppercase tracking-wide text-muted">Seasonal adjust</p>
-                  <p className="text-xl font-bold mt-1">{program.seasonalAdjust}</p>
+                  <p className="text-xl font-bold mt-1">{Math.round(row.program.seasonal_adjustment * 100)}%</p>
                 </div>
                 <div className="rounded-xl p-3 app-system-card app-system-card--irrigation">
                   <p className="text-xs uppercase tracking-wide text-muted">Estimated water</p>
-                  <p className="text-xl font-bold mt-1">{program.estimate}</p>
+                  <p className="text-xl font-bold mt-1">{estimateLiters.toLocaleString()} L</p>
                 </div>
               </div>
-            </section>
-          ))}
 
-          {!zones.length ? (
+              <div className="mt-3 rounded-xl border border-slate-200 px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-muted">Weather mode</p>
+                <p className="text-sm font-semibold mt-1">{row.program.weather_mode}</p>
+                <p className="text-xs text-muted mt-2">
+                  {latestForDevice
+                    ? `Latest device event: ${latestForDevice.event_type.replace(/_/g, ' ')}`
+                    : latestRunEvent
+                      ? `Latest site run event: ${latestRunEvent.event_type.replace(/_/g, ' ')}`
+                      : 'No realtime feedback yet'}
+                </p>
+              </div>
+            </section>
+          )})}
+
+          {!programRows.length ? (
             <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
-              <p className="text-sm text-muted">No irrigation zones are available for this site yet.</p>
+              <p className="text-sm text-muted">No irrigation programs are available for this site yet.</p>
             </section>
           ) : null}
         </div>

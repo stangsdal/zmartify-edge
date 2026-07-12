@@ -241,6 +241,27 @@ export interface IrrigationSiteOverview {
   devices: IrrigationDeviceOverview[];
 }
 
+export interface IrrigationProgramSummary {
+  program_id: string;
+  name: string;
+  enabled: boolean;
+  seasonal_adjustment: number;
+  weather_mode: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IrrigationScheduleSummary {
+  schedule_id: string;
+  name: string;
+  start_local_time: string;
+  weekdays: number[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
@@ -274,4 +295,13 @@ export const mobileApi = {
 
   renameZoneByRef: (zoneRef: string, name: string): Promise<MobileZone> =>
     apiClient.post(`/mobile/zones/${encodeURIComponent(zoneRef)}/rename`, { name }),
+
+  listIrrigationPrograms: (deviceId: string): Promise<{ device_id: string; programs: IrrigationProgramSummary[] }> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs`),
+
+  listIrrigationProgramSchedules: (
+    deviceId: string,
+    programId: string,
+  ): Promise<{ device_id: string; program_id: string; schedules: IrrigationScheduleSummary[] }> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules`),
 };
