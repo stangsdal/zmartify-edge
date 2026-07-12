@@ -23,7 +23,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: Alembic baseline scaffold and first baseline revision.
 - Completed: first SQLAlchemy-managed core v2 tables migration (`core_domains_v2`, `core_sites_v2`, `core_devices_v2`).
 - Completed: transitional dual-write bridge from registry writes into `core_*_v2` when tables exist.
-- Open: migrate active runtime persistence from SQLite to PostgreSQL-backed SQLAlchemy models.
+- Completed: full Postgres schema bootstrap (`zmartify-edge-api/db/postgres_schema.sql`, 37 tables + 40 indexes) machine-translated from the runtime schema and applied cleanly to the production TimescaleDB container.
+- Open: port runtime data access from sqlite3 API to the PostgreSQL backend (largest remaining work item).
 
 3. Phase 2 - Core platform extraction: `partially started`
 - Existing role/auth/domain/site/device endpoints exist.
@@ -36,6 +37,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: mobile websocket stream extraction into adapter router (dual-path compatibility: `/mobile/ws/...` + `/api/v2/mobile/ws/...`).
 - Completed: setpoint-outcome MQTT listener extraction from `main.py` into dedicated module with unit tests.
 - Completed: system-status router extraction (`health`, `registry/status`, `admin/acl/*`) from `main.py` into `app/router_system_status.py` with dead-import cleanup.
+- Completed: mqtt-clients router extraction (`/mqtt/clients/*`) from `main.py` into `app/router_mqtt_clients.py`.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
@@ -64,6 +66,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: dedicated v2 ingest routing/service layer for reported-state and setpoint-outcome ingestion, including regression coverage.
 - Completed: initial irrigation outcome schema + ingest endpoint (`irrigation-outcome.schema.json`, `/api/v2/devices/{id}/ingest/mqtt/irrigation/outcome`) with alarm-to-event mapping.
 - Completed: typed irrigation outcome taxonomy (run/valve/hydraulics/power/weather categories) with side-effects: run completion mapping and valve fault propagation into output state.
+- Completed: legacy homie command topics retired (v2 is the first release, no backward compatibility): firmware v0.3.0 executes v2 commands natively (setpoint + zone name), legacy command handlers/subscriptions removed (-305 LOC), production edge flipped to `ZMART_EDGE_MQTT_TOPIC_STYLE=v2`, live loop re-validated v2-only.
 - Open: deeper firmware topic alignment for irrigation outcome publishing.
 
 6. Phase 5 - Irrigation backend: `early stage`
@@ -125,7 +128,10 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation outcome taxonomy increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after enforce-mode ingest coverage increment): baseline fallback still valid, 3 passed / 2 skipped.
 
-9. Phase 8 - Irrigation firmware integration: `not started`
+9. Phase 8 - Irrigation firmware integration: `started`
+- Completed: `zic_v2` contract adapter component added to the zmartify-irrigation firmware repo (commit 160f123): v2 topic builders plus reported-state and outcome payload builders, host-compiled and validated against the edge schemas under enforce mode.
+- Completed: all four edge-side irrigation v2 endpoints verified live in production (reported-state ingest, irrigation outcome ingest, zones API, site overview).
+- Open: wire `zic_v2` into the controller's mqtt_manager/event_bus once the in-progress UI branch work lands; deploy to irrigation hardware.
 
 10. Phase 9 - Production hardening: `started`
 - Completed: database backup + restore-drill helper (`scripts/backup_edge_db.sh`) with integrity verification and retention pruning; validated end-to-end against a freshly initialized edge database.
