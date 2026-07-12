@@ -249,3 +249,58 @@ def test_v2_mqtt_irrigation_outcome_propagates_valve_fault(monkeypatch, tmp_path
     assert outputs.status_code == 200
     matched = [output for output in outputs.json()["outputs"] if output["local_ref"] == "out-7"]
     assert matched and matched[0]["fault"] == "stuck open"
+
+
+def test_v2_mqtt_reported_state_enforce_rejects_invalid_timestamp(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi06")
+
+    reported = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/reported-state",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "not-a-timestamp",
+            "hvac": {"zones": [{"zone_id": 1, "target_temperature_c": 21.0}]},
+        },
+    )
+    assert reported.status_code == 400
+    assert "validation failed" in str(reported.json().get("detail", "")).lower()
+
+
+def test_v2_mqtt_irrigation_outcome_enforce_rejects_missing_event_type(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi07")
+
+    outcome = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/irrigation/outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-12T15:30:00Z",
+            "severity": "alarm",
+        },
+    )
+    assert outcome.status_code == 400
+    assert "validation failed" in str(outcome.json().get("detail", "")).lower()
+
+
+def test_v2_mqtt_setpoint_outcome_enforce_rejects_missing_result(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi08")
+
+    outcome = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/hvac/zones/1/setpoint-outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-12T15:35:00Z",
+        },
+    )
+    assert outcome.status_code == 400

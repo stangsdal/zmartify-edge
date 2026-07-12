@@ -50,6 +50,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: notification read-state realtime fan-out (`notification.read`, `notification.read_all`) from notification lifecycle updates.
 - Completed: irrigation run realtime fan-out hooks (`irrigation.run.updated`) and site-event publication.
 - Completed: dedicated MQTT-v2 ingest service/router for reported-state and setpoint-outcome paths (`/api/v2/devices/{id}/ingest/mqtt/*`) beyond listener-only compatibility.
+- Completed: enforce-mode negative-path regression coverage for all mqtt-v2 ingest endpoints (reported-state, setpoint-outcome, irrigation-outcome).
 - Open: firmware/adapters contract conformance and strict-mode rollout.
 
 5. Phase 4 - MQTT v2 adapter: `early stage`
@@ -111,6 +112,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation programs + hydraulics parity increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation program actions increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation outcome taxonomy increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after enforce-mode ingest coverage increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
