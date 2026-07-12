@@ -117,6 +117,7 @@ def _render_acl_content(clients: list[sqlite3.Row], devices: list[sqlite3.Row], 
                 device_topic_id = username[len("device_"):]
             if device_topic_id:
                 lines.append(f"topic readwrite homie/5/{safe_topic_segment(device_topic_id)}/#")
+                lines.append(f"topic readwrite zmartify/v2/devices/{safe_topic_segment(device_topic_id)}/#")
             lines.append("")
             continue
 

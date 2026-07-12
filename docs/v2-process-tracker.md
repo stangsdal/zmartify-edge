@@ -89,7 +89,11 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation program management actions in app shell (create program, enable/pause toggle, add schedule, run now) bound to v2 program endpoints.
 - Open: complete remaining UX parity screens and deeper API bindings.
 
-8. Phase 7 - HVAC firmware alignment: `not started`
+8. Phase 7 - HVAC firmware alignment: `started`
+- Completed: firmware v0.2.0 (zmartify-hvac-ahc9000 commit 18c7709) adds MQTT v2 setpoint contract support: subscribes to `zmartify/v2/devices/{id}/commands/hvac/zones/+/setpoint` for command_id correlation and dual-publishes schema-conformant `setpoint-outcome` payloads alongside legacy topics.
+- Completed: firmware v0.2.0 deployed to live device 192.168.10.57 via OTA (`POST /ota` + reboot); post-OTA health verified (AHC9000 detected, 0 poll failures).
+- Completed: edge ACL generation now grants devices `zmartify/v2/devices/{id}/#` readwrite alongside legacy homie topics.
+- Open: deploy updated edge (ACL regeneration + `ZMART_EDGE_MQTT_TOPIC_STYLE=dual`) to pilot.zmartify.dk and run edge-assisted live command-feedback validation.
 - Early validation support added: optional live HVAC smoke tests include edge twin-shape and command-feedback sequence checks.
 - Latest run: direct live HVAC smoke (`RUN_LIVE_HVAC=1`, base `http://192.168.10.57`) completed with 3 passed and 2 skipped (edge-assisted checks not enabled).
 - Latest attempt with edge-assisted flags passed baseline live checks with same 3 passed / 2 skipped, indicating `LIVE_EDGE_*` credentials were still not provided in environment.
