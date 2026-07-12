@@ -179,3 +179,7 @@ Helper script:
 - Commands: host deploy of merged `main` (dual topic style, contracts mount, ACL regeneration, mosquitto restart), then `publish_setpoint_command("hvac-gateway-1cdbd47a254c", 1, 16.0)` from the API container.
 - Result: `setpoint_command_outcome_received` events logged with source `mqtt_v2_setpoint_outcome`, result `confirmed`, command_id `sp-29b30c570ebc` echoed by firmware v0.2.0; legacy `mqtt_last_setpoint_command` path ran in parallel.
 - Notes: first full production validation of the v2 MQTT contract loop (edge -> firmware -> edge). Known follow-up: outcomes are ingested twice because both API containers run the listener.
+
+- Date: 2026-07-12 (listener dedup validation)
+- Commands: disabled listener in http service, recreated container, re-published no-op setpoint command.
+- Result: exactly one `setpoint_command_outcome_received` per topic source (one `mqtt_v2_setpoint_outcome`, one `mqtt_last_setpoint_command`) — duplication resolved; both sources present as expected in dual mode.

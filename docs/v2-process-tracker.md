@@ -95,7 +95,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: edge ACL generation now grants devices `zmartify/v2/devices/{id}/#` readwrite alongside legacy homie topics.
 - Completed: production edge deployed from merged `main` (b426a9a + fixes) with `ZMART_EDGE_MQTT_TOPIC_STYLE=dual`, contracts volume mount, regenerated ACL, and broker restart for client resubscribe.
 - Completed: live end-to-end v2 loop validated on 2026-07-12: dual-published setpoint command -> firmware v0.2.0 -> v2 `setpoint-outcome` ingested by edge (`setpoint_command_outcome_received` events with source `mqtt_v2_setpoint_outcome`, result `confirmed`, command_id echoed).
-- Open: outcome events are ingested twice because both API containers run the setpoint listener; deduplicate by running the listener in a single service.
+- Completed: duplicate outcome ingestion resolved — setpoint listener now runs only in the primary HTTPS API service (`ZMART_EDGE_ENABLE_SETPOINT_OUTCOME_LISTENER=0` on the http service); re-validated live with exactly one event per topic source.
 - Early validation support added: optional live HVAC smoke tests include edge twin-shape and command-feedback sequence checks.
 - Latest run: direct live HVAC smoke (`RUN_LIVE_HVAC=1`, base `http://192.168.10.57`) completed with 3 passed and 2 skipped (edge-assisted checks not enabled).
 - Latest attempt with edge-assisted flags passed baseline live checks with same 3 passed / 2 skipped, indicating `LIVE_EDGE_*` credentials were still not provided in environment.
