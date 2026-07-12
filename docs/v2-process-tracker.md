@@ -167,8 +167,12 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Phase 1: migrate active runtime persistence from SQLite to PostgreSQL-backed SQLAlchemy models.
-2. Phase 2: continue extraction of remaining v1 endpoints from `main.py` into router modules.
-3. Phase 4/9: plan legacy homie-topic retirement after a dual-mode bake period; continue hardening checklist.
-4. Phase 8: integrate the irrigation controller firmware (zmartify-irrigation) against the mqtt-v2 contracts and irrigation ingest endpoints.
+Paused 2026-07-12 with all repos clean and pushed. Resume points, in priority order:
+
+1. Phase 8: finish the irrigation controller so it is operational, then onboard it — register device `zmartify-irrigation-01` (must match `ZIC_V2_DEVICE_ID` in `main/main.c`), issue MQTT credentials, regenerate the broker ACL, restart mosquitto, and run the live loop validation. All edge/firmware v2 wiring is already deployed and build-green.
+2. Phase 1: port runtime data access from the sqlite3 API to PostgreSQL (schema bootstrap already applied to the production TimescaleDB; largest remaining work item).
+3. Phase 2: extract remaining v1 endpoint groups from `main.py` (domains/sites, devices/lifecycle, mobile API, auth/invites; mqtt-clients and system-status are done).
+4. Phase 9: remaining hardening checklist (homie state-topic retirement decision, backup restore drills in deployment, monitoring).
 5. Phase 10: native mobile packaging via Capacitor once UX parity is closed.
+
+Status snapshot at pause: Phases 0 and 7 `completed`; production runs v2-only topic style with enforce-mode contracts (HVAC firmware v0.3.0 live); irrigation v2 loop is code-complete on both sides and waits only on operational controller hardware.
