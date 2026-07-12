@@ -94,6 +94,12 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: firmware v0.2.0 deployed to live device 192.168.10.57 via OTA (`POST /ota` + reboot); post-OTA health verified (AHC9000 detected, 0 poll failures).
 - Completed: edge ACL generation now grants devices `zmartify/v2/devices/{id}/#` readwrite alongside legacy homie topics.
 - Open: deploy updated edge (ACL regeneration + `ZMART_EDGE_MQTT_TOPIC_STYLE=dual`) to pilot.zmartify.dk and run edge-assisted live command-feedback validation.
+- Deployment runbook for the open step (requires production access):
+  1. Pull branch `docs/edge-v2-architecture-redesign` on the edge host and rebuild: `docker compose build zmartify-edge-api && docker compose up -d`.
+  2. Add `ZMART_EDGE_MQTT_TOPIC_STYLE=dual` to both API service environments (compose or `.env`).
+  3. Regenerate the broker ACL: `POST /admin/acl/regenerate` (owner/admin token) — the device user then gains `zmartify/v2/devices/{id}/#`.
+  4. Verify: set a zone setpoint via mobile API, then confirm a `setpoint_command_outcome_received` event with payload source `mqtt_v2_setpoint_outcome` appears in `/events/recent`.
+  5. Run `./scripts/run_live_edge_assisted_hvac.sh` with `LIVE_EDGE_BASE_URL`, `LIVE_EDGE_BEARER_TOKEN`, `LIVE_EDGE_DEVICE_ID` set for the full edge-assisted suite.
 - Early validation support added: optional live HVAC smoke tests include edge twin-shape and command-feedback sequence checks.
 - Latest run: direct live HVAC smoke (`RUN_LIVE_HVAC=1`, base `http://192.168.10.57`) completed with 3 passed and 2 skipped (edge-assisted checks not enabled).
 - Latest attempt with edge-assisted flags passed baseline live checks with same 3 passed / 2 skipped, indicating `LIVE_EDGE_*` credentials were still not provided in environment.
