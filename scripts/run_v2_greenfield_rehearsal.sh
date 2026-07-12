@@ -69,6 +69,9 @@ printf "[phase-3] Run realtime topic-hub unit tests\n"
 printf "[phase-3] Run setpoint outcome listener parser tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_setpoint_outcome_listener.py
 
+printf "[phase-3] Run irrigation realtime hook tests\n"
+"$PYTHON_BIN" -m pytest -q tests/test_irrigation_realtime_hooks.py
+
 printf "[phase-5] Run irrigation backend skeleton API tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_api_v2_irrigation.py
 
@@ -77,6 +80,9 @@ printf "[phase-4] Run MQTT-related regression tests\n"
 
 printf "[phase-4] Run MQTT topic normalization tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_mqtt_v2_topics.py
+
+printf "[phase-4] Run MQTT v2 command contract publish tests\n"
+"$PYTHON_BIN" -m pytest -q tests/test_mqtt_commands_v2_contract.py
 
 if [[ "${RUN_LIVE_HVAC:-0}" == "1" ]]; then
   printf "[phase-7-smoke] Running optional live HVAC contract tests\n"

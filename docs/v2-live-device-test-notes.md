@@ -99,3 +99,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after notification read-state fan-out, irrigation schedules/runs foundation, and MQTT topic normalization.
+
+- Date: 2026-07-12 (helper script rerun after mqtt-v2 command-contract + irrigation realtime/overview increment)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after v2 command-payload validation, irrigation run realtime fan-out, and site overview endpoint addition.

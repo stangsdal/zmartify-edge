@@ -48,10 +48,18 @@ def _seed_device(client: TestClient) -> str:
     return "dev-irrig"
 
 
+def _site_ref() -> str:
+    return "site-irrig"
+
+
 def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     device_id = _seed_device(client)
     headers = _auth_headers()
+
+    overview_initial = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
+    assert overview_initial.status_code == 200
+    assert overview_initial.json()["device_count"] == 1
 
     list_empty = client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=headers)
     assert list_empty.status_code == 200
@@ -75,6 +83,10 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     list_zones = client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=headers)
     assert list_zones.status_code == 200
     assert len(list_zones.json()["zones"]) == 1
+
+    overview_after_zone = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
+    assert overview_after_zone.status_code == 200
+    assert overview_after_zone.json()["zone_count"] >= 1
 
     list_programs_empty = client.get(f"/api/v2/devices/{device_id}/irrigation/programs", headers=headers)
     assert list_programs_empty.status_code == 200
@@ -143,6 +155,10 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     run_id = run_start.json()["run"]["run_id"]
     assert isinstance(run_start.json()["run"].get("steps"), list)
 
+    overview_running = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
+    assert overview_running.status_code == 200
+    assert overview_running.json()["active_run_count"] >= 1
+
     list_runs = client.get(f"/api/v2/devices/{device_id}/irrigation/runs", headers=headers)
     assert list_runs.status_code == 200
     assert len(list_runs.json()["runs"]) >= 1
@@ -153,6 +169,10 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     )
     assert complete_run.status_code == 200
     assert complete_run.json()["run"]["status"] == "completed"
+
+    overview_completed = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
+    assert overview_completed.status_code == 200
+    assert overview_completed.json()["active_run_count"] == 0
 
     list_programs = client.get(f"/api/v2/devices/{device_id}/irrigation/programs", headers=headers)
     assert list_programs.status_code == 200
