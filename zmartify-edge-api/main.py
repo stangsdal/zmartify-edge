@@ -87,6 +87,7 @@ from app.mqtt_commands import (
     should_forward_setpoint_commands,
 )
 from app.irrigation_domain import set_irrigation_run_emit_hook
+from app.irrigation_domain import set_irrigation_run_emit_hook, set_irrigation_status_emit_hook
 from app.registry import (
     authenticate_device_admin_token,
     RegistryConflictError,
@@ -500,6 +501,33 @@ def _publish_irrigation_run_update(event: dict) -> None:
         )
 
 
+def _publish_irrigation_status_update(event: dict) -> None:
+    event_type = str(event.get("event_type") or "irrigation.status.updated")
+    device_id = event.get("device_id")
+    site_id = event.get("site_id")
+    payload = {
+        "event_type": event_type,
+        "action": event.get("action"),
+        "state_type": event.get("state_type"),
+        "device_id": device_id,
+        "site_id": site_id,
+        "state": event.get("state"),
+    }
+
+    if device_id:
+        realtime_topic_hub.publish_from_sync(
+            f"device:{device_id}:irrigation",
+            event_type,
+            payload,
+        )
+    if site_id is not None:
+        realtime_topic_hub.publish_from_sync(
+            f"site:{int(site_id)}:events",
+            event_type,
+            payload,
+        )
+
+
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
     scoped_site_ids = _mobile_site_scope_ids(request)
     if scoped_site_ids is None:
@@ -554,12 +582,14 @@ async def startup_event() -> None:
         notification_state_hook=_publish_notification_state_update,
     )
     set_irrigation_run_emit_hook(_publish_irrigation_run_update)
+    set_irrigation_status_emit_hook(_publish_irrigation_status_update)
     setpoint_outcome_listener.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     set_irrigation_run_emit_hook(None)
+    set_irrigation_status_emit_hook(None)
     setpoint_outcome_listener.stop()
 
 

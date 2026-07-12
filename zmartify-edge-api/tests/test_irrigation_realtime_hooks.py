@@ -10,6 +10,12 @@ from app.irrigation_domain import (
     create_program_run,
     complete_irrigation_run,
     set_irrigation_run_emit_hook,
+    set_irrigation_status_emit_hook,
+    set_irrigation_rain_delay,
+    upsert_irrigation_hydraulics_state,
+    upsert_irrigation_output_state,
+    upsert_irrigation_power_state,
+    upsert_irrigation_weather_state,
     upsert_irrigation_zone,
 )
 
@@ -62,3 +68,30 @@ def test_irrigation_run_emits_realtime_hook_events(monkeypatch, tmp_path: Path):
     assert captured[0]["event_type"] == "irrigation.run.updated"
     assert captured[0]["action"] == "started"
     assert captured[-1]["action"] == "completed"
+
+
+def test_irrigation_status_emits_realtime_hook_events(monkeypatch, tmp_path: Path):
+    _setup_db(monkeypatch, tmp_path)
+    device_id = _seed_irrigation_device()
+
+    captured: list[dict] = []
+
+    def _hook(event: dict) -> None:
+        captured.append(event)
+
+    set_irrigation_status_emit_hook(_hook)
+    try:
+        upsert_irrigation_output_state(device_id, local_ref="out-1", name="Valve 1", enabled=True, active=False)
+        upsert_irrigation_hydraulics_state(device_id, flow_lpm=9.3, pressure_bar=2.1, water_liters=80.0)
+        upsert_irrigation_power_state(device_id, voltage_rms_v=230.0, current_rms_a=0.7, real_power_w=140.0, power_factor=0.86)
+        upsert_irrigation_weather_state(device_id, temperature_c=17.0, rain_mm=0.0, wind_mps=3.4, eto_mm=2.0)
+        set_irrigation_rain_delay(device_id, delay_hours=6, reason="rain")
+    finally:
+        set_irrigation_status_emit_hook(None)
+
+    assert len(captured) == 5
+    assert captured[0]["event_type"] == "irrigation.status.updated"
+    assert captured[0]["action"] == "output.upserted"
+    assert captured[0]["state_type"] == "outputs"
+    assert captured[-1]["action"] == "rain_delay.set"
+    assert captured[-1]["state_type"] == "weather"

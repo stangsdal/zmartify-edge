@@ -9,6 +9,7 @@ from app.db import get_connection
 from app.registry import RegistryNotFoundError
 
 _IRRIGATION_RUN_EMIT_HOOK = None
+_IRRIGATION_STATUS_EMIT_HOOK = None
 
 
 def set_irrigation_run_emit_hook(run_hook=None) -> None:
@@ -16,11 +17,25 @@ def set_irrigation_run_emit_hook(run_hook=None) -> None:
     _IRRIGATION_RUN_EMIT_HOOK = run_hook
 
 
+def set_irrigation_status_emit_hook(status_hook=None) -> None:
+    global _IRRIGATION_STATUS_EMIT_HOOK
+    _IRRIGATION_STATUS_EMIT_HOOK = status_hook
+
+
 def _emit_irrigation_run_event(payload: dict[str, Any]) -> None:
     if _IRRIGATION_RUN_EMIT_HOOK is None:
         return
     try:
         _IRRIGATION_RUN_EMIT_HOOK(payload)
+    except Exception:
+        pass
+
+
+def _emit_irrigation_status_event(payload: dict[str, Any]) -> None:
+    if _IRRIGATION_STATUS_EMIT_HOOK is None:
+        return
+    try:
+        _IRRIGATION_STATUS_EMIT_HOOK(payload)
     except Exception:
         pass
 
@@ -586,8 +601,10 @@ def upsert_irrigation_output_state(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata_json = json.dumps(metadata or {}, separators=(",", ":"), sort_keys=True)
+    site_pk_id: int | None = None
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
         row = conn.execute(
             "SELECT id, uuid FROM irrigation_outputs WHERE device_id = ? AND local_ref = ?",
             (device["id"], local_ref),
@@ -635,6 +652,16 @@ def upsert_irrigation_output_state(
     outputs = list_irrigation_outputs(device_external_id)
     for item in outputs:
         if item["output_id"] == output_uuid:
+            _emit_irrigation_status_event(
+                {
+                    "event_type": "irrigation.status.updated",
+                    "action": "output.upserted",
+                    "state_type": "outputs",
+                    "device_id": device_external_id,
+                    "site_id": site_pk_id,
+                    "state": item,
+                }
+            )
             return item
     raise RegistryNotFoundError("irrigation output not found")
 
@@ -658,8 +685,10 @@ def upsert_irrigation_hydraulics_state(
     water_liters: float | None = None,
     source_timestamp: str | None = None,
 ) -> dict[str, Any]:
+    site_pk_id: int | None = None
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
         _upsert_device_state_row(
             conn,
             "irrigation_hydraulics_state",
@@ -672,7 +701,18 @@ def upsert_irrigation_hydraulics_state(
             },
         )
         conn.commit()
-    return get_irrigation_hydraulics(device_external_id)
+    state = get_irrigation_hydraulics(device_external_id)
+    _emit_irrigation_status_event(
+        {
+            "event_type": "irrigation.status.updated",
+            "action": "hydraulics.upserted",
+            "state_type": "hydraulics",
+            "device_id": device_external_id,
+            "site_id": site_pk_id,
+            "state": state,
+        }
+    )
+    return state
 
 
 def upsert_irrigation_power_state(
@@ -684,8 +724,10 @@ def upsert_irrigation_power_state(
     power_factor: float | None = None,
     source_timestamp: str | None = None,
 ) -> dict[str, Any]:
+    site_pk_id: int | None = None
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
         _upsert_device_state_row(
             conn,
             "irrigation_power_state",
@@ -699,7 +741,18 @@ def upsert_irrigation_power_state(
             },
         )
         conn.commit()
-    return get_irrigation_power(device_external_id)
+    state = get_irrigation_power(device_external_id)
+    _emit_irrigation_status_event(
+        {
+            "event_type": "irrigation.status.updated",
+            "action": "power.upserted",
+            "state_type": "power",
+            "device_id": device_external_id,
+            "site_id": site_pk_id,
+            "state": state,
+        }
+    )
+    return state
 
 
 def upsert_irrigation_weather_state(
@@ -711,8 +764,10 @@ def upsert_irrigation_weather_state(
     eto_mm: float | None = None,
     source_timestamp: str | None = None,
 ) -> dict[str, Any]:
+    site_pk_id: int | None = None
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
         _upsert_device_state_row(
             conn,
             "irrigation_weather_state",
@@ -726,7 +781,18 @@ def upsert_irrigation_weather_state(
             },
         )
         conn.commit()
-    return get_irrigation_weather(device_external_id)
+    state = get_irrigation_weather(device_external_id)
+    _emit_irrigation_status_event(
+        {
+            "event_type": "irrigation.status.updated",
+            "action": "weather.upserted",
+            "state_type": "weather",
+            "device_id": device_external_id,
+            "site_id": site_pk_id,
+            "state": state,
+        }
+    )
+    return state
 
 
 def _active_rain_delay_for_device(conn: Any, device_pk_id: int) -> dict[str, Any] | None:
@@ -754,6 +820,7 @@ def set_irrigation_rain_delay(device_external_id: str, *, delay_hours: int, reas
     safe_hours = max(1, min(int(delay_hours), 168))
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
         active_until = (datetime.now(timezone.utc) + timedelta(hours=safe_hours)).isoformat()
         rain_delay_uuid = str(uuid.uuid4())
         conn.execute(
@@ -765,11 +832,22 @@ def set_irrigation_rain_delay(device_external_id: str, *, delay_hours: int, reas
         )
         conn.commit()
         current = _active_rain_delay_for_device(conn, device["id"])
-    return {
+    result = {
         "device_id": device_external_id,
         "delay_hours": safe_hours,
         "rain_delay": current,
     }
+    _emit_irrigation_status_event(
+        {
+            "event_type": "irrigation.status.updated",
+            "action": "rain_delay.set",
+            "state_type": "weather",
+            "device_id": device_external_id,
+            "site_id": site_pk_id,
+            "state": result,
+        }
+    )
+    return result
 
 
 def get_irrigation_hydraulics(device_external_id: str) -> dict[str, Any]:
