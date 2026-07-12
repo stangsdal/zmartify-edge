@@ -55,7 +55,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: topic normalization helper for legacy/v2/dual command and outcome topic paths.
 - Completed: setpoint outcome listener parsing/subscription support for both legacy and v2 topic styles.
 - Completed: payload-level v2 command contract objects for HVAC setpoint/rename publish path with enforce-mode validation coverage.
-- Open: outcome payload contract alignment and dedicated v2 ingest routing beyond current listener compatibility.
+- Completed: v2 setpoint outcome payload contract schema + runtime validation wired into listener ingest path.
+- Open: dedicated v2 ingest routing beyond current listener compatibility and broader irrigation outcome contracts.
 
 6. Phase 5 - Irrigation backend: `early stage`
 - UI scaffolding and route architecture are in place.
@@ -84,6 +85,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after realtime scoped fan-out + irrigation skeleton): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after realtime read-state + irrigation schedules/runs + mqtt topic normalization): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after mqtt-v2 command-contract + irrigation realtime/overview increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after mqtt-v2 outcome contract increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -116,6 +118,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Align setpoint outcome ingestion payloads with explicit mqtt-v2 outcome contract schema and enable enforce-mode coverage.
-2. Expand irrigation domain with outputs/master-valve/hydraulics/weather and run-step execution state updates from telemetry.
-3. Add irrigation alarm/status fan-out and mobile overview consumption paths on top of current run-event coverage.
+1. Expand irrigation domain with outputs/master-valve/hydraulics/weather and run-step execution state updates from telemetry.
+2. Add irrigation alarm/status fan-out and mobile overview consumption paths on top of current run-event coverage.
+3. Introduce dedicated mqtt-v2 ingest routing/service layer beyond listener compatibility hooks.

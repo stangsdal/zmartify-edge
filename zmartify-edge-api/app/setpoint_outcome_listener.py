@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from app.contracts import ContractValidationError, validate_mqtt_v2_setpoint_command_outcome
 from app.mqtt_v2_topics import outcome_subscription_topics, parse_setpoint_outcome_topic
 
 
@@ -77,6 +78,37 @@ class SetpointOutcomeMqttListener:
             payload={"source": "mqtt_last_setpoint_command", "raw": data},
         )
 
+    def _handle_v2_setpoint_outcome(self, device_id: str, zone_id: int, payload_text: str) -> None:
+        try:
+            data = json.loads(payload_text)
+        except json.JSONDecodeError:
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        try:
+            validate_mqtt_v2_setpoint_command_outcome(data)
+        except ContractValidationError:
+            return
+
+        result = str(data.get("result") or "").strip().lower()
+        if not result:
+            return
+
+        requested = data.get("requested_target_temperature_c")
+        confirmed = data.get("confirmed_target_temperature_c")
+        detail = data.get("detail")
+        self._ingest_setpoint_command_outcome(
+            device_id,
+            zone_id,
+            result=result,
+            detail=str(detail) if detail is not None else None,
+            requested_target_c=float(requested) if isinstance(requested, (int, float)) else None,
+            confirmed_target_c=float(confirmed) if isinstance(confirmed, (int, float)) else None,
+            payload={"source": "mqtt_v2_setpoint_outcome", "raw": data},
+        )
+
     def _on_connect(self, client, userdata, _flags, _rc):
         device_id = str(userdata or "").strip()
         if not device_id:
@@ -95,6 +127,9 @@ class SetpointOutcomeMqttListener:
             return
         if topic.endswith("/last-setpoint-command"):
             self._handle_last_setpoint_command(device_id, zone_id, payload_text)
+            return
+        if topic.endswith("/setpoint-outcome"):
+            self._handle_v2_setpoint_outcome(device_id, zone_id, payload_text)
 
     def _device_listener_targets(self) -> list[tuple[str, str, str]]:
         override = self._device_id_override()
