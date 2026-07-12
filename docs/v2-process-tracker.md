@@ -116,7 +116,9 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
-10. Phase 9 - Production hardening: `not started`
+10. Phase 9 - Production hardening: `started`
+- Completed: database backup + restore-drill helper (`scripts/backup_edge_db.sh`) with integrity verification and retention pruning; validated end-to-end against a freshly initialized edge database.
+- Open: schedule automated backups in deployment, enforce-mode default rollout, and remaining hardening checklist items.
 
 11. Phase 10 - Native mobile packaging: `not started`
 
@@ -146,5 +148,5 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 ## Next Process-Aligned Steps
 
 1. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.
-2. Start Phase 9 production-hardening checklist items that do not depend on firmware (backup/restore drill, enforce-mode default rollout plan).
+2. Wire scheduled backups (cron/compose sidecar) around `scripts/backup_edge_db.sh` and plan enforce-mode default flip.
 3. Align firmware publish payloads (Phase 7/8) with the typed outcome taxonomy once live device credentials are available.
