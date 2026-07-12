@@ -1,18 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --ion-color-primary: #301e96;
-  --ion-color-primary-rgb: 48, 30, 150;
+  --ion-color-primary: #0f766e;
+  --ion-color-primary-rgb: 15, 118, 110;
   --ion-color-primary-contrast: #ffffff;
-  --ion-color-secondary: #67fbff;
-  --ion-background-color: #f1f2f2;
-  --ion-text-color: #111827;
+  --ion-color-secondary: #ea580c;
+  --ion-background-color: #f7f6f1;
+  --ion-text-color: #152238;
   --app-surface: #ffffff;
-  --app-muted: #5f6377;
+  --app-muted: #59637a;
+  --app-nav-bg: #f3f0e7;
+  --app-border: #dde3ee;
 }
 
 html,
@@ -24,22 +26,25 @@ ion-app {
 
 html,
 body {
-  font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
-  background: radial-gradient(circle at 10% 10%, rgba(103, 251, 255, 0.15), transparent 40%),
-    linear-gradient(180deg, #f7f8fb 0%, #f1f2f2 100%);
+  background: radial-gradient(circle at 8% 8%, rgba(14, 165, 164, 0.14), transparent 42%),
+    radial-gradient(circle at 88% 12%, rgba(234, 88, 12, 0.12), transparent 36%),
+    linear-gradient(180deg, #fbfaf7 0%, #f7f6f1 100%);
 }
 
 body.dark-mode {
-  --ion-background-color: #121212;
-  --ion-text-color: #f6f7fb;
-  --app-surface: #1e1e1e;
-  --app-muted: #a8acbf;
-  background: radial-gradient(circle at 15% 12%, rgba(103, 251, 255, 0.09), transparent 38%),
-    linear-gradient(180deg, #121212 0%, #17171b 100%);
+  --ion-background-color: #11161f;
+  --ion-text-color: #edf2ff;
+  --app-surface: #1b2432;
+  --app-muted: #a8b5cc;
+  --app-nav-bg: #152031;
+  --app-border: #30415c;
+  background: radial-gradient(circle at 18% 10%, rgba(14, 165, 164, 0.16), transparent 38%),
+    linear-gradient(180deg, #11161f 0%, #172132 100%);
   color: #f6f7fb;
 }
 
@@ -52,5 +57,209 @@ body.dark-mode {
 }
 
 .hero-glow {
-  box-shadow: 0 18px 40px rgba(48, 30, 150, 0.2);
+  box-shadow: 0 18px 40px rgba(15, 118, 110, 0.2);
+}
+
+.app-layout-tabs {
+  min-height: 100%;
+}
+
+.app-router-outlet {
+  padding-bottom: 84px;
+}
+
+.mobile-nav {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--app-nav-bg) 84%, white);
+  backdrop-filter: blur(8px);
+}
+
+.mobile-nav-item {
+  min-height: 56px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--app-muted);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mobile-nav-item ion-icon {
+  font-size: 18px;
+}
+
+.mobile-nav-item.active {
+  background: linear-gradient(140deg, #0f766e 0%, #0ea5a4 100%);
+  color: #fff;
+}
+
+.desktop-nav {
+  display: none;
+}
+
+.tablet-nav {
+  display: none;
+}
+
+.desktop-nav-kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-muted);
+}
+
+.desktop-nav-brand h2 {
+  margin: 6px 0 0;
+  font-family: 'Sora', ui-sans-serif, system-ui;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.desktop-nav-list {
+  display: grid;
+  gap: 6px;
+}
+
+.desktop-nav-item {
+  min-height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  color: var(--app-muted);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.desktop-nav-item.active {
+  background: linear-gradient(140deg, #0f766e 0%, #0ea5a4 100%);
+  color: #fff;
+}
+
+.app-home-hero {
+  background: linear-gradient(145deg, #0f766e 0%, #0ea5a4 58%, #ea580c 100%);
+}
+
+.app-system-card {
+  border: 1px solid var(--app-border);
+}
+
+.app-system-card--irrigation {
+  background: linear-gradient(160deg, rgba(14, 165, 164, 0.1) 0%, rgba(255, 255, 255, 0.92) 70%);
+}
+
+.app-system-card--hvac {
+  background: linear-gradient(160deg, rgba(234, 88, 12, 0.1) 0%, rgba(255, 255, 255, 0.92) 70%);
+}
+
+.app-system-card--weather {
+  background: linear-gradient(160deg, rgba(56, 189, 248, 0.12) 0%, rgba(255, 255, 255, 0.92) 70%);
+}
+
+@media (min-width: 768px) {
+  .mobile-nav {
+    left: 20px;
+    right: 20px;
+    width: auto;
+    transform: none;
+  }
+
+  .app-router-outlet {
+    padding-bottom: 94px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .mobile-nav {
+    display: none;
+  }
+
+  .tablet-nav {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 86px;
+    border-right: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-nav-bg) 88%, white);
+    padding: 16px 8px;
+    display: block;
+    z-index: 30;
+  }
+
+  .tablet-nav-list {
+    display: grid;
+    gap: 6px;
+    align-content: start;
+  }
+
+  .tablet-nav-item {
+    min-height: 58px;
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 3px;
+    color: var(--app-muted);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .tablet-nav-item ion-icon {
+    font-size: 19px;
+  }
+
+  .tablet-nav-item.active {
+    background: linear-gradient(140deg, #0f766e 0%, #0ea5a4 100%);
+    color: #fff;
+  }
+
+  .app-router-outlet {
+    margin-left: 86px;
+    padding-bottom: 0;
+  }
+}
+
+@media (min-width: 1200px) {
+  .mobile-nav {
+    display: none;
+  }
+
+  .tablet-nav {
+    display: none;
+  }
+
+  .desktop-nav {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 252px;
+    border-right: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-nav-bg) 88%, white);
+    padding: 22px 14px;
+    display: grid;
+    align-content: start;
+    gap: 24px;
+    z-index: 30;
+  }
+
+  .app-router-outlet {
+    margin-left: 252px;
+    padding-bottom: 0;
+  }
 }

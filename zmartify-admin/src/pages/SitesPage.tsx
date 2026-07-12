@@ -1,23 +1,18 @@
 import { useEffect, useState } from 'react';
 import {
   IonContent,
-  IonHeader,
-  IonTitle,
-  IonToolbar,
   IonPage,
-  IonList,
-  IonItem,
-  IonLabel,
   IonButton,
-  IonCard,
-  IonCardContent,
-  IonInput,
   IonLoading,
   IonAlert,
+  IonItem,
+  IonInput,
+  IonLabel,
 } from '@ionic/react';
 import { siteApi } from '../api/sites';
 import { domainApi } from '../api/domains';
 import { Site, Domain } from '../types/api';
+import { AppHeader } from '../components/AppHeader';
 
 export function SitesPage() {
   const [sites, setSites] = useState<Site[]>([]);
@@ -112,11 +107,7 @@ export function SitesPage() {
 
   return (
     <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Sites</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppHeader title="Sites" subtitle="Domain locations and ownership boundaries" />
       <IonContent className="ion-padding">
         <IonLoading isOpen={creating} message="Processing..." />
         <IonAlert
@@ -138,25 +129,20 @@ export function SitesPage() {
           ]}
         />
 
-        {error && (
-          <IonCard>
-            <IonCardContent style={{ color: 'red' }}>
-              <strong>Error:</strong> {error}
-            </IonCardContent>
-          </IonCard>
-        )}
+        <div className="space-y-4 pb-20 lg:pb-8">
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-        <IonButton
-          expand="block"
-          onClick={() => setShowForm(!showForm)}
-          className="ion-margin-bottom"
-        >
-          {showForm ? 'Cancel' : 'New Site'}
-        </IonButton>
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted">Total sites</p>
+              <p className="text-2xl font-bold mt-1">{sites.length}</p>
+            </div>
+            <IonButton onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancel' : 'New site'}</IonButton>
+          </section>
 
-        {showForm && (
-          <IonCard className="ion-margin-bottom">
-            <IonCardContent>
+          {showForm ? (
+            <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+              <h2 className="text-lg font-semibold mb-2">Create site</h2>
               <IonItem>
                 <IonLabel position="stacked">Domain</IonLabel>
                 <select
@@ -198,40 +184,35 @@ export function SitesPage() {
                   Create
                 </IonButton>
               </div>
-            </IonCardContent>
-          </IonCard>
-        )}
+            </section>
+          ) : null}
 
-        {loading ? (
-          <p>Loading sites...</p>
-        ) : sites.length === 0 ? (
-          <p>No sites yet. Create one to get started.</p>
-        ) : (
-          <IonList>
-            {sites.map((site) => (
-              <IonItem key={site.id}>
-                <IonLabel>
-                  <strong>{site.name}</strong>
-                  <p>{site.slug}</p>
-                  <p style={{ fontSize: '0.8em', color: '#666' }}>
-                    Domain: {getDomainName(site.domain_id)}
-                  </p>
-                </IonLabel>
-                <IonButton
-                  slot="end"
-                  color="danger"
-                  size="small"
-                  onClick={() => {
-                    setDeleteTarget(site.id);
-                    setShowDeleteAlert(true);
-                  }}
-                >
-                  Delete
-                </IonButton>
-              </IonItem>
-            ))}
-          </IonList>
-        )}
+          {loading ? <p className="text-sm text-muted">Loading sites...</p> : null}
+          {!loading && sites.length === 0 ? <p className="text-sm text-muted">No sites yet. Create one to get started.</p> : null}
+          {!loading && sites.length > 0 ? (
+            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {sites.map((site) => (
+                <article key={site.id} className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+                  <p className="text-xs uppercase tracking-wide text-muted">{getDomainName(site.domain_id)}</p>
+                  <h3 className="text-lg font-semibold mt-1">{site.name}</h3>
+                  <p className="text-sm text-muted mt-1">{site.slug}</p>
+                  <IonButton
+                    color="danger"
+                    size="small"
+                    fill="outline"
+                    className="mt-3"
+                    onClick={() => {
+                      setDeleteTarget(site.id);
+                      setShowDeleteAlert(true);
+                    }}
+                  >
+                    Delete
+                  </IonButton>
+                </article>
+              ))}
+            </section>
+          ) : null}
+        </div>
       </IonContent>
     </IonPage>
   );

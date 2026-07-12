@@ -206,6 +206,27 @@ def test_mobile_setpoint_forwarded_stays_pending_until_feedback(monkeypatch, tmp
     assert any(evt["payload"].get("command_id") == command_id for evt in feedback_events)
 
 
+def test_contract_enforce_rejects_invalid_twin_timestamp(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-enf001")
+
+    ingest = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "source_timestamp": "not-a-date",
+            "zones": [{"zone_id": 1, "target_temperature_c": 21.0}],
+        },
+    )
+
+    assert ingest.status_code == 400
+    assert "validation failed" in str(ingest.json().get("detail", "")).lower()
+
+
 def test_events_filtering_by_type_and_device(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}

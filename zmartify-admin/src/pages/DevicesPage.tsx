@@ -1,19 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
   IonContent,
-  IonHeader,
-  IonTitle,
-  IonToolbar,
   IonPage,
-  IonList,
-  IonItem,
-  IonLabel,
   IonButton,
-  IonCard,
-  IonCardContent,
-  IonInput,
   IonLoading,
   IonAlert,
+  IonInput,
+  IonItem,
+  IonLabel,
   IonSpinner,
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
@@ -21,6 +15,7 @@ import { deviceApi } from '../api/devices';
 import { Device } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
 import { ZoneCard } from '../components/ZoneCard';
+import { AppHeader } from '../components/AppHeader';
 
 function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
   const { zoneState, loading, error, updateZoneSetpoint, refetch } = useDeviceZones(deviceId);
@@ -148,11 +143,7 @@ export function DevicesPage() {
 
   return (
     <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Devices</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppHeader title="Devices" subtitle="Inventory, status and zone operations" />
       <IonContent className="ion-padding">
         <IonLoading isOpen={creating} message="Processing..." />
         <IonAlert
@@ -174,34 +165,25 @@ export function DevicesPage() {
           ]}
         />
 
-        {error && (
-          <IonCard>
-            <IonCardContent style={{ color: 'red' }}>
-              <strong>Error:</strong> {error}
-            </IonCardContent>
-          </IonCard>
-        )}
+        <div className="space-y-4 pb-20 lg:pb-8">
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-        <IonButton
-          expand="block"
-          fill="outline"
-          onClick={() => history.push('/devices/add')}
-          className="ion-margin-bottom"
-        >
-          Add Device
-        </IonButton>
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted">Total devices</p>
+              <p className="text-2xl font-bold mt-1">{devices.length}</p>
+            </div>
+            <div className="flex gap-2">
+              <IonButton fill="outline" onClick={() => history.push('/app/devices/add')}>
+                Add device
+              </IonButton>
+              <IonButton onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancel' : 'Register device'}</IonButton>
+            </div>
+          </section>
 
-        <IonButton
-          expand="block"
-          onClick={() => setShowForm(!showForm)}
-          className="ion-margin-bottom"
-        >
-          {showForm ? 'Cancel' : 'Register Device'}
-        </IonButton>
-
-        {showForm && (
-          <IonCard className="ion-margin-bottom">
-            <IonCardContent>
+          {showForm ? (
+            <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+              <h2 className="text-lg font-semibold mb-2">Register device</h2>
               <IonItem>
                 <IonLabel position="stacked">Device ID</IonLabel>
                 <IonInput
@@ -239,77 +221,67 @@ export function DevicesPage() {
                   Register
                 </IonButton>
               </div>
-            </IonCardContent>
-          </IonCard>
-        )}
+            </section>
+          ) : null}
 
-        {loading ? (
-          <p>Loading devices...</p>
-        ) : devices.length === 0 ? (
-          <p>No devices registered yet.</p>
-        ) : (
-          <IonList>
-            {devices.map((device) => (
-              <div key={device.device_id}>
-                <IonItem>
-                  <IonLabel>
-                    <strong>{device.display_name}</strong>
-                    <p>{device.device_id}</p>
-                    {device.mac && <p>MAC: {device.mac}</p>}
-                    {device.site_id && (
-                      <p style={{ color: '#666' }}>Site ID: {device.site_id}</p>
-                    )}
-                    {device.online !== undefined && (
-                      <p
-                        style={{
-                          color: device.online ? 'green' : 'red',
+          {loading ? <p className="text-sm text-muted">Loading devices...</p> : null}
+          {!loading && devices.length === 0 ? <p className="text-sm text-muted">No devices registered yet.</p> : null}
+          {!loading && devices.length > 0 ? (
+            <section className="space-y-3">
+              {devices.map((device) => (
+                <article key={device.device_id} className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted">{device.device_id}</p>
+                      <h3 className="text-lg font-semibold mt-1">{device.display_name}</h3>
+                      {device.mac ? <p className="text-sm text-muted mt-1">MAC: {device.mac}</p> : null}
+                      {device.site_id ? <p className="text-sm text-muted">Site ID: {device.site_id}</p> : null}
+                      {device.online !== undefined ? (
+                        <p className={`text-sm font-semibold ${device.online ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {device.online ? 'Online' : 'Offline'}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <IonButton
+                        size="small"
+                        fill="outline"
+                        onClick={() =>
+                          setExpandedDeviceId(expandedDeviceId === device.device_id ? null : device.device_id)
+                        }
+                      >
+                        {expandedDeviceId === device.device_id ? 'Hide zones' : 'Zones'}
+                      </IonButton>
+                      <IonButton
+                        size="small"
+                        fill="outline"
+                        onClick={() => history.push(`/app/devices/${device.device_id}/history`)}
+                      >
+                        History
+                      </IonButton>
+                      <IonButton
+                        color="danger"
+                        fill="outline"
+                        size="small"
+                        onClick={() => {
+                          setDeleteTarget(device.device_id);
+                          setShowDeleteAlert(true);
                         }}
                       >
-                        {device.online ? 'Online' : 'Offline'}
-                      </p>
-                    )}
-                  </IonLabel>
-                  <IonButton
-                    slot="end"
-                    size="small"
-                    fill="outline"
-                    onClick={() =>
-                      setExpandedDeviceId(
-                        expandedDeviceId === device.device_id ? null : device.device_id
-                      )
-                    }
-                  >
-                    {expandedDeviceId === device.device_id ? 'Hide Zones' : 'Zones'}
-                  </IonButton>
-                  <IonButton
-                    slot="end"
-                    size="small"
-                    fill="outline"
-                    onClick={() => history.push(`/app/devices/${device.device_id}/history`)}
-                  >
-                    History
-                  </IonButton>
-                  <IonButton
-                    slot="end"
-                    color="danger"
-                    size="small"
-                    onClick={() => {
-                      setDeleteTarget(device.device_id);
-                      setShowDeleteAlert(true);
-                    }}
-                  >
-                    Delete
-                  </IonButton>
-                </IonItem>
-                {expandedDeviceId === device.device_id && (
-                  <div style={{ padding: '8px 16px 16px 16px', backgroundColor: '#f8f9fa' }}>
-                    <DeviceZonesPanel deviceId={device.device_id} />
+                        Delete
+                      </IonButton>
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
-          </IonList>
-        )}
+                  {expandedDeviceId === device.device_id ? (
+                    <div className="mt-3 rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
+                      <DeviceZonesPanel deviceId={device.device_id} />
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </section>
+          ) : null}
+        </div>
       </IonContent>
     </IonPage>
   );

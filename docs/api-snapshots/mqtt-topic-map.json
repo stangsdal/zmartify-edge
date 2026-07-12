@@ -1,0 +1,58 @@
+{
+  "generated_from": "app/mqtt_v2_topics.py",
+  "style_env_var": "ZMART_EDGE_MQTT_TOPIC_STYLE",
+  "bases": {
+    "legacy": "homie/5 (ZMART_EDGE_COMMAND_MQTT_BASE)",
+    "v2": "zmartify/v2 (ZMART_EDGE_COMMAND_MQTT_V2_BASE)"
+  },
+  "commands": {
+    "hvac.setpoint": {
+      "legacy": [
+        "homie/5/device/zone-1/target-temperature/set"
+      ],
+      "v2": [
+        "zmartify/v2/devices/device/commands/hvac/zones/1/setpoint"
+      ],
+      "dual": [
+        "homie/5/device/zone-1/target-temperature/set",
+        "zmartify/v2/devices/device/commands/hvac/zones/1/setpoint"
+      ]
+    },
+    "hvac.zone_name": {
+      "legacy": [
+        "homie/5/device/zone-1/$name/set"
+      ],
+      "v2": [
+        "zmartify/v2/devices/device/commands/hvac/zones/1/name"
+      ],
+      "dual": [
+        "homie/5/device/zone-1/$name/set",
+        "zmartify/v2/devices/device/commands/hvac/zones/1/name"
+      ]
+    }
+  },
+  "outcome_subscriptions": {
+    "legacy": [
+      "homie/5/device/+/last-setpoint-command"
+    ],
+    "v2": [
+      "zmartify/v2/devices/device/events/hvac/zones/+/setpoint-outcome"
+    ],
+    "dual": [
+      "homie/5/device/+/last-setpoint-command",
+      "zmartify/v2/devices/device/events/hvac/zones/+/setpoint-outcome"
+    ]
+  },
+  "ingest_http_paths": [
+    "/api/v2/devices/{device_id}/ingest/mqtt/reported-state",
+    "/api/v2/devices/{device_id}/ingest/mqtt/hvac/zones/{zone_id}/setpoint-outcome",
+    "/api/v2/devices/{device_id}/ingest/mqtt/irrigation/outcome"
+  ],
+  "realtime_ws_topics": [
+    "device:{device_id}:state",
+    "zone:{zone_ref}:state",
+    "device:{device_id}:irrigation",
+    "site:{site_pk_id}:events",
+    "user:{user_pk_id}:notifications"
+  ]
+}

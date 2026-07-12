@@ -1,4 +1,17 @@
 services:
+  postgres-timescale:
+    image: timescale/timescaledb:2.16.1-pg17
+    container_name: zmartify-postgres-timescale
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=zmartify
+      - POSTGRES_USER=zmartify
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-zmartify-dev-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: hvac-mosquitto
@@ -39,6 +52,9 @@ services:
     environment:
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
+      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
+      - ZMART_EDGE_CONTRACT_VALIDATION_MODE=${ZMART_EDGE_CONTRACT_VALIDATION_MODE:-warn}
+      - ZMART_EDGE_MQTT_TOPIC_STYLE=${ZMART_EDGE_MQTT_TOPIC_STYLE:-legacy}
       - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
@@ -53,6 +69,7 @@ services:
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
+      - postgres-timescale
 
   zmartify-edge-api-http:
     build:
@@ -73,6 +90,9 @@ services:
     environment:
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
+      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
+      - ZMART_EDGE_CONTRACT_VALIDATION_MODE=${ZMART_EDGE_CONTRACT_VALIDATION_MODE:-warn}
+      - ZMART_EDGE_MQTT_TOPIC_STYLE=${ZMART_EDGE_MQTT_TOPIC_STYLE:-legacy}
       - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
@@ -87,6 +107,34 @@ services:
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
+      - postgres-timescale
+
+  edge-db-backup:
+    image: alpine:3.20
+    container_name: zmartify-edge-db-backup
+    restart: unless-stopped
+    volumes:
+      - hvac-edge-data:/data
+      - edge-backups:/backups
+      - ./scripts/backup_edge_db.sh:/usr/local/bin/backup_edge_db.sh:ro
+    environment:
+      - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
+      - BACKUP_INTERVAL_SECONDS=${ZMART_EDGE_BACKUP_INTERVAL_SECONDS:-86400}
+      - BACKUP_KEEP=${ZMART_EDGE_BACKUP_KEEP:-14}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        apk add --no-cache sqlite bash >/dev/null &&
+        while true; do
+        bash /usr/local/bin/backup_edge_db.sh backup --db /data/hvac-edge.sqlite --out /backups --keep "$$BACKUP_KEEP"
+        || echo "[edge-db-backup] backup attempt failed";
+        sleep "$$BACKUP_INTERVAL_SECONDS";
+        done
+    depends_on:
+      - zmartify-edge-api
 
 volumes:
   hvac-edge-data:
+  postgres-data:
+  edge-backups:

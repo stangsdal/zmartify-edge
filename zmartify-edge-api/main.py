@@ -1,13 +1,11 @@
 import asyncio
-import hashlib
 import json
 import os
 import uuid
-import threading
 from pathlib import Path
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -41,7 +39,8 @@ from app.auth import (
     set_user_site_access,
     validate_registration_invite,
 )
-from app.db import get_connection, get_db_path, initialize_database
+from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
+from app.db import get_connection, initialize_database
 from app.device_onboarding import (
     DeviceOnboardingError,
     discover_remote_device,
@@ -59,7 +58,6 @@ from app.domain_model import (
     get_device_freshness,
     get_device_zone,
     get_zone_history,
-    ingest_setpoint_command_outcome,
     get_mobile_site,
     ingest_device_twin_snapshot,
     list_device_channels,
@@ -73,6 +71,7 @@ from app.domain_model import (
     mark_notification_read,
     rename_zone,
     resolve_zone_ref,
+    set_realtime_emit_hooks,
     set_channel_metadata,
     set_channel_zone_links,
     set_zone_metadata,
@@ -80,13 +79,14 @@ from app.domain_model import (
     upsert_channel_state,
     upsert_zone_state,
 )
-from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.mqtt_commands import (
     MqttCommandError,
     publish_setpoint_command,
     publish_zone_name_command,
     should_forward_setpoint_commands,
 )
+from app.irrigation_domain import set_irrigation_run_emit_hook
+from app.irrigation_domain import set_irrigation_run_emit_hook, set_irrigation_status_emit_hook
 from app.registry import (
     authenticate_device_admin_token,
     RegistryConflictError,
@@ -112,7 +112,6 @@ from app.registry import (
     list_domains,
     list_mqtt_clients,
     list_sites,
-    regenerate_acl_now,
     rename_domain,
     rename_device,
     rotate_mqtt_client_password,
@@ -121,6 +120,20 @@ from app.registry import (
     update_device_firmware_version,
     update_device_local_url,
 )
+from app.router_v2_auth_users import create_auth_users_v2_router
+from app.router_v2_core import create_core_v2_router
+from app.router_v2_device_ota import create_device_ota_v2_router
+from app.router_v2_device_lifecycle import create_device_lifecycle_v2_router
+from app.router_v2_device_domain import create_device_domain_v2_router
+from app.router_v2_mobile_events import create_mobile_events_v2_router
+from app.router_v2_mobile_ws import create_mobile_ws_v2_router
+from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
+from app.router_v2_mqtt_ingest import create_mqtt_ingest_v2_router
+from app.router_system_status import create_system_status_router
+from app.router_v2_realtime_ws import create_realtime_ws_v2_router
+from app.router_v2_irrigation import create_irrigation_v2_router
+from app.realtime_topic_hub import RealtimeTopicHub
+from app.setpoint_outcome_listener import create_setpoint_outcome_listener
 from app.schemas import (
     ChannelMetadataIn,
     ChannelOut,
@@ -136,9 +149,6 @@ from app.schemas import (
     DeviceDiscoverIn,
     DeviceDiscoverOut,
     DeviceOnboardingStatusOut,
-    DeviceOtaPollOut,
-    DeviceOtaOut,
-    DeviceOtaStageOut,
     DeviceOut,
     DevicePushConfigIn,
     DeviceRename,
@@ -174,22 +184,13 @@ from app.schemas import (
     InviteValidateOut,
 )
 
-try:
-    import paho.mqtt.client as mqtt
-except Exception:  # pragma: no cover - optional until dependency is present
-    mqtt = None
-
 app = FastAPI(title="Zmartify Edge API", version="0.1.0")
 
 _REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
 _REQUIRED_PUBLIC_MQTT_URI = "mqtts://pilot.zmartify.dk:8883"
 
-_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events")
+_PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events", "/api")
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
-
-
-def _ota_stage_root() -> Path:
-    return Path(os.getenv("ZMART_EDGE_OTA_STAGE_DIR", "/data/ota-stage"))
 
 
 def _allow_manual_firmware_refresh() -> bool:
@@ -241,154 +242,8 @@ class ZoneStreamHub:
 
 
 zone_stream_hub = ZoneStreamHub()
-
-
-class SetpointOutcomeMqttListener:
-    def __init__(self) -> None:
-        self._clients: dict[str, Any] = {}
-        self._threads: dict[str, threading.Thread] = {}
-        self._running = False
-
-    @staticmethod
-    def _mqtt_host() -> str:
-        return os.getenv("MQTT_HOST", "mosquitto").strip() or "mosquitto"
-
-    @staticmethod
-    def _mqtt_port() -> int:
-        raw = os.getenv("MQTT_PORT", "1883").strip() or "1883"
-        try:
-            return int(raw)
-        except ValueError:
-            return 1883
-
-    @staticmethod
-    def _base_topic() -> str:
-        return os.getenv("ZMART_EDGE_COMMAND_MQTT_BASE", "homie/5").strip().rstrip("/") or "homie/5"
-
-    @staticmethod
-    def _enabled() -> bool:
-        raw = os.getenv("ZMART_EDGE_ENABLE_SETPOINT_OUTCOME_LISTENER", "1")
-        return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-    @staticmethod
-    def _device_id_override() -> str:
-        return os.getenv("ZMART_EDGE_SETPOINT_OUTCOME_DEVICE_ID", "").strip()
-
-    @staticmethod
-    def _parse_zone_topic(topic: str) -> tuple[str, int] | None:
-        parts = topic.split("/")
-        if len(parts) < 5:
-            return None
-        node = parts[3]
-        if not node.startswith("zone-"):
-            return None
-        try:
-            zone_id = int(node[5:])
-        except ValueError:
-            return None
-        if zone_id <= 0:
-            return None
-        return parts[2], zone_id
-
-    def _handle_last_setpoint_command(self, device_id: str, zone_id: int, payload_text: str) -> None:
-        try:
-            data = json.loads(payload_text)
-        except json.JSONDecodeError:
-            return
-
-        result = str(data.get("result") or "").strip().lower()
-        if not result:
-            return
-        requested = data.get("requested")
-        confirmed = data.get("confirmed")
-        detail = data.get("detail")
-        ingest_setpoint_command_outcome(
-            device_id,
-            zone_id,
-            result=result,
-            detail=str(detail) if detail is not None else None,
-            requested_target_c=float(requested) if isinstance(requested, (int, float)) else None,
-            confirmed_target_c=float(confirmed) if isinstance(confirmed, (int, float)) else None,
-            payload={"source": "mqtt_last_setpoint_command", "raw": data},
-        )
-
-    def _on_connect(self, client, userdata, _flags, _rc):
-        device_id = str(userdata or "").strip()
-        if not device_id:
-            return
-        base = self._base_topic()
-        client.subscribe(f"{base}/{device_id}/+/last-setpoint-command", qos=1)
-
-    def _on_message(self, _client, _userdata, msg):
-        topic = str(msg.topic or "")
-        parsed = self._parse_zone_topic(topic)
-        if parsed is None:
-            return
-        device_id, zone_id = parsed
-        payload_text = (msg.payload or b"").decode("utf-8", errors="ignore").strip()
-        if not payload_text:
-            return
-        if topic.endswith("/last-setpoint-command"):
-            self._handle_last_setpoint_command(device_id, zone_id, payload_text)
-
-    @staticmethod
-    def _device_listener_targets() -> list[tuple[str, str, str]]:
-        override = SetpointOutcomeMqttListener._device_id_override()
-        devices = list_devices()
-        targets: list[tuple[str, str, str]] = []
-        for item in devices:
-            device_id = str(item.get("device_id") or "").strip()
-            if not device_id:
-                continue
-            if override and device_id != override:
-                continue
-            try:
-                creds = get_device_mqtt_credentials(device_id)
-            except Exception:
-                continue
-            username = str(creds.get("username") or "").strip()
-            password = str(creds.get("password") or "").strip()
-            if not username or not password:
-                continue
-            targets.append((device_id, username, password))
-        return targets
-
-    def start(self) -> None:
-        if not self._enabled() or mqtt is None or self._running:
-            return
-
-        targets = self._device_listener_targets()
-        for device_id, username, password in targets:
-            client = mqtt.Client(client_id=f"edge-setpoint-{device_id}-{uuid.uuid4().hex[:6]}", userdata=device_id)
-            client.username_pw_set(username=username, password=password)
-            client.on_connect = self._on_connect
-            client.on_message = self._on_message
-            client.connect(self._mqtt_host(), self._mqtt_port(), keepalive=30)
-            thread = threading.Thread(
-                target=client.loop_forever,
-                name=f"setpoint-outcome-{device_id}",
-                daemon=True,
-            )
-            thread.start()
-            self._clients[device_id] = client
-            self._threads[device_id] = thread
-
-        self._running = True
-
-    def stop(self) -> None:
-        if not self._running:
-            return
-        for client in self._clients.values():
-            try:
-                client.disconnect()
-            except Exception:
-                pass
-        self._clients.clear()
-        self._threads.clear()
-        self._running = False
-
-
-setpoint_outcome_listener = SetpointOutcomeMqttListener()
+realtime_topic_hub = RealtimeTopicHub()
+setpoint_outcome_listener = create_setpoint_outcome_listener()
 
 
 def _extract_device_ingest_device_id(path: str) -> str | None:
@@ -399,57 +254,6 @@ def _extract_device_ingest_device_id(path: str) -> str | None:
         if parts[2] == "ota" and parts[3] in {"poll", "download"}:
             return parts[1]
     return None
-
-
-def _ota_stage_dir(device_id: str) -> Path:
-    return _ota_stage_root() / device_id
-
-
-def _ota_stage_meta_path(device_id: str) -> Path:
-    return _ota_stage_dir(device_id) / "meta.json"
-
-
-def _ota_stage_bin_path(device_id: str) -> Path:
-    return _ota_stage_dir(device_id) / "firmware.bin"
-
-
-def _ota_load_stage(device_id: str) -> dict | None:
-    meta_path = _ota_stage_meta_path(device_id)
-    bin_path = _ota_stage_bin_path(device_id)
-    if not meta_path.exists() or not bin_path.exists():
-        return None
-    with meta_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    data["bin_path"] = str(bin_path)
-    return data
-
-
-def _ota_save_stage(device_id: str, firmware_bytes: bytes, version: str, force: bool, notes: str | None) -> dict:
-    stage_dir = _ota_stage_dir(device_id)
-    stage_dir.mkdir(parents=True, exist_ok=True)
-
-    sha256 = hashlib.sha256(firmware_bytes).hexdigest()
-    size_bytes = len(firmware_bytes)
-    uploaded_at = datetime.now(timezone.utc).isoformat()
-
-    bin_path = _ota_stage_bin_path(device_id)
-    meta_path = _ota_stage_meta_path(device_id)
-    with bin_path.open("wb") as f:
-        f.write(firmware_bytes)
-
-    meta = {
-        "device_id": device_id,
-        "version": version,
-        "sha256": sha256,
-        "size_bytes": size_bytes,
-        "force": bool(force),
-        "notes": notes,
-        "uploaded_at": uploaded_at,
-    }
-    with meta_path.open("w", encoding="utf-8") as f:
-        json.dump(meta, f)
-
-    return meta
 
 
 def _create_spa_handler(dist_path: Path):
@@ -580,9 +384,148 @@ def _publish_zone_state_update(device_id: str, zone: dict) -> None:
     zone_ref = zone.get("zone_uuid")
     if zone_ref:
         zone_stream_hub.publish_from_sync(str(zone_ref), zone)
+        realtime_topic_hub.publish_from_sync(
+            f"zone:{zone_ref}:state",
+            "hvac.zone.updated",
+            {"device_id": device_id, "zone": zone},
+        )
     zone_id = zone.get("zone_id")
     if zone_id is not None:
         zone_stream_hub.publish_from_sync(f"{device_id}:{int(zone_id)}", zone)
+    realtime_topic_hub.publish_from_sync(
+        f"device:{device_id}:state",
+        "device.state.updated",
+        {"device_id": device_id, "zone": zone},
+    )
+
+
+def _publish_event_update(event: dict) -> None:
+    site_id = event.get("site_id")
+    event_type = str(event.get("event_type") or "event.created")
+    event_id = event.get("event_id")
+    if site_id is not None:
+        realtime_topic_hub.publish_from_sync(
+            f"site:{int(site_id)}:events",
+            "event.created",
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "site_id": int(site_id),
+                "domain_id": event.get("domain_id"),
+                "device_id": event.get("device_id"),
+                "zone_id": event.get("zone_id"),
+                "payload": event.get("payload") or {},
+                "created_at": event.get("created_at"),
+            },
+        )
+    realtime_topic_hub.publish_from_sync(
+        "events",
+        "event.created",
+        {
+            "event_id": event_id,
+            "event_type": event_type,
+            "site_id": site_id,
+            "domain_id": event.get("domain_id"),
+            "device_id": event.get("device_id"),
+            "zone_id": event.get("zone_id"),
+            "payload": event.get("payload") or {},
+            "created_at": event.get("created_at"),
+        },
+    )
+
+
+def _publish_notification_update(notification: dict) -> None:
+    user_id = notification.get("user_id")
+    if user_id is None:
+        return
+    event = notification.get("event") or {}
+    realtime_topic_hub.publish_from_sync(
+        f"user:{int(user_id)}:notifications",
+        "notification.created",
+        {
+            "notification_id": notification.get("notification_id"),
+            "user_id": int(user_id),
+            "read": bool(notification.get("read", False)),
+            "created_at": notification.get("created_at"),
+            "event": event,
+        },
+    )
+
+
+def _publish_notification_state_update(state_event: dict) -> None:
+    user_id = state_event.get("user_id")
+    if user_id is None:
+        return
+    event_type = str(state_event.get("event_type") or "notification.updated")
+    payload: dict = {
+        "user_id": int(user_id),
+        "event_type": event_type,
+    }
+    if state_event.get("notification") is not None:
+        payload["notification"] = state_event.get("notification")
+    if state_event.get("notification_ids") is not None:
+        payload["notification_ids"] = list(state_event.get("notification_ids") or [])
+    if state_event.get("updated") is not None:
+        payload["updated"] = int(state_event.get("updated") or 0)
+
+    realtime_topic_hub.publish_from_sync(
+        f"user:{int(user_id)}:notifications",
+        event_type,
+        payload,
+    )
+
+
+def _publish_irrigation_run_update(event: dict) -> None:
+    event_type = str(event.get("event_type") or "irrigation.run.updated")
+    device_id = event.get("device_id")
+    site_id = event.get("site_id")
+    payload = {
+        "event_type": event_type,
+        "action": event.get("action"),
+        "device_id": device_id,
+        "site_id": site_id,
+        "run": event.get("run"),
+    }
+
+    if device_id:
+        realtime_topic_hub.publish_from_sync(
+            f"device:{device_id}:irrigation",
+            event_type,
+            payload,
+        )
+    if site_id is not None:
+        realtime_topic_hub.publish_from_sync(
+            f"site:{int(site_id)}:events",
+            event_type,
+            payload,
+        )
+
+
+def _publish_irrigation_status_update(event: dict) -> None:
+    event_type = str(event.get("event_type") or "irrigation.status.updated")
+    device_id = event.get("device_id")
+    site_id = event.get("site_id")
+    payload = {
+        "event_type": event_type,
+        "action": event.get("action"),
+        "state_type": event.get("state_type"),
+        "device_id": device_id,
+        "site_id": site_id,
+        "state": event.get("state"),
+    }
+
+    if device_id:
+        realtime_topic_hub.publish_from_sync(
+            f"device:{device_id}:irrigation",
+            event_type,
+            payload,
+        )
+    if site_id is not None:
+        realtime_topic_hub.publish_from_sync(
+            f"site:{int(site_id)}:events",
+            event_type,
+            payload,
+        )
 
 
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
@@ -632,11 +575,21 @@ async def startup_event() -> None:
     initialize_database()
     ensure_bootstrap_owner()
     zone_stream_hub.set_loop(asyncio.get_running_loop())
+    realtime_topic_hub.set_loop(asyncio.get_running_loop())
+    set_realtime_emit_hooks(
+        event_hook=_publish_event_update,
+        notification_hook=_publish_notification_update,
+        notification_state_hook=_publish_notification_state_update,
+    )
+    set_irrigation_run_emit_hook(_publish_irrigation_run_update)
+    set_irrigation_status_emit_hook(_publish_irrigation_status_update)
     setpoint_outcome_listener.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    set_irrigation_run_emit_hook(None)
+    set_irrigation_status_emit_hook(None)
     setpoint_outcome_listener.stop()
 
 
@@ -648,6 +601,27 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
         require_any_role(auth_user, allowed_roles)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+app.include_router(create_core_v2_router(_require_roles))
+app.include_router(create_system_status_router(_require_roles))
+app.include_router(create_auth_users_v2_router(_require_roles))
+app.include_router(create_mqtt_clients_v2_router(_require_roles))
+app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
+app.include_router(create_mobile_events_v2_router(_require_roles))
+app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
+app.include_router(create_irrigation_v2_router(_require_roles))
+app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
+app.include_router(create_device_lifecycle_v2_router(_require_roles))
+app.include_router(create_device_ota_v2_router(_require_roles))
+app.include_router(
+    create_device_domain_v2_router(
+        _require_roles,
+        _resolve_device_site_pk_id,
+        _enforce_mobile_site_scope,
+        _publish_zone_state_update,
+    )
+)
 
 
 def _enforce_admin_user_guardrails(actor_roles: set[str], target_roles: list[str], action: str) -> None:
@@ -762,53 +736,6 @@ def auth_me(request: Request) -> dict:
             "roles": sorted(auth_user.roles),
         }
     return get_user(auth_user.user_id)
-
-
-@app.get("/health")
-def health() -> dict:
-    return {
-        "ok": True,
-        "service": "zmartify-edge-api",
-        "db_path": str(get_db_path()),
-    }
-
-
-@app.get("/registry/status")
-def registry_status() -> dict:
-    return {
-        "phase": "C",
-        "status": "registry_and_mqtt_client_lifecycle_enabled",
-    }
-
-
-@app.get("/admin/acl/status")
-def acl_status(request: Request, limit: int = 10) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    acl_path = Path(os.getenv("ZMART_EDGE_MQTT_ACL_FILE", "/mosquitto/config/acl"))
-    with get_connection() as conn:
-        return build_acl_status(conn, acl_path=acl_path, limit=limit)
-
-
-@app.get("/admin/acl/preview/{client_id}")
-def acl_preview(client_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    with get_connection() as conn:
-        try:
-            return build_acl_preview_for_client(conn, client_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.post("/admin/acl/regenerate")
-def admin_regenerate_acl(request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        result = regenerate_acl_now()
-        auth_user = request.state.auth_user
-        audit_action(actor_user_id=auth_user.user_id, action="acl_regeneration", resource_type="acl")
-        return result
-    except RegistryOperationError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @app.post("/admin/invites/register", response_model=InviteCreateOut)
@@ -1097,156 +1024,6 @@ def api_device_onboarding_status(device_id: str, request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@app.post("/devices/{device_id}/ota", response_model=DeviceOtaOut)
-async def api_device_ota(device_id: str, request: Request, reboot: bool = False) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    try:
-        device = get_device_onboarding_context(device_id)
-        local_url = device.get("local_url")
-        if not local_url:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
-
-        firmware_bytes = await request.body()
-        if not firmware_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware payload is empty")
-
-        ota_response = push_remote_firmware(local_url, firmware_bytes)
-
-        reboot_triggered = False
-        reboot_response = None
-        reboot_error = None
-        if reboot:
-            try:
-                reboot_response = trigger_remote_reboot(local_url)
-                reboot_triggered = bool(reboot_response.get("ok", True))
-            except DeviceOnboardingError as exc:
-                reboot_error = str(exc)
-
-        written_bytes = None
-        if isinstance(ota_response, dict):
-            raw_written = ota_response.get("written_bytes")
-            if isinstance(raw_written, int):
-                written_bytes = raw_written
-
-        audit_action(
-            actor_user_id=request.state.auth_user.user_id,
-            action="device_ota",
-            resource_type="device",
-            resource_id=device_id,
-            metadata={
-                "base_url": local_url,
-                "reboot": reboot,
-                "payload_bytes": len(firmware_bytes),
-                "written_bytes": written_bytes,
-                "reboot_error": reboot_error,
-            },
-        )
-
-        return {
-            "device_id": device_id,
-            "local_url": local_url,
-            "ota_response": ota_response,
-            "written_bytes": written_bytes,
-            "reboot_requested": reboot,
-            "reboot_triggered": reboot_triggered,
-            "reboot_response": reboot_response,
-            "reboot_error": reboot_error,
-        }
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DeviceOnboardingError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-
-@app.post("/devices/{device_id}/ota/stage", response_model=DeviceOtaStageOut)
-async def api_device_ota_stage(
-    device_id: str,
-    request: Request,
-    version: str,
-    force: bool = False,
-    notes: str | None = None,
-) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    try:
-        _ = get_device_onboarding_context(device_id)
-        firmware_bytes = await request.body()
-        if not firmware_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware payload is empty")
-
-        staged = _ota_save_stage(device_id, firmware_bytes, version=version.strip(), force=force, notes=notes)
-        audit_action(
-            actor_user_id=request.state.auth_user.user_id,
-            action="stage_device_ota",
-            resource_type="device",
-            resource_id=device_id,
-            metadata={
-                "version": staged["version"],
-                "sha256": staged["sha256"],
-                "size_bytes": staged["size_bytes"],
-                "force": staged["force"],
-            },
-        )
-        return staged
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.get("/devices/{device_id}/ota/poll", response_model=DeviceOtaPollOut)
-def api_device_ota_poll(device_id: str, request: Request, current_version: str | None = None) -> dict:
-    _ = request  # request is required for auth middleware and URL generation
-    staged = _ota_load_stage(device_id)
-    if staged is None:
-        return {
-            "device_id": device_id,
-            "update_available": False,
-            "reason": "no staged update",
-        }
-
-    if not staged.get("force") and current_version and current_version.strip() == staged.get("version"):
-        return {
-            "device_id": device_id,
-            "update_available": False,
-            "reason": "already on staged version",
-        }
-
-    base = _edge_public_base_url(request)
-    return {
-        "device_id": device_id,
-        "update_available": True,
-        "version": staged.get("version"),
-        "sha256": staged.get("sha256"),
-        "size_bytes": staged.get("size_bytes"),
-        "download_url": f"{base}/devices/{device_id}/ota/download?sha256={staged.get('sha256')}",
-    }
-
-
-@app.get("/devices/{device_id}/ota/download")
-def api_device_ota_download(device_id: str, request: Request, sha256: str) -> Response:
-    _ = request
-    staged = _ota_load_stage(device_id)
-    if staged is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no staged update")
-
-    expected_sha = str(staged.get("sha256") or "")
-    if not expected_sha or sha256 != expected_sha:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="staged update not found")
-
-    bin_path = _ota_stage_bin_path(device_id)
-    if not bin_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="staged binary missing")
-
-    payload = bin_path.read_bytes()
-    return Response(
-        content=payload,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Length": str(len(payload)),
-            "X-Firmware-Version": str(staged.get("version") or ""),
-            "X-Firmware-Sha256": expected_sha,
-        },
-    )
-
-
 @app.get("/devices/{device_id}/zones", response_model=list[ZoneOut])
 def api_device_zones(device_id: str, request: Request) -> list[dict]:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
@@ -1396,6 +1173,18 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
     if device_token_device_id != device_id:
         _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
     try:
+        validate_mqtt_v2_reported_state(
+            {
+                "schema_version": "2.0",
+                "source_timestamp": payload.source_timestamp or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                "firmware_version": payload.firmware_version,
+                "hvac": {
+                    "zones": [item.model_dump(exclude_none=True) for item in payload.zones],
+                    "channels": [item.model_dump(exclude_none=True) for item in payload.channels],
+                },
+            }
+        )
+
         result = ingest_device_twin_snapshot(
             device_id,
             source=payload.source,
@@ -1411,6 +1200,8 @@ def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request:
             for zone in list_device_zones(device_id):
                 _publish_zone_state_update(device_id, zone)
         return result
+    except ContractValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
@@ -1469,56 +1260,6 @@ def api_refresh_device_firmware(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="unable to query device /version; provide base_url reachable from edge",
     )
-
-
-@app.websocket("/mobile/ws/zones/{zone_ref}")
-async def mobile_zone_stream(websocket: WebSocket, zone_ref: str) -> None:
-    token = (websocket.query_params.get("token") or "").strip()
-    if not token:
-        await websocket.close(code=4401, reason="missing bearer token")
-        return
-
-    try:
-        auth_user = authenticate_bearer_token(token)
-    except AuthError:
-        auth_user = authenticate_emergency_token(token)
-        if auth_user is None:
-            await websocket.close(code=4403, reason="invalid bearer token")
-            return
-
-    try:
-        require_any_role(auth_user, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    except AuthError:
-        await websocket.close(code=4403, reason="insufficient role permissions")
-        return
-
-    try:
-        device_id, zone_id = resolve_zone_ref(zone_ref)
-        site_pk_id = _resolve_device_site_pk_id(device_id)
-        if site_pk_id is None:
-            await websocket.close(code=4404, reason="device not found")
-            return
-        scoped_site_ids = _mobile_site_scope_ids_for_user(auth_user)
-        if scoped_site_ids is not None and site_pk_id not in scoped_site_ids:
-            await websocket.close(code=4404, reason="site not found")
-            return
-        zone = get_device_zone(device_id, zone_id)
-    except (RegistryNotFoundError, DomainModelError):
-        await websocket.close(code=4404, reason="zone not found")
-        return
-
-    await zone_stream_hub.subscribe(zone_ref, websocket)
-    await websocket.send_json({"type": "zone_update", "zone_ref": zone_ref, "zone": zone})
-
-    try:
-        while True:
-            message = await websocket.receive_text()
-            if message.strip().lower() == "ping":
-                await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await zone_stream_hub.unsubscribe(zone_ref, websocket)
 
 
 @app.get("/mobile/devices/{device_id}/freshness", response_model=DeviceFreshnessOut)
@@ -1858,6 +1599,20 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
         if should_forward_setpoint_commands():
             try:
                 command_id = f"sp-{uuid.uuid4().hex[:12]}"
+                validate_mqtt_v2_command(
+                    {
+                        "schema_version": "2.0",
+                        "command_id": command_id,
+                        "command_type": "set_zone_setpoint",
+                        "target_ref": zone_ref,
+                        "parameters": {
+                            "device_id": device_id,
+                            "zone_id": zone_id,
+                            "target_temperature_c": requested_target_c,
+                        },
+                        "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    }
+                )
                 publish_setpoint_command(device_id, zone_id, requested_target_c)
                 command_state = "pending_device_feedback"
             except MqttCommandError as exc:
@@ -1897,6 +1652,8 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             "command_id": command_id,
             "zone": zone,
         }
+    except ContractValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:

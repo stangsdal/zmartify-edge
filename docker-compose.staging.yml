@@ -1,0 +1,8 @@
+services:
+  zmartify-edge-api:
+    environment:
+      - ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce
+
+  zmartify-edge-api-http:
+    environment:
+      - ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce

@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   IonContent,
-  IonHeader,
-  IonTitle,
-  IonToolbar,
   IonPage,
-  IonCard,
-  IonCardContent,
 } from '@ionic/react';
 import { systemApi } from '../api/system';
 import { SystemStatus } from '../types/api';
+import { AppHeader } from '../components/AppHeader';
 
 export function DashboardPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -39,19 +35,16 @@ export function DashboardPage() {
 
   return (
     <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Dashboard</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppHeader title="Overview" subtitle="Edge health and platform capacity" />
       <IonContent className="ion-padding">
-        <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label>
-            Refresh every:
+        <div className="space-y-4 pb-20 lg:pb-8">
+          <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 flex flex-wrap gap-2 items-center justify-between">
+            <label className="text-sm text-muted">
+              Refresh every:
             <select
               value={refreshInterval}
               onChange={(e) => setRefreshInterval(Number(e.target.value))}
-              style={{ marginLeft: '8px', padding: '4px' }}
+                style={{ marginLeft: '8px', padding: '4px', borderRadius: '8px' }}
             >
               <option value={3000}>3s</option>
               <option value={5000}>5s</option>
@@ -59,71 +52,50 @@ export function DashboardPage() {
               <option value={30000}>30s</option>
               <option value={60000}>1m</option>
             </select>
-          </label>
-          {lastRefresh && (
-            <span style={{ fontSize: '0.8em', color: '#666' }}>
-              Last: {lastRefresh.toLocaleTimeString()}
-            </span>
+            </label>
+            {lastRefresh ? <span className="text-xs text-muted">Last: {lastRefresh.toLocaleTimeString()}</span> : null}
+          </div>
+
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          {!status ? (
+            <p className="text-sm text-muted">Loading overview...</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
+                <p className="text-xs text-muted uppercase tracking-wide">Health</p>
+                <p className="text-xl font-bold mt-1">{status.health}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
+                <p className="text-xs text-muted uppercase tracking-wide">Registry</p>
+                <p className="text-xl font-bold mt-1">{status.registry_status}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
+                <p className="text-xs text-muted uppercase tracking-wide">ACL</p>
+                <p className="text-xl font-bold mt-1">{status.acl_file_status}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
+                <p className="text-xs text-muted uppercase tracking-wide">Domains</p>
+                <p className="text-xl font-bold mt-1">{status.domain_count}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
+                <p className="text-xs text-muted uppercase tracking-wide">Sites</p>
+                <p className="text-xl font-bold mt-1">{status.site_count}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
+                <p className="text-xs text-muted uppercase tracking-wide">Devices</p>
+                <p className="text-xl font-bold mt-1">{status.device_count}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
+                <p className="text-xs text-muted uppercase tracking-wide">MQTT clients</p>
+                <p className="text-xl font-bold mt-1">{status.mqtt_client_count}</p>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
+                <p className="text-xs text-muted uppercase tracking-wide">Last ACL generation</p>
+                <p className="text-sm font-semibold mt-1">{status.last_acl_generation || 'n/a'}</p>
+              </section>
+            </div>
           )}
         </div>
-
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        {!status ? (
-          <p>Loading...</p>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <IonCard>
-              <IonCardContent>
-                <strong>Health</strong>
-                <p>{status.health}</p>
-              </IonCardContent>
-            </IonCard>
-            <IonCard>
-              <IonCardContent>
-                <strong>Registry</strong>
-                <p>{status.registry_status}</p>
-              </IonCardContent>
-            </IonCard>
-            <IonCard>
-              <IonCardContent>
-                <strong>ACL File</strong>
-                <p>{status.acl_file_status}</p>
-              </IonCardContent>
-            </IonCard>
-            <IonCard>
-              <IonCardContent>
-                <strong>Domains</strong>
-                <p>{status.domain_count}</p>
-              </IonCardContent>
-            </IonCard>
-            <IonCard>
-              <IonCardContent>
-                <strong>Sites</strong>
-                <p>{status.site_count}</p>
-              </IonCardContent>
-            </IonCard>
-            <IonCard>
-              <IonCardContent>
-                <strong>Devices</strong>
-                <p>{status.device_count}</p>
-              </IonCardContent>
-            </IonCard>
-            <IonCard>
-              <IonCardContent>
-                <strong>MQTT Clients</strong>
-                <p>{status.mqtt_client_count}</p>
-              </IonCardContent>
-            </IonCard>
-            {status.last_acl_generation && (
-              <IonCard>
-                <IonCardContent>
-                  <strong>Last ACL Gen</strong>
-                  <p>{status.last_acl_generation}</p>
-                </IonCardContent>
-              </IonCard>
-            )}
-          </div>
-        )}
       </IonContent>
     </IonPage>
   );

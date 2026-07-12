@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlparse
 
 DEFAULT_DB_PATH = "/data/hvac-edge.sqlite"
 
@@ -10,6 +11,22 @@ DEFAULT_DB_PATH = "/data/hvac-edge.sqlite"
 def get_db_path() -> Path:
     raw = os.getenv("ZMART_EDGE_DB_PATH", DEFAULT_DB_PATH)
     return Path(raw)
+
+
+def get_database_url() -> str:
+    raw = (os.getenv("DATABASE_URL") or "").strip()
+    if raw:
+        return raw
+    # Backward-compatible default while sqlite remains active runtime.
+    return f"sqlite:///{get_db_path()}"
+
+
+def get_database_backend() -> str:
+    parsed = urlparse(get_database_url())
+    scheme = (parsed.scheme or "sqlite").lower()
+    if scheme.startswith("postgres"):
+        return "postgres"
+    return "sqlite"
 
 
 def _ensure_db_parent(path: Path) -> None:

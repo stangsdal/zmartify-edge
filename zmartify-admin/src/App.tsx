@@ -14,7 +14,6 @@ import { DomainsPage } from './pages/DomainsPage';
 import { SitesPage } from './pages/SitesPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { DeviceHistoryPage } from './pages/DeviceHistoryPage';
-import { AddDevicePage } from './pages/AddDevicePage';
 import { UsersPage } from './pages/UsersPage';
 import { InvitesPage } from './pages/InvitesPage';
 import { RolesPage } from './pages/RolesPage';
@@ -23,8 +22,23 @@ import { SystemPage } from './pages/SystemPage';
 import { MqttClientsPage } from './pages/MqttClientsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { IrrigationOverviewPage } from './pages/IrrigationOverviewPage';
+import { IrrigationProgramsPage } from './pages/IrrigationProgramsPage';
+import { IrrigationHydraulicsPage } from './pages/IrrigationHydraulicsPage';
+import { IrrigationManualPage } from './pages/IrrigationManualPage';
+import { IrrigationWeatherPage } from './pages/IrrigationWeatherPage';
+import { IrrigationZoneDetailPage } from './pages/IrrigationZoneDetailPage';
+import { InsightsWaterPage } from './pages/InsightsWaterPage';
+import { InsightsEnergyPage } from './pages/InsightsEnergyPage';
+import { MorePage } from './pages/MorePage';
+import { OnboardingDiscoverPage } from './pages/OnboardingDiscoverPage';
+import { OnboardingClaimPage } from './pages/OnboardingClaimPage';
+import { OnboardingAssignSitePage } from './pages/OnboardingAssignSitePage';
+import { OnboardingCompletePage } from './pages/OnboardingCompletePage';
+import { SystemsPage } from './pages/SystemsPage';
+import { AutomationsPage } from './pages/AutomationsPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { BottomNavigation } from './components/BottomNavigation';
+import { ResponsiveNavigation } from './components/ResponsiveNavigation';
 
 export function App() {
   const location = useLocation();
@@ -110,12 +124,17 @@ export function App() {
   return (
     <>
       <OfflineIndicator />
-      <IonTabs>
-        <IonRouterOutlet>
+      <IonTabs className="app-layout-tabs">
+        <IonRouterOutlet className="app-router-outlet">
         <Route exact path={`${appBase}/login`} component={LoginPage} />
           <Route
             exact
             path={`${appBase}/home`}
+              render={() => requireAuth(<HomePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/overview`}
               render={() => requireAuth(<HomePage />)}
           />
           <Route
@@ -135,6 +154,21 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/insights/hvac`}
+              render={() => requireAuth(<HistoryPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/insights/water`}
+              render={() => requireAuth(<InsightsWaterPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/insights/energy`}
+              render={() => requireAuth(<InsightsEnergyPage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/alerts`}
               render={() => requireAuth(<AlertsPage />)}
           />
@@ -142,6 +176,136 @@ export function App() {
             exact
             path={`${appBase}/settings`}
               render={() => requireAuth(<SettingsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/settings`}
+              render={() => requireAuth(<SettingsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control`}
+              render={() => <Redirect to={`${appBase}/control/hvac/overview`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding`}
+              render={() => <Redirect to={`${appBase}/onboarding/discover`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/discover`}
+              render={() => requireAuth(<OnboardingDiscoverPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/claim`}
+              render={() => requireAuth(<OnboardingClaimPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/assign-site`}
+              render={() => requireAuth(<OnboardingAssignSitePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/complete`}
+              render={() => requireAuth(<OnboardingCompletePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/hvac/overview`}
+              render={() => requireAuth(<RoomsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/hvac/zones`}
+              render={() => requireAuth(<RoomsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/hvac/zones/:zoneRef`}
+              render={() => requireAuth(<RoomDetailPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/overview`}
+              render={() => requireAuth(<IrrigationOverviewPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/zones`}
+              render={() => requireAuth(<IrrigationOverviewPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/zones/:zoneRef`}
+              render={() => requireAuth(<IrrigationZoneDetailPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/programs`}
+              render={() => requireAuth(<IrrigationProgramsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/manual`}
+              render={() => requireAuth(<IrrigationManualPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/hydraulics`}
+              render={() => requireAuth(<IrrigationHydraulicsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/weather`}
+              render={() => requireAuth(<IrrigationWeatherPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/power`}
+              render={() => requireAuth(<IrrigationHydraulicsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/insights`}
+              render={() => <Redirect to={`${appBase}/insights/water`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/more`}
+              render={() => requireAuth(<MorePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/profile`}
+              render={() => requireAuth(<ProfilePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/notifications`}
+              render={() => requireAuth(<NotificationsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/devices`}
+              render={() => requireAuth(isAdmin ? <DevicesPage /> : <HomePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/users`}
+              render={() => requireAuth(isAdmin ? <UsersPage /> : <HomePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/integrations`}
+              render={() => requireAuth(isAdmin ? <MqttClientsPage /> : <HomePage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/system`}
+              render={() => requireAuth(isAdmin ? <SystemPage /> : <SettingsPage />)}
           />
 
           <Route
@@ -166,8 +330,18 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/systems`}
+              render={() => requireAdmin(<SystemsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/automations`}
+              render={() => requireAdmin(<AutomationsPage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/devices/add`}
-              render={() => requireAdmin(<AddDevicePage />)}
+              render={() => <Redirect to={`${appBase}/onboarding/discover`} />}
           />
           <Route
             exact
@@ -206,6 +380,11 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/integrations`}
+              render={() => requireAdmin(<MqttClientsPage />)}
+          />
+          <Route
+            exact
             path={`${appBase}/profile`}
               render={() => requireAuth(<ProfilePage />)}
           />
@@ -219,7 +398,7 @@ export function App() {
           <Route exact path={appBase} render={() => <Redirect to={`${appBase}/home`} />} />
       </IonRouterOutlet>
 
-      {!isPublicRoute && <BottomNavigation appBase={appBase} isAdmin={isAdmin} />}
+      {!isPublicRoute && <ResponsiveNavigation appBase={appBase} isAdmin={isAdmin} />}
     </IonTabs>
     </>
   );

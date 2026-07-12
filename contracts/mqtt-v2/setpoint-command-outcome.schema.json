@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zmartify/contracts/mqtt-v2/setpoint-command-outcome.schema.json",
+  "title": "Zmartify MQTT v2 Setpoint Command Outcome",
+  "type": "object",
+  "required": ["schema_version", "command_id", "result", "source_timestamp"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0" },
+    "command_id": { "type": "string", "minLength": 1 },
+    "result": { "type": "string", "enum": ["confirmed", "accepted", "rejected", "failed", "timeout"] },
+    "detail": { "type": ["string", "null"] },
+    "requested_target_temperature_c": { "type": ["number", "null"] },
+    "confirmed_target_temperature_c": { "type": ["number", "null"] },
+    "source_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    }
+  },
+  "additionalProperties": true
+}

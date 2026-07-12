@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   IonBadge,
   IonButton,
-  IonCard,
-  IonCardContent,
   IonContent,
-  IonHeader,
   IonItem,
   IonLabel,
   IonList,
@@ -13,10 +10,9 @@ import {
   IonSelect,
   IonSelectOption,
   IonSpinner,
-  IonTitle,
-  IonToolbar,
 } from '@ionic/react';
 import { notificationsApi, type MobileNotification } from '../api/notifications';
+import { AppHeader } from '../components/AppHeader';
 
 function toSiteKey(deviceId: string | undefined): string {
   if (!deviceId) return 'unknown';
@@ -95,20 +91,16 @@ export function NotificationsPage() {
 
   return (
     <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Notifications</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppHeader title="Notifications" subtitle="Event feed and acknowledgement status" />
       <IonContent className="ion-padding">
-        <IonCard>
-          <IonCardContent>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="space-y-4 pb-20 lg:pb-8">
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+            <div className="flex flex-wrap justify-between items-center gap-2">
               <div>
-                <strong>Unread</strong>{' '}
+                <p className="text-sm text-muted">Unread</p>{' '}
                 <IonBadge color={unreadCount > 0 ? 'warning' : 'success'}>{unreadCount}</IonBadge>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div className="flex gap-2">
                 <IonButton size="small" fill="outline" onClick={() => setUnreadOnly((v) => !v)}>
                   {unreadOnly ? 'Show All' : 'Unread Only'}
                 </IonButton>
@@ -118,7 +110,7 @@ export function NotificationsPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
+            <div className="grid gap-2 mt-3">
               <IonItem>
                 <IonLabel>Filter by Device</IonLabel>
                 <IonSelect value={deviceFilter} onIonChange={(e) => setDeviceFilter(e.detail.value)} interface="popover">
@@ -142,17 +134,14 @@ export function NotificationsPage() {
                 </IonSelect>
               </IonItem>
             </div>
-          </IonCardContent>
-        </IonCard>
+          </section>
 
         {error && (
-          <IonCard>
-            <IonCardContent style={{ color: 'red' }}>{error}</IonCardContent>
-          </IonCard>
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-rose-200 text-rose-600 text-sm">{error}</section>
         )}
 
         {loading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="flex items-center gap-2">
             <IonSpinner name="crescent" />
             <span>Loading notifications...</span>
           </div>
@@ -181,6 +170,7 @@ export function NotificationsPage() {
             {!filtered.length && <IonItem><IonLabel>No notifications found.</IonLabel></IonItem>}
           </IonList>
         )}
+        </div>
       </IonContent>
     </IonPage>
   );
