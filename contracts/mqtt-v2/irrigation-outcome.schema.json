@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zmartify/contracts/mqtt-v2/irrigation-outcome.schema.json",
+  "title": "Zmartify MQTT v2 Irrigation Outcome",
+  "type": "object",
+  "required": ["schema_version", "source_timestamp", "event_type"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2.0" },
+    "source_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "event_type": { "type": "string", "minLength": 1 },
+    "severity": { "type": ["string", "null"], "enum": ["info", "warning", "alarm", "critical", null] },
+    "result": { "type": ["string", "null"] },
+    "detail": { "type": ["string", "null"] },
+    "run_id": { "type": ["string", "null"] },
+    "program_id": { "type": ["string", "null"] },
+    "zone_id": { "type": ["integer", "null"], "minimum": 1 },
+    "payload": { "type": ["object", "null"] }
+  },
+  "additionalProperties": true
+}

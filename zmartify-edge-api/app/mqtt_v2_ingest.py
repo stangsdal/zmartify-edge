@@ -5,10 +5,13 @@ from typing import Any
 
 from app.contracts import (
     ContractValidationError,
+    validate_mqtt_v2_irrigation_outcome,
     validate_mqtt_v2_reported_state,
     validate_mqtt_v2_setpoint_command_outcome,
 )
+from app.db import get_connection
 from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_command_outcome, list_device_zones
+from app.domain_model import log_event
 from app.irrigation_domain import (
     set_irrigation_rain_delay,
     upsert_irrigation_hydraulics_state,
@@ -16,6 +19,7 @@ from app.irrigation_domain import (
     upsert_irrigation_power_state,
     upsert_irrigation_weather_state,
 )
+from app.registry import RegistryNotFoundError
 
 
 def _safe_source_timestamp(payload: dict[str, Any]) -> str:
@@ -202,4 +206,61 @@ def parse_mqtt_v2_setpoint_outcome_payload(payload: dict[str, Any]) -> dict[str,
         "requested_target_c": requested_target_c,
         "confirmed_target_c": confirmed_target_c,
         "raw": outcome,
+    }
+
+
+def _resolve_device_context(device_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, site_id FROM devices WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFoundError("device not found")
+        site_id = int(row["site_id"]) if row["site_id"] is not None else None
+        domain_id = None
+        if site_id is not None:
+            site_row = conn.execute("SELECT domain_id FROM sites WHERE id = ?", (site_id,)).fetchone()
+            if site_row is not None and site_row["domain_id"] is not None:
+                domain_id = int(site_row["domain_id"])
+    return {"device_pk_id": int(row["id"]), "site_id": site_id, "domain_id": domain_id}
+
+
+def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    outcome = dict(payload or {})
+    validate_mqtt_v2_irrigation_outcome(outcome)
+
+    normalized_event_type = str(outcome.get("event_type") or "irrigation.status.feedback").strip().lower()
+    severity = str(outcome.get("severity") or "info").strip().lower()
+    result = str(outcome.get("result") or "").strip().lower()
+    detail = str(outcome.get("detail") or "").strip() or None
+
+    mapped_event_type = "irrigation_status_feedback"
+    if severity in {"alarm", "critical"} or result in {"failed", "fault", "error"}:
+        mapped_event_type = "controller_fault"
+
+    context = _resolve_device_context(device_id)
+    event = log_event(
+        mapped_event_type,
+        domain_id=context["domain_id"],
+        site_id=context["site_id"],
+        device_pk_id=context["device_pk_id"],
+        zone_id=int(outcome["zone_id"]) if isinstance(outcome.get("zone_id"), int) else None,
+        payload={
+            "device_id": device_id,
+            "event_type": normalized_event_type,
+            "severity": severity,
+            "result": result or None,
+            "detail": detail,
+            "run_id": outcome.get("run_id"),
+            "program_id": outcome.get("program_id"),
+            "payload": outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {},
+            "source": "mqtt_v2_irrigation_outcome_ingest",
+        },
+    )
+
+    return {
+        "device_id": device_id,
+        "mapped_event_type": mapped_event_type,
+        "event": event,
     }

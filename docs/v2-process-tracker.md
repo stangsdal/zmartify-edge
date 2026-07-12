@@ -58,7 +58,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: payload-level v2 command contract objects for HVAC setpoint/rename publish path with enforce-mode validation coverage.
 - Completed: v2 setpoint outcome payload contract schema + runtime validation wired into listener ingest path.
 - Completed: dedicated v2 ingest routing/service layer for reported-state and setpoint-outcome ingestion, including regression coverage.
-- Open: broader irrigation outcome contracts and deeper firmware topic alignment.
+- Completed: initial irrigation outcome schema + ingest endpoint (`irrigation-outcome.schema.json`, `/api/v2/devices/{id}/ingest/mqtt/irrigation/outcome`) with alarm-to-event mapping.
+- Open: deeper firmware topic alignment and richer typed irrigation outcome taxonomy.
 
 6. Phase 5 - Irrigation backend: `early stage`
 - UI scaffolding and route architecture are in place.
@@ -97,6 +98,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation status-fanout increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation overview operations-state expansion): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after mqtt-v2 ingest + irrigation realtime UI increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after irrigation outcome contract + ingest increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -129,6 +131,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Add irrigation command execution outcome contracts/events from firmware and map them into domain alarm/status timelines.
-2. Expand app-shell irrigation views with explicit realtime status badges and alarm drill-down on current topic stream.
+1. Expand irrigation outcome taxonomy (run-step/valve/hydraulics/power alarms) and align firmware publish payloads to strict typed events.
+2. Extend app-shell irrigation views with explicit alarm drill-down and command feedback traces from current realtime stream.
 3. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.

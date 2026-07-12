@@ -149,3 +149,31 @@ def test_v2_mqtt_setpoint_outcome_ingest_logs_outcome(monkeypatch, tmp_path: Pat
     events = client.get("/events/recent", headers=headers, params={"event_type": "setpoint_write_failed"})
     assert events.status_code == 200
     assert len(events.json()) >= 1
+
+
+def test_v2_mqtt_irrigation_outcome_ingest_maps_alarm_to_controller_fault(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi03")
+
+    ingest_outcome = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/irrigation/outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-12T15:10:00Z",
+            "event_type": "pump.fault",
+            "severity": "alarm",
+            "result": "failed",
+            "detail": "dry-run protection",
+            "zone_id": 1,
+            "payload": {"fault_code": "PUMP_DRY_RUN"},
+        },
+    )
+
+    assert ingest_outcome.status_code == 200
+    assert ingest_outcome.json()["mapped_event_type"] == "controller_fault"
+
+    events = client.get("/events/recent", headers=headers, params={"event_type": "controller_fault"})
+    assert events.status_code == 200
+    assert len(events.json()) >= 1

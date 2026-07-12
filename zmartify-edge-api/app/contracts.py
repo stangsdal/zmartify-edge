@@ -98,3 +98,16 @@ def validate_mqtt_v2_setpoint_command_outcome(payload: dict) -> None:
         _validator("mqtt-v2/setpoint-command-outcome.schema.json").validate(payload)
     except ValidationError as exc:
         _handle_validation_failure("mqtt-v2/setpoint-command-outcome", exc)
+
+
+def validate_mqtt_v2_irrigation_outcome(payload: dict) -> None:
+    mode = _validation_mode()
+    if Draft202012Validator is None:
+        if mode == "enforce":
+            raise ContractValidationError("jsonschema dependency is not installed")
+        print("[contracts] jsonschema dependency missing; irrigation outcome validation skipped")
+        return
+    try:
+        _validator("mqtt-v2/irrigation-outcome.schema.json").validate(payload)
+    except ValidationError as exc:
+        _handle_validation_failure("mqtt-v2/irrigation-outcome", exc)

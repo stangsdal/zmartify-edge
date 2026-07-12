@@ -129,3 +129,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after dedicated mqtt-v2 ingest routing/service addition and app-shell irrigation realtime topic consumption.
+
+- Date: 2026-07-12 (helper script rerun after irrigation outcome contract + ingest increment)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after irrigation outcome schema validation and new mqtt-v2 irrigation outcome ingest endpoint.
