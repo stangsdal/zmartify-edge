@@ -12,9 +12,10 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 
 ## Phase Status
 
-1. Phase 0 - Freeze and document v1: `in progress`
+1. Phase 0 - Freeze and document v1: `completed`
 - Existing architecture doc exists.
-- Open: capture current API/OpenAPI snapshot and MQTT map as explicit artifacts.
+- Completed: OpenAPI snapshot artifact captured at `docs/api-snapshots/edge-api-openapi.json` (137 paths).
+- Completed: MQTT topic map artifact captured at `docs/api-snapshots/mqtt-topic-map.json` (legacy/v2/dual command + outcome topics, ingest HTTP paths, realtime ws topics).
 
 2. Phase 1 - PostgreSQL and Timescale foundation: `in progress`
 - Completed: compose service scaffold for postgres-timescale and `DATABASE_URL` environment wiring.
