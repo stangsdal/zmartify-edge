@@ -40,7 +40,7 @@ from app.auth import (
     validate_registration_invite,
 )
 from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
-from app.db import get_connection, get_database_backend, get_database_url, get_db_path, initialize_database
+from app.db import get_connection, initialize_database
 from app.device_onboarding import (
     DeviceOnboardingError,
     discover_remote_device,
@@ -79,7 +79,6 @@ from app.domain_model import (
     upsert_channel_state,
     upsert_zone_state,
 )
-from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.mqtt_commands import (
     MqttCommandError,
     publish_setpoint_command,
@@ -113,7 +112,6 @@ from app.registry import (
     list_domains,
     list_mqtt_clients,
     list_sites,
-    regenerate_acl_now,
     rename_domain,
     rename_device,
     rotate_mqtt_client_password,
@@ -131,6 +129,7 @@ from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
 from app.router_v2_mqtt_ingest import create_mqtt_ingest_v2_router
+from app.router_system_status import create_system_status_router
 from app.router_v2_realtime_ws import create_realtime_ws_v2_router
 from app.router_v2_irrigation import create_irrigation_v2_router
 from app.realtime_topic_hub import RealtimeTopicHub
@@ -605,6 +604,7 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
 
 
 app.include_router(create_core_v2_router(_require_roles))
+app.include_router(create_system_status_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
@@ -736,57 +736,6 @@ def auth_me(request: Request) -> dict:
             "roles": sorted(auth_user.roles),
         }
     return get_user(auth_user.user_id)
-
-
-@app.get("/health")
-def health() -> dict:
-    db_url = get_database_url()
-    db_scheme = db_url.split(":", 1)[0] if ":" in db_url else "sqlite"
-    return {
-        "ok": True,
-        "service": "zmartify-edge-api",
-        "db_path": str(get_db_path()),
-        "db_backend": get_database_backend(),
-        "database_url_scheme": db_scheme,
-    }
-
-
-@app.get("/registry/status")
-def registry_status() -> dict:
-    return {
-        "phase": "C",
-        "status": "registry_and_mqtt_client_lifecycle_enabled",
-    }
-
-
-@app.get("/admin/acl/status")
-def acl_status(request: Request, limit: int = 10) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    acl_path = Path(os.getenv("ZMART_EDGE_MQTT_ACL_FILE", "/mosquitto/config/acl"))
-    with get_connection() as conn:
-        return build_acl_status(conn, acl_path=acl_path, limit=limit)
-
-
-@app.get("/admin/acl/preview/{client_id}")
-def acl_preview(client_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    with get_connection() as conn:
-        try:
-            return build_acl_preview_for_client(conn, client_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.post("/admin/acl/regenerate")
-def admin_regenerate_acl(request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        result = regenerate_acl_now()
-        auth_user = request.state.auth_user
-        audit_action(actor_user_id=auth_user.user_id, action="acl_regeneration", resource_type="acl")
-        return result
-    except RegistryOperationError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @app.post("/admin/invites/register", response_model=InviteCreateOut)

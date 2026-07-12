@@ -35,6 +35,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: `/api/v2` device-ota adapter router extraction (`ota`, `ota/stage`, `ota/poll`, `ota/download`).
 - Completed: mobile websocket stream extraction into adapter router (dual-path compatibility: `/mobile/ws/...` + `/api/v2/mobile/ws/...`).
 - Completed: setpoint-outcome MQTT listener extraction from `main.py` into dedicated module with unit tests.
+- Completed: system-status router extraction (`health`, `registry/status`, `admin/acl/*`) from `main.py` into `app/router_system_status.py` with dead-import cleanup.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
