@@ -75,6 +75,9 @@ printf "[phase-3] Run irrigation realtime hook tests\n"
 printf "[phase-5] Run irrigation backend skeleton API tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_api_v2_irrigation.py
 
+printf "[phase-5] Run irrigation realtime hook tests\n"
+"$PYTHON_BIN" -m pytest -q tests/test_irrigation_realtime_hooks.py
+
 printf "[phase-4] Run MQTT-related regression tests\n"
 "$PYTHON_BIN" -m pytest -q tests/test_mqtt_clients.py tests/test_mqtt_security.py
 

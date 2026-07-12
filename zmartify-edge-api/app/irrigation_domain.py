@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import uuid
 from typing import Any
@@ -535,4 +535,336 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
             }
             for row in device_rows
         ],
+    }
+
+
+def list_irrigation_outputs(device_external_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        rows = conn.execute(
+            """
+            SELECT uuid, local_ref, name, enabled, active, fault, is_master_valve, metadata_json, created_at, updated_at
+            FROM irrigation_outputs
+            WHERE device_id = ?
+            ORDER BY id
+            """,
+            (device["id"],),
+        ).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        result.append(
+            {
+                "output_id": row["uuid"],
+                "local_ref": row["local_ref"],
+                "name": row["name"],
+                "enabled": bool(row["enabled"]),
+                "active": bool(row["active"]),
+                "fault": row["fault"],
+                "is_master_valve": bool(row["is_master_valve"]),
+                "metadata": metadata,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        )
+    return result
+
+
+def upsert_irrigation_output_state(
+    device_external_id: str,
+    *,
+    local_ref: str,
+    name: str,
+    enabled: bool = True,
+    active: bool = False,
+    fault: str | None = None,
+    is_master_valve: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata_json = json.dumps(metadata or {}, separators=(",", ":"), sort_keys=True)
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT id, uuid FROM irrigation_outputs WHERE device_id = ? AND local_ref = ?",
+            (device["id"], local_ref),
+        ).fetchone()
+        if row is None:
+            output_uuid = str(uuid.uuid4())
+            conn.execute(
+                """
+                INSERT INTO irrigation_outputs(uuid, device_id, local_ref, name, enabled, active, fault, is_master_valve, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    output_uuid,
+                    device["id"],
+                    local_ref,
+                    name,
+                    1 if enabled else 0,
+                    1 if active else 0,
+                    fault,
+                    1 if is_master_valve else 0,
+                    metadata_json,
+                ),
+            )
+        else:
+            output_uuid = row["uuid"]
+            conn.execute(
+                """
+                UPDATE irrigation_outputs
+                SET name = ?, enabled = ?, active = ?, fault = ?, is_master_valve = ?, metadata_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    1 if enabled else 0,
+                    1 if active else 0,
+                    fault,
+                    1 if is_master_valve else 0,
+                    metadata_json,
+                    _now_iso(),
+                    row["id"],
+                ),
+            )
+        conn.commit()
+
+    outputs = list_irrigation_outputs(device_external_id)
+    for item in outputs:
+        if item["output_id"] == output_uuid:
+            return item
+    raise RegistryNotFoundError("irrigation output not found")
+
+
+def _upsert_device_state_row(conn: Any, table_name: str, device_pk_id: int, values: dict[str, Any]) -> None:
+    columns = ["device_id", *values.keys(), "updated_at"]
+    placeholders = ",".join("?" for _ in columns)
+    update_clause = ", ".join(f"{column} = excluded.{column}" for column in values.keys()) + ", updated_at = excluded.updated_at"
+    sql = (
+        f"INSERT INTO {table_name}({','.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(device_id) DO UPDATE SET {update_clause}"
+    )
+    conn.execute(sql, (device_pk_id, *values.values(), _now_iso()))
+
+
+def upsert_irrigation_hydraulics_state(
+    device_external_id: str,
+    *,
+    flow_lpm: float | None = None,
+    pressure_bar: float | None = None,
+    water_liters: float | None = None,
+    source_timestamp: str | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        _upsert_device_state_row(
+            conn,
+            "irrigation_hydraulics_state",
+            device["id"],
+            {
+                "flow_lpm": flow_lpm,
+                "pressure_bar": pressure_bar,
+                "water_liters": water_liters,
+                "source_timestamp": source_timestamp or _now_iso(),
+            },
+        )
+        conn.commit()
+    return get_irrigation_hydraulics(device_external_id)
+
+
+def upsert_irrigation_power_state(
+    device_external_id: str,
+    *,
+    voltage_rms_v: float | None = None,
+    current_rms_a: float | None = None,
+    real_power_w: float | None = None,
+    power_factor: float | None = None,
+    source_timestamp: str | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        _upsert_device_state_row(
+            conn,
+            "irrigation_power_state",
+            device["id"],
+            {
+                "voltage_rms_v": voltage_rms_v,
+                "current_rms_a": current_rms_a,
+                "real_power_w": real_power_w,
+                "power_factor": power_factor,
+                "source_timestamp": source_timestamp or _now_iso(),
+            },
+        )
+        conn.commit()
+    return get_irrigation_power(device_external_id)
+
+
+def upsert_irrigation_weather_state(
+    device_external_id: str,
+    *,
+    temperature_c: float | None = None,
+    rain_mm: float | None = None,
+    wind_mps: float | None = None,
+    eto_mm: float | None = None,
+    source_timestamp: str | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        _upsert_device_state_row(
+            conn,
+            "irrigation_weather_state",
+            device["id"],
+            {
+                "temperature_c": temperature_c,
+                "rain_mm": rain_mm,
+                "wind_mps": wind_mps,
+                "eto_mm": eto_mm,
+                "source_timestamp": source_timestamp or _now_iso(),
+            },
+        )
+        conn.commit()
+    return get_irrigation_weather(device_external_id)
+
+
+def _active_rain_delay_for_device(conn: Any, device_pk_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT uuid, active_until, reason, created_at
+        FROM irrigation_rain_delay
+        WHERE device_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (device_pk_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "rain_delay_id": row["uuid"],
+        "active_until": row["active_until"],
+        "reason": row["reason"],
+        "created_at": row["created_at"],
+    }
+
+
+def set_irrigation_rain_delay(device_external_id: str, *, delay_hours: int, reason: str | None = None) -> dict[str, Any]:
+    safe_hours = max(1, min(int(delay_hours), 168))
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        active_until = (datetime.now(timezone.utc) + timedelta(hours=safe_hours)).isoformat()
+        rain_delay_uuid = str(uuid.uuid4())
+        conn.execute(
+            """
+            INSERT INTO irrigation_rain_delay(uuid, device_id, active_until, reason)
+            VALUES (?, ?, ?, ?)
+            """,
+            (rain_delay_uuid, device["id"], active_until, reason),
+        )
+        conn.commit()
+        current = _active_rain_delay_for_device(conn, device["id"])
+    return {
+        "device_id": device_external_id,
+        "delay_hours": safe_hours,
+        "rain_delay": current,
+    }
+
+
+def get_irrigation_hydraulics(device_external_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            """
+            SELECT flow_lpm, pressure_bar, water_liters, source_timestamp, updated_at
+            FROM irrigation_hydraulics_state
+            WHERE device_id = ?
+            """,
+            (device["id"],),
+        ).fetchone()
+    if row is None:
+        return {
+            "device_id": device_external_id,
+            "flow_lpm": None,
+            "pressure_bar": None,
+            "water_liters": None,
+            "source_timestamp": None,
+            "updated_at": None,
+        }
+    return {
+        "device_id": device_external_id,
+        "flow_lpm": row["flow_lpm"],
+        "pressure_bar": row["pressure_bar"],
+        "water_liters": row["water_liters"],
+        "source_timestamp": row["source_timestamp"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def get_irrigation_power(device_external_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            """
+            SELECT voltage_rms_v, current_rms_a, real_power_w, power_factor, source_timestamp, updated_at
+            FROM irrigation_power_state
+            WHERE device_id = ?
+            """,
+            (device["id"],),
+        ).fetchone()
+    if row is None:
+        return {
+            "device_id": device_external_id,
+            "voltage_rms_v": None,
+            "current_rms_a": None,
+            "real_power_w": None,
+            "power_factor": None,
+            "source_timestamp": None,
+            "updated_at": None,
+        }
+    return {
+        "device_id": device_external_id,
+        "voltage_rms_v": row["voltage_rms_v"],
+        "current_rms_a": row["current_rms_a"],
+        "real_power_w": row["real_power_w"],
+        "power_factor": row["power_factor"],
+        "source_timestamp": row["source_timestamp"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def get_irrigation_weather(device_external_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            """
+            SELECT temperature_c, rain_mm, wind_mps, eto_mm, source_timestamp, updated_at
+            FROM irrigation_weather_state
+            WHERE device_id = ?
+            """,
+            (device["id"],),
+        ).fetchone()
+        rain_delay = _active_rain_delay_for_device(conn, device["id"])
+
+    if row is None:
+        return {
+            "device_id": device_external_id,
+            "temperature_c": None,
+            "rain_mm": None,
+            "wind_mps": None,
+            "eto_mm": None,
+            "source_timestamp": None,
+            "updated_at": None,
+            "rain_delay": rain_delay,
+        }
+    return {
+        "device_id": device_external_id,
+        "temperature_c": row["temperature_c"],
+        "rain_mm": row["rain_mm"],
+        "wind_mps": row["wind_mps"],
+        "eto_mm": row["eto_mm"],
+        "source_timestamp": row["source_timestamp"],
+        "updated_at": row["updated_at"],
+        "rain_delay": rain_delay,
     }

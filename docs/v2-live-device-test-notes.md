@@ -109,3 +109,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after v2 setpoint-outcome contract validation and listener ingest extension.
+
+- Date: 2026-07-12 (helper script rerun after irrigation operations-state increment)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after irrigation outputs/hydraulics/power/weather/rain-delay API addition.

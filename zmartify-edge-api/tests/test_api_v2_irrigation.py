@@ -88,6 +88,88 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert overview_after_zone.status_code == 200
     assert overview_after_zone.json()["zone_count"] >= 1
 
+    outputs_empty = client.get(f"/api/v2/devices/{device_id}/irrigation/outputs", headers=headers)
+    assert outputs_empty.status_code == 200
+    assert outputs_empty.json()["outputs"] == []
+
+    upsert_output = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/outputs",
+        headers=headers,
+        json={
+            "local_ref": "out-1",
+            "name": "Valve 1",
+            "enabled": True,
+            "active": True,
+            "is_master_valve": False,
+            "metadata": {"line": "north"},
+        },
+    )
+    assert upsert_output.status_code == 200
+    assert upsert_output.json()["output"]["name"] == "Valve 1"
+
+    upsert_master = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/outputs",
+        headers=headers,
+        json={
+            "local_ref": "master",
+            "name": "Master Valve",
+            "enabled": True,
+            "active": False,
+            "is_master_valve": True,
+            "metadata": {"line": "main"},
+        },
+    )
+    assert upsert_master.status_code == 200
+    assert upsert_master.json()["output"]["is_master_valve"] is True
+
+    outputs = client.get(f"/api/v2/devices/{device_id}/irrigation/outputs", headers=headers)
+    assert outputs.status_code == 200
+    assert len(outputs.json()["outputs"]) == 2
+
+    set_hydraulics = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/hydraulics",
+        headers=headers,
+        json={"flow_lpm": 12.2, "pressure_bar": 2.4, "water_liters": 120.0},
+    )
+    assert set_hydraulics.status_code == 200
+    assert set_hydraulics.json()["flow_lpm"] == 12.2
+
+    set_power = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/power",
+        headers=headers,
+        json={"voltage_rms_v": 230.0, "current_rms_a": 0.8, "real_power_w": 160.0, "power_factor": 0.87},
+    )
+    assert set_power.status_code == 200
+    assert set_power.json()["real_power_w"] == 160.0
+
+    set_weather = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/weather",
+        headers=headers,
+        json={"temperature_c": 18.5, "rain_mm": 0.2, "wind_mps": 4.1, "eto_mm": 2.3},
+    )
+    assert set_weather.status_code == 200
+    assert set_weather.json()["temperature_c"] == 18.5
+
+    rain_delay = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/rain-delay",
+        headers=headers,
+        json={"delay_hours": 12, "reason": "Forecast rain"},
+    )
+    assert rain_delay.status_code == 200
+    assert rain_delay.json()["delay_hours"] == 12
+
+    hydraulics = client.get(f"/api/v2/devices/{device_id}/irrigation/hydraulics", headers=headers)
+    assert hydraulics.status_code == 200
+    assert hydraulics.json()["pressure_bar"] == 2.4
+
+    power = client.get(f"/api/v2/devices/{device_id}/irrigation/power", headers=headers)
+    assert power.status_code == 200
+    assert power.json()["power_factor"] == 0.87
+
+    weather = client.get(f"/api/v2/devices/{device_id}/irrigation/weather", headers=headers)
+    assert weather.status_code == 200
+    assert weather.json()["rain_delay"] is not None
+
     list_programs_empty = client.get(f"/api/v2/devices/{device_id}/irrigation/programs", headers=headers)
     assert list_programs_empty.status_code == 200
     assert list_programs_empty.json()["programs"] == []

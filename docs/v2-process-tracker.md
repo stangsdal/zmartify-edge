@@ -65,7 +65,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation API skeleton coverage added to stage-gate rehearsal.
 - Completed: irrigation schedules and run-history foundation (`014_irrigation_schedules_and_runs.sql`) with API routes for schedule creation/listing and manual program runs.
 - Completed: site irrigation overview endpoint (`/api/v2/sites/{site_id}/irrigation/overview`).
-- Open: add irrigation output/master-valve/hydraulics models and real command/feedback execution pipeline.
+- Completed: irrigation operations-state foundation (`015_irrigation_operations_state.sql`) with output/master-valve records, hydraulics/power/weather state, rain-delay API endpoints, and regression coverage.
+- Open: add irrigation alarm/status fan-out and command/feedback execution pipeline on top of the new operations-state endpoints.
 
 7. Phase 6 - New responsive app shell: `in progress`
 - Completed: responsive nav shell, mobile/tablet/desktop behavior, onboarding flow routes.
@@ -86,6 +87,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after realtime read-state + irrigation schedules/runs + mqtt topic normalization): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after mqtt-v2 command-contract + irrigation realtime/overview increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after mqtt-v2 outcome contract increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after irrigation operations-state increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -118,6 +120,6 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Expand irrigation domain with outputs/master-valve/hydraulics/weather and run-step execution state updates from telemetry.
-2. Add irrigation alarm/status fan-out and mobile overview consumption paths on top of current run-event coverage.
+1. Add irrigation alarm/status fan-out and mobile overview consumption paths on top of current run-event coverage.
+2. Connect operations-state endpoints to real command/feedback execution telemetry pipeline (not only persisted API writes).
 3. Introduce dedicated mqtt-v2 ingest routing/service layer beyond listener compatibility hooks.
