@@ -169,3 +169,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after enforce-mode negative-path tests were added for all mqtt-v2 ingest endpoints.
+
+- Date: 2026-07-12 (helper script rerun after scheduled backup sidecar increment)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after the `edge-db-backup` compose sidecar was added; compose config validated including stage-gate merge check.
