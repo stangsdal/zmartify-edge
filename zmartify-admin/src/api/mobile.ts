@@ -192,6 +192,55 @@ export interface MobileDeviceFreshness {
   }>;
 }
 
+export interface IrrigationDeviceOverview {
+  device_id: string;
+  display_name: string;
+  outputs: {
+    total: number;
+    active: number;
+    faulted: number;
+  };
+  hydraulics?: {
+    flow_lpm?: number | null;
+    pressure_bar?: number | null;
+    water_liters?: number | null;
+    source_timestamp?: string | null;
+    updated_at?: string | null;
+  } | null;
+  power?: {
+    voltage_rms_v?: number | null;
+    current_rms_a?: number | null;
+    real_power_w?: number | null;
+    power_factor?: number | null;
+    source_timestamp?: string | null;
+    updated_at?: string | null;
+  } | null;
+  weather?: {
+    temperature_c?: number | null;
+    rain_mm?: number | null;
+    wind_mps?: number | null;
+    eto_mm?: number | null;
+    source_timestamp?: string | null;
+    updated_at?: string | null;
+  } | null;
+  rain_delay?: {
+    rain_delay_id?: string;
+    active_until?: string;
+    reason?: string | null;
+    created_at?: string;
+  } | null;
+}
+
+export interface IrrigationSiteOverview {
+  site_id: string;
+  site_name: string;
+  device_count: number;
+  zone_count: number;
+  program_count: number;
+  active_run_count: number;
+  devices: IrrigationDeviceOverview[];
+}
+
 export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
@@ -205,9 +254,15 @@ export const mobileApi = {
   getDeviceFreshness: (deviceId: string): Promise<MobileDeviceFreshness> =>
     apiClient.get(`/mobile/devices/${deviceId}/freshness`),
 
-  listEvents: (limit = 25): Promise<{ events: MobileEvent[] }> => apiClient.get(`/mobile/events?limit=${limit}`),
+  listEvents: (limit = 25, options?: { eventType?: string; siteId?: string }): Promise<{ events: MobileEvent[] }> => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (options?.eventType) params.set('event_type', options.eventType);
+    if (options?.siteId) params.set('site_id', options.siteId);
+    return apiClient.get(`/mobile/events?${params.toString()}`);
+  },
 
-  getIrrigationOverview: (siteId: string): Promise<any> => apiClient.get(`/sites/${encodeURIComponent(siteId)}/irrigation/overview`),
+  getIrrigationOverview: (siteId: string): Promise<IrrigationSiteOverview> =>
+    apiClient.get(`/sites/${encodeURIComponent(siteId)}/irrigation/overview`),
 
   setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<MobileSetpointResponse> =>
     apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {
