@@ -128,6 +128,7 @@ from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
 from app.router_v2_realtime_ws import create_realtime_ws_v2_router
+from app.realtime_topic_hub import RealtimeTopicHub
 from app.setpoint_outcome_listener import create_setpoint_outcome_listener
 from app.schemas import (
     ChannelMetadataIn,
@@ -237,6 +238,7 @@ class ZoneStreamHub:
 
 
 zone_stream_hub = ZoneStreamHub()
+realtime_topic_hub = RealtimeTopicHub()
 setpoint_outcome_listener = create_setpoint_outcome_listener()
 
 
@@ -378,9 +380,19 @@ def _publish_zone_state_update(device_id: str, zone: dict) -> None:
     zone_ref = zone.get("zone_uuid")
     if zone_ref:
         zone_stream_hub.publish_from_sync(str(zone_ref), zone)
+        realtime_topic_hub.publish_from_sync(
+            f"zone:{zone_ref}:state",
+            "hvac.zone.updated",
+            {"device_id": device_id, "zone": zone},
+        )
     zone_id = zone.get("zone_id")
     if zone_id is not None:
         zone_stream_hub.publish_from_sync(f"{device_id}:{int(zone_id)}", zone)
+    realtime_topic_hub.publish_from_sync(
+        f"device:{device_id}:state",
+        "device.state.updated",
+        {"device_id": device_id, "zone": zone},
+    )
 
 
 def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
@@ -430,6 +442,7 @@ async def startup_event() -> None:
     initialize_database()
     ensure_bootstrap_owner()
     zone_stream_hub.set_loop(asyncio.get_running_loop())
+    realtime_topic_hub.set_loop(asyncio.get_running_loop())
     setpoint_outcome_listener.start()
 
 
@@ -452,7 +465,7 @@ app.include_router(create_core_v2_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mobile_events_v2_router(_require_roles))
-app.include_router(create_realtime_ws_v2_router())
+app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
 app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
 app.include_router(create_device_lifecycle_v2_router(_require_roles))
 app.include_router(create_device_ota_v2_router(_require_roles))

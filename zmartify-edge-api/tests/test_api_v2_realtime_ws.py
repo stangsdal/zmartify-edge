@@ -42,3 +42,5 @@ def test_api_v2_realtime_ws_subscribe_flow(monkeypatch, tmp_path: Path):
         ws.send_text("ping")
         pong = ws.receive_json()
         assert pong["type"] == "pong"
+
+

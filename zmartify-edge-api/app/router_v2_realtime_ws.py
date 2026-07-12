@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from typing import Protocol
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -17,7 +17,13 @@ from app.auth import (
 )
 
 
-def create_realtime_ws_v2_router() -> APIRouter:
+class RealtimeHubProtocol(Protocol):
+    async def subscribe_many(self, websocket: WebSocket, topics: list[str]) -> list[str]: ...
+
+    async def unsubscribe_all(self, websocket: WebSocket) -> None: ...
+
+
+def create_realtime_ws_v2_router(realtime_hub: RealtimeHubProtocol) -> APIRouter:
     router = APIRouter(tags=["api-v2-realtime-ws"])
 
     @router.websocket("/api/v2/ws")
@@ -42,7 +48,6 @@ def create_realtime_ws_v2_router() -> APIRouter:
             return
 
         await websocket.accept()
-        subscribed_topics: set[str] = set()
         await websocket.send_json({"type": "ready", "protocol": "v2"})
 
         try:
@@ -72,9 +77,11 @@ def create_realtime_ws_v2_router() -> APIRouter:
                     continue
 
                 normalized = [str(topic).strip() for topic in topics_raw if str(topic).strip()]
-                subscribed_topics.update(normalized)
-                await websocket.send_json({"type": "subscribed", "topics": sorted(subscribed_topics)})
+                subscribed_topics = await realtime_hub.subscribe_many(websocket, normalized)
+                await websocket.send_json({"type": "subscribed", "topics": subscribed_topics})
         except WebSocketDisconnect:
-            return
+            pass
+        finally:
+            await realtime_hub.unsubscribe_all(websocket)
 
     return router
