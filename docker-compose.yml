@@ -66,6 +66,7 @@ services:
       - ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
       - ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
       - ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://pilot.zmartify.dk:8883
+      - ZMART_EDGE_ENABLE_EMERGENCY_TOKEN=${ZMART_EDGE_ENABLE_EMERGENCY_TOKEN:-0}
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
@@ -104,6 +105,7 @@ services:
       - ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
       - ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
       - ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://pilot.zmartify.dk:8883
+      - ZMART_EDGE_ENABLE_EMERGENCY_TOKEN=${ZMART_EDGE_ENABLE_EMERGENCY_TOKEN:-0}
       - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
     depends_on:
       - mosquitto
