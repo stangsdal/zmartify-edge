@@ -80,6 +80,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: realtime irrigation status topic consumption in app shell pages (Home + Water Insights) over `/api/v2/ws` subscriptions.
 - Completed: irrigation alarm drill-down and status badges in app shell (Alerts + Weather surfaces consume realtime irrigation topic stream and rain-delay/fault snapshots).
 - Completed: irrigation manual-run command feedback traces in app shell via realtime topic stream correlation.
+- Completed: per-device irrigation alarm history navigation from Alerts into enriched irrigation detail surface with realtime event history and operations-state snapshots.
 - Open: complete remaining UX parity screens and deeper API bindings.
 
 8. Phase 7 - HVAC firmware alignment: `not started`
@@ -103,6 +104,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation outcome contract + ingest increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation alarm drill-down UI increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after irrigation command feedback trace UI increment): baseline fallback still valid, 3 passed / 2 skipped.
+- Latest helper-script rerun (after irrigation alert-navigation/detail-history increment): baseline fallback still valid, 3 passed / 2 skipped.
 
 9. Phase 8 - Irrigation firmware integration: `not started`
 
@@ -136,5 +138,5 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 ## Next Process-Aligned Steps
 
 1. Expand irrigation outcome taxonomy (run-step/valve/hydraulics/power alarms) and align firmware publish payloads to strict typed events.
-2. Add per-device alarm history navigation and deeper irrigation detail pages on top of the new realtime traces.
+2. Add remaining irrigation UX parity surfaces around programs/hydraulics/power with the same realtime detail model.
 3. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.

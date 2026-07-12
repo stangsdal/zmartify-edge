@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IonButton, IonContent, IonPage } from '@ionic/react';
+import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { AlertCard } from '../components/AlertCard';
 import { notificationsApi } from '../api/notifications';
@@ -12,6 +13,7 @@ function priorityFromEventType(eventType: string): 'critical' | 'warning' | 'inf
 }
 
 export function AlertsPage() {
+  const history = useHistory();
   const [rows, setRows] = useState<any[]>([]);
   const [irrigationRows, setIrrigationRows] = useState<MobileEvent[]>([]);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -89,6 +91,24 @@ export function AlertsPage() {
     [irrigationRows]
   );
 
+  const openIrrigationDetail = async (row: MobileEvent) => {
+    const deviceId = row.device_id || (typeof row.payload?.device_id === 'string' ? row.payload.device_id : '');
+    if (!deviceId) return;
+    const rawZoneId = row.zone_id ?? (typeof row.payload?.zone_id === 'number' ? row.payload.zone_id : null);
+
+    try {
+      const detail = await mobileApi.getDevice(deviceId);
+      const matchedZone = rawZoneId != null
+        ? (detail.zones || []).find((zone) => zone.zone_id === rawZoneId)
+        : (detail.zones || [])[0];
+      if (!matchedZone) return;
+      const zoneRef = matchedZone.zone_uuid || `${deviceId}:${matchedZone.zone_id}`;
+      history.push(`/app/control/irrigation/zones/${encodeURIComponent(zoneRef)}?deviceId=${encodeURIComponent(deviceId)}`);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   return (
     <IonPage>
       <AppHeader title="Alerts" subtitle="Actionable incidents and notifications" />
@@ -154,6 +174,9 @@ export function AlertsPage() {
                     detail={detailParts.join(' · ') || 'Irrigation event'}
                     time={row.created_at}
                     priority={priority}
+                    onClick={() => {
+                      void openIrrigationDetail(row);
+                    }}
                   />
                 );
               })}

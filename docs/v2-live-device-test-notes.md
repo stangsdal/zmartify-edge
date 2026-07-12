@@ -144,3 +144,8 @@ Helper script:
 - Command: `./scripts/run_live_edge_assisted_hvac.sh`
 - Result: baseline fallback executed; 3 passed, 2 skipped
 - Notes: unchanged behavior confirms live baseline checks remain stable after realtime command feedback traces were added to irrigation manual-run UI.
+
+- Date: 2026-07-12 (helper script rerun after irrigation alert-navigation/detail-history increment)
+- Command: `./scripts/run_live_edge_assisted_hvac.sh`
+- Result: baseline fallback executed; 3 passed, 2 skipped
+- Notes: unchanged behavior confirms live baseline checks remain stable after irrigation alert cards were wired into detailed realtime history/status pages.
