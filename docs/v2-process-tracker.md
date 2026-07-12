@@ -128,10 +128,12 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation outcome taxonomy increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after enforce-mode ingest coverage increment): baseline fallback still valid, 3 passed / 2 skipped.
 
-9. Phase 8 - Irrigation firmware integration: `started`
+9. Phase 8 - Irrigation firmware integration: `in progress`
 - Completed: `zic_v2` contract adapter component added to the zmartify-irrigation firmware repo (commit 160f123): v2 topic builders plus reported-state and outcome payload builders, host-compiled and validated against the edge schemas under enforce mode.
 - Completed: all four edge-side irrigation v2 endpoints verified live in production (reported-state ingest, irrigation outcome ingest, zones API, site overview).
-- Open: wire `zic_v2` into the controller's mqtt_manager/event_bus once the in-progress UI branch work lands; deploy to irrigation hardware.
+- Completed: `zic_v2` wired into the controller runtime (commit d74ff1f): v2 command subscription/routing (`zone/start`, `zone/stop`, `stop_all`, `rain_delay` with command_id capture), periodic v2 reported-state on the telemetry cadence, and outcome publication on command application; full firmware build green.
+- Completed: edge MQTT listener extended and deployed to production (commit e54e38d): subscribes to `events/irrigation/outcome` and `state/reported` v2 topics per device and routes them into the mqtt-v2 ingest service.
+- Open: onboard the irrigation controller hardware (register device `zmartify-irrigation-01`, issue MQTT credentials, regenerate ACL), then run the live loop validation.
 
 10. Phase 9 - Production hardening: `started`
 - Completed: database backup + restore-drill helper (`scripts/backup_edge_db.sh`) with integrity verification and retention pruning; validated end-to-end against a freshly initialized edge database.
