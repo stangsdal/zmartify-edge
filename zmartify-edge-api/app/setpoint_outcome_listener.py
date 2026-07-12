@@ -9,7 +9,7 @@ from typing import Any
 
 from app.contracts import ContractValidationError
 from app.mqtt_v2_ingest import parse_mqtt_v2_setpoint_outcome_payload
-from app.mqtt_v2_topics import outcome_subscription_topics, parse_setpoint_outcome_topic
+from app.mqtt_v2_topics import outcome_subscription_topics, parse_setpoint_outcome_topic, parse_v2_device_event_topic
 
 
 class SetpointOutcomeMqttListener:
@@ -19,10 +19,14 @@ class SetpointOutcomeMqttListener:
         get_device_mqtt_credentials_fn: Callable[[str], dict],
         ingest_setpoint_command_outcome_fn: Callable[..., None],
         mqtt_client_module: Any = None,
+        ingest_irrigation_outcome_fn: Callable[..., None] | None = None,
+        ingest_reported_state_fn: Callable[..., None] | None = None,
     ) -> None:
         self._list_devices = list_devices_fn
         self._get_device_mqtt_credentials = get_device_mqtt_credentials_fn
         self._ingest_setpoint_command_outcome = ingest_setpoint_command_outcome_fn
+        self._ingest_irrigation_outcome = ingest_irrigation_outcome_fn
+        self._ingest_reported_state = ingest_reported_state_fn
         self._mqtt = mqtt_client_module
         self._clients: dict[str, Any] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -112,13 +116,34 @@ class SetpointOutcomeMqttListener:
 
     def _on_message(self, _client, _userdata, msg):
         topic = str(msg.topic or "")
+        payload_text = (msg.payload or b"").decode("utf-8", errors="ignore").strip()
+        if not payload_text:
+            return
+
+        v2_event = parse_v2_device_event_topic(topic)
+        if v2_event is not None:
+            device_id, kind = v2_event
+            try:
+                data = json.loads(payload_text)
+            except json.JSONDecodeError:
+                return
+            if not isinstance(data, dict):
+                return
+            try:
+                if kind == "irrigation_outcome" and self._ingest_irrigation_outcome is not None:
+                    self._ingest_irrigation_outcome(device_id, data)
+                elif kind == "reported_state" and self._ingest_reported_state is not None:
+                    self._ingest_reported_state(device_id, data)
+            except ContractValidationError:
+                return
+            except Exception:
+                return
+            return
+
         parsed = self._parse_zone_topic(topic)
         if parsed is None:
             return
         device_id, zone_id = parsed
-        payload_text = (msg.payload or b"").decode("utf-8", errors="ignore").strip()
-        if not payload_text:
-            return
         if topic.endswith("/last-setpoint-command"):
             self._handle_last_setpoint_command(device_id, zone_id, payload_text)
             return
@@ -188,6 +213,7 @@ def create_setpoint_outcome_listener() -> SetpointOutcomeMqttListener:
         mqtt_client_module = None
 
     from app.domain_model import ingest_setpoint_command_outcome
+    from app.mqtt_v2_ingest import ingest_mqtt_v2_irrigation_outcome, ingest_mqtt_v2_reported_state
     from app.registry import get_device_mqtt_credentials, list_devices
 
     return SetpointOutcomeMqttListener(
@@ -195,4 +221,8 @@ def create_setpoint_outcome_listener() -> SetpointOutcomeMqttListener:
         get_device_mqtt_credentials_fn=get_device_mqtt_credentials,
         ingest_setpoint_command_outcome_fn=ingest_setpoint_command_outcome,
         mqtt_client_module=mqtt_client_module,
+        ingest_irrigation_outcome_fn=ingest_mqtt_v2_irrigation_outcome,
+        ingest_reported_state_fn=lambda device_id, payload: ingest_mqtt_v2_reported_state(
+            device_id, payload, source="mqtt_v2_state_reported"
+        ),
     )

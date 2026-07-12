@@ -63,13 +63,36 @@ def outcome_subscription_topics(device_id: str) -> list[str]:
 
     legacy = f"{_legacy_base()}/{safe_device}/+/last-setpoint-command"
     v2 = f"{_v2_base()}/devices/{safe_device}/events/hvac/zones/+/setpoint-outcome"
+    v2_irrigation = f"{_v2_base()}/devices/{safe_device}/events/irrigation/outcome"
+    v2_state = f"{_v2_base()}/devices/{safe_device}/state/reported"
 
     style = _topic_style()
     if style == "v2":
-        return [v2]
+        return [v2, v2_irrigation, v2_state]
     if style == "dual":
-        return [legacy, v2]
+        return [legacy, v2, v2_irrigation, v2_state]
     return [legacy]
+
+
+def parse_v2_device_event_topic(topic: str) -> tuple[str, str] | None:
+    """Classify a v2 device topic into (device_id, kind).
+
+    kind is one of: "irrigation_outcome", "reported_state".
+    """
+    parts = str(topic or "").split("/")
+    try:
+        devices_idx = parts.index("devices")
+    except ValueError:
+        return None
+    if devices_idx + 1 >= len(parts):
+        return None
+    device_id = parts[devices_idx + 1]
+    remainder = "/".join(parts[devices_idx + 2 :])
+    if remainder == "events/irrigation/outcome":
+        return device_id, "irrigation_outcome"
+    if remainder == "state/reported":
+        return device_id, "reported_state"
+    return None
 
 
 def parse_setpoint_outcome_topic(topic: str) -> tuple[str, int] | None:
