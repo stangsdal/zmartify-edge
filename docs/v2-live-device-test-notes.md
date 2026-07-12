@@ -188,3 +188,8 @@ Helper script:
 - Commands: set `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` in host .env and recreated API containers; discovered twin-push 403s caused by v0.2.0 repo-rename identity drift (`zmartify-hvac-ahc9000-*` vs registered `hvac-gateway-*`); shipped firmware v0.2.1 via OTA reading device id from NVS `mqtt_client_id`.
 - Result: v0.2.1 live, twin pushes HTTP 200 under enforce mode (success 2/2 after boot), AHC9000 detected, zero contract violations.
 - Notes: enforce mode is now the production default; the twin-push regression existed since the v0.2.0 OTA (~90 min) and HVAC state freshness was stale during that window.
+
+- Date: 2026-07-12 (full edge-assisted live suite — Phase 7 completion)
+- Command: `RUN_LIVE_HVAC=1 LIVE_HVAC_BASE_URL=http://192.168.10.57 LIVE_EDGE_BASE_URL=https://pilot.zmartify.dk LIVE_EDGE_BEARER_TOKEN=<ephemeral> LIVE_EDGE_DEVICE_ID=hvac-gateway-1cdbd47a254c LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 pytest zmartify-edge-api/tests/test_live_hvac_contract.py`
+- Result: 5 passed (previously always 3 passed / 2 skipped) — twin-shape v2 adapter and command-feedback sequence smoke both green against production and firmware v0.2.1.
+- Notes: ephemeral `live-test` admin account used for the bearer token; token disabled and account deactivated immediately after the run (revocation verified with 403).

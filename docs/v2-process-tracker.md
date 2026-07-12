@@ -90,7 +90,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation program management actions in app shell (create program, enable/pause toggle, add schedule, run now) bound to v2 program endpoints.
 - Open: complete remaining UX parity screens and deeper API bindings.
 
-8. Phase 7 - HVAC firmware alignment: `started`
+8. Phase 7 - HVAC firmware alignment: `completed`
+- Completed: full edge-assisted live suite passed 5/5 on 2026-07-12 (health, identity/version, onboarding shape, twin-shape v2 adapter, command-feedback sequence) using an ephemeral admin token, revoked after the run.
 - Completed: firmware v0.2.0 (zmartify-hvac-ahc9000 commit 18c7709) adds MQTT v2 setpoint contract support: subscribes to `zmartify/v2/devices/{id}/commands/hvac/zones/+/setpoint` for command_id correlation and dual-publishes schema-conformant `setpoint-outcome` payloads alongside legacy topics.
 - Completed: firmware v0.2.0 deployed to live device 192.168.10.57 via OTA (`POST /ota` + reboot); post-OTA health verified (AHC9000 detected, 0 poll failures).
 - Completed: edge ACL generation now grants devices `zmartify/v2/devices/{id}/#` readwrite alongside legacy homie topics.
@@ -158,6 +159,8 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 ## Next Process-Aligned Steps
 
-1. Continue strict contract rollout across adapters/firmware paths and close remaining enforce-mode gaps.
-2. Plan and stage the enforce-mode default flip (warn -> enforce) once firmware payload conformance is confirmed.
-3. Align firmware publish payloads (Phase 7/8) with the typed outcome taxonomy once live device credentials are available.
+1. Phase 1: migrate active runtime persistence from SQLite to PostgreSQL-backed SQLAlchemy models.
+2. Phase 2: continue extraction of remaining v1 endpoints from `main.py` into router modules.
+3. Phase 4/9: plan legacy homie-topic retirement after a dual-mode bake period; continue hardening checklist.
+4. Phase 8: integrate the irrigation controller firmware (zmartify-irrigation) against the mqtt-v2 contracts and irrigation ingest endpoints.
+5. Phase 10: native mobile packaging via Capacitor once UX parity is closed.
