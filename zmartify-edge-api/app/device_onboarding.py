@@ -18,7 +18,7 @@ def normalize_device_base_url(base_url: str) -> str:
     return cleaned.rstrip("/")
 
 
-def _request_json(method: str, url: str, payload: dict | None = None) -> dict:
+def _request_json(method: str, url: str, payload: dict | None = None, timeout_s: int = 10) -> dict:
     data: bytes | None = None
     headers = {"Accept": "application/json"}
     if payload is not None:
@@ -27,7 +27,7 @@ def _request_json(method: str, url: str, payload: dict | None = None) -> dict:
 
     req = request.Request(url, data=data, headers=headers, method=method)
     try:
-        with request.urlopen(req, timeout=10) as response:
+        with request.urlopen(req, timeout=timeout_s) as response:
             body = response.read().decode("utf-8")
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -87,6 +87,11 @@ def get_remote_device_version(base_url: str) -> dict:
 def get_remote_network_config(base_url: str) -> dict:
     normalized = normalize_device_base_url(base_url)
     return _request_json("GET", f"{normalized}/config/network")
+
+
+def get_remote_sd_card_status(base_url: str) -> dict:
+    normalized = normalize_device_base_url(base_url)
+    return _request_json("GET", f"{normalized}/storage/sd-card", timeout_s=2)
 
 
 def push_remote_network_config(base_url: str, payload: dict) -> dict:

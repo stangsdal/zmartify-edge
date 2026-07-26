@@ -12,6 +12,7 @@ from app.device_onboarding import (
     get_remote_network_config,
     get_remote_device_version,
     get_remote_onboarding_status,
+    get_remote_sd_card_status,
     normalize_device_base_url,
     push_remote_onboarding_config,
 )
@@ -40,6 +41,8 @@ from app.schemas import (
     DeviceDiscoverOut,
     DeviceOnboardingStatusOut,
     DevicePushConfigIn,
+    DeviceSdCardInitializeIn,
+    DeviceSdCardStatusOut,
 )
 
 
@@ -125,6 +128,36 @@ def _fallback_controller_settings(device_id: str, local_url: str) -> dict:
             "ntp_server": "pool.ntp.org",
             "timezone": "CET-1CEST,M3.5.0/2,M10.5.0/3",
         },
+    )
+
+
+def _sd_card_status_payload(device_id: str, local_url: str, status_payload: dict, source: str = "device_http") -> dict:
+    return {
+        "device_id": device_id,
+        "local_url": local_url,
+        "state": status_payload.get("state") or "unknown",
+        "mounted": bool(status_payload.get("mounted")),
+        "total_bytes": status_payload.get("total_bytes"),
+        "free_bytes": status_payload.get("free_bytes"),
+        "mount_point": status_payload.get("mount_point"),
+        "card_name": status_payload.get("card_name"),
+        "last_error": status_payload.get("last_error"),
+        "source": source,
+        "command_id": status_payload.get("command_id"),
+        "command_status": status_payload.get("command_status"),
+    }
+
+
+def _fallback_sd_card_status(device_id: str, local_url: str, detail: str | None = None) -> dict:
+    return _sd_card_status_payload(
+        device_id,
+        local_url,
+        {
+            "state": "unreachable",
+            "mounted": False,
+            "last_error": detail or "controller HTTP status endpoint is not reachable from edge",
+        },
+        source="edge_fallback",
     )
 
 
@@ -282,6 +315,50 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
             )
             fallback = _fallback_controller_settings(device_id, local_url)
             return _controller_settings_payload(device_id, local_url, {**fallback, **update_payload}, reboot_required=True)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except (MqttCommandError, RegistryOperationError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @router.get("/devices/{device_id}/storage/sd-card", response_model=DeviceSdCardStatusOut)
+    def v2_get_device_sd_card_status(device_id: str, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        try:
+            local_url = _device_local_url(device_id)
+            try:
+                status_payload = get_remote_sd_card_status(local_url)
+            except DeviceOnboardingError as exc:
+                return _fallback_sd_card_status(device_id, local_url, str(exc))
+            return _sd_card_status_payload(device_id, local_url, status_payload)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except RegistryOperationError as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    @router.post("/devices/{device_id}/storage/sd-card/initialize", response_model=DeviceSdCardStatusOut)
+    def v2_initialize_device_sd_card(device_id: str, payload: DeviceSdCardInitializeIn, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        try:
+            local_url = _device_local_url(device_id)
+            result = publish_irrigation_command(
+                device_id,
+                "irrigation.config.storage.sd-card.initialize",
+                None,
+                {"format": payload.format},
+            )
+            audit_action(
+                actor_user_id=request.state.auth_user.user_id,
+                action="initialize_sd_card",
+                resource_type="device",
+                resource_id=device_id,
+                metadata={"format": payload.format, "command_id": result.get("command_id")},
+            )
+            status_payload = _fallback_sd_card_status(device_id, local_url)
+            status_payload["state"] = "initialize_requested"
+            status_payload["command_id"] = result.get("command_id")
+            status_payload["command_status"] = result.get("status")
+            status_payload["last_error"] = None
+            return status_payload
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except (MqttCommandError, RegistryOperationError) as exc:

@@ -176,6 +176,25 @@ class DeviceControllerSettingsOut(BaseModel):
     reboot_required: bool = False
 
 
+class DeviceSdCardInitializeIn(BaseModel):
+    format: bool = True
+
+
+class DeviceSdCardStatusOut(BaseModel):
+    device_id: str
+    local_url: str
+    state: str
+    mounted: bool = False
+    total_bytes: int | None = None
+    free_bytes: int | None = None
+    mount_point: str | None = None
+    card_name: str | None = None
+    last_error: str | None = None
+    source: str = "device_http"
+    command_id: str | None = None
+    command_status: str | None = None
+
+
 class DeviceOtaOut(BaseModel):
     device_id: str
     local_url: str

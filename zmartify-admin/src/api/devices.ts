@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { Device, DeviceClaimRequest, DeviceControllerSettings, DeviceControllerSettingsUpdate, DeviceDiscovery, DeviceFreshness } from '../types/api';
+import { Device, DeviceClaimRequest, DeviceControllerSettings, DeviceControllerSettingsUpdate, DeviceDiscovery, DeviceFreshness, DeviceSdCardStatus } from '../types/api';
 
 export const deviceApi = {
   list: () => apiClient.get('/devices'),
@@ -39,6 +39,12 @@ export const deviceApi = {
 
   updateControllerSettings: (deviceId: string, payload: DeviceControllerSettingsUpdate): Promise<DeviceControllerSettings> =>
     apiClient.put(`/api/v2/devices/${deviceId}/controller-settings`, payload),
+
+  getSdCardStatus: (deviceId: string): Promise<DeviceSdCardStatus> =>
+    apiClient.get(`/api/v2/devices/${deviceId}/storage/sd-card`),
+
+  initializeSdCard: (deviceId: string, format = true): Promise<DeviceSdCardStatus> =>
+    apiClient.post(`/api/v2/devices/${deviceId}/storage/sd-card/initialize`, { format }),
   
   assignToSite: (deviceId: string, siteId: number): Promise<Device> =>
     apiClient.post(`/devices/${deviceId}/site`, { site_id: siteId }),

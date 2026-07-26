@@ -13,7 +13,7 @@ import {
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { deviceApi } from '../api/devices';
-import { Device, DeviceControllerSettings } from '../types/api';
+import { Device, DeviceControllerSettings, DeviceSdCardStatus } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
 import { ZoneCard } from '../components/ZoneCard';
 import { AppHeader } from '../components/AppHeader';
@@ -153,6 +153,7 @@ function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
 
 function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
   const [settings, setSettings] = useState<DeviceControllerSettings | null>(null);
+  const [sdCardStatus, setSdCardStatus] = useState<DeviceSdCardStatus | null>(null);
   const [timezone, setTimezone] = useState('');
   const [ntpServer, setNtpServer] = useState('');
   const [mqttBrokerUri, setMqttBrokerUri] = useState('');
@@ -162,8 +163,11 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
   const [mqttTlsEnabled, setMqttTlsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sdCardLoading, setSdCardLoading] = useState(false);
+  const [sdCardInitializing, setSdCardInitializing] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [sdCardError, setSdCardError] = useState('');
 
   const applySettings = (next: DeviceControllerSettings) => {
     setSettings(next);
@@ -189,9 +193,53 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
     }
   };
 
+  const loadSdCardStatus = async () => {
+    try {
+      setSdCardLoading(true);
+      setSdCardError('');
+      setSdCardStatus(await deviceApi.getSdCardStatus(deviceId));
+    } catch (e) {
+      setSdCardError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSdCardLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadSettings();
+    void loadSdCardStatus();
   }, [deviceId]);
+
+  const formatBytes = (value?: number | null): string => {
+    if (value == null || !Number.isFinite(value)) return 'Unknown';
+    if (value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const initializeSdCard = async () => {
+    if (!window.confirm('Initialize the SD card for controller storage? If the card cannot be mounted, the controller may format it.')) {
+      return;
+    }
+    try {
+      setSdCardInitializing(true);
+      setSdCardError('');
+      setMessage('');
+      const updated = await deviceApi.initializeSdCard(deviceId, true);
+      setSdCardStatus(updated);
+      setMessage(updated.command_id ? `SD-card initialize command sent (${updated.command_id}).` : 'SD-card initialize command sent.');
+    } catch (e) {
+      setSdCardError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSdCardInitializing(false);
+    }
+  };
 
   const saveSettings = async () => {
     const parsedPort = mqttPort.trim() ? Number(mqttPort) : undefined;
@@ -276,6 +324,37 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
       <IonButton className="mt-3" size="small" onClick={saveSettings} disabled={saving}>
         {saving ? 'Saving...' : 'Save settings'}
       </IonButton>
+
+      <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div>
+            <p className="font-semibold">SD card</p>
+            <p className="text-xs text-muted">{sdCardStatus?.mount_point || '/sdcard'}</p>
+          </div>
+          <div className="flex gap-2">
+            <IonButton size="small" fill="outline" onClick={() => { void loadSdCardStatus(); }} disabled={sdCardLoading || sdCardInitializing}>
+              {sdCardLoading ? 'Refreshing...' : 'Refresh'}
+            </IonButton>
+            <IonButton size="small" onClick={initializeSdCard} disabled={sdCardLoading || sdCardInitializing}>
+              {sdCardInitializing ? 'Initializing...' : 'Initialize'}
+            </IonButton>
+          </div>
+        </div>
+        {sdCardError ? <p className="text-sm text-rose-600 mb-2">{sdCardError}</p> : null}
+        {sdCardStatus ? (
+          <div className="grid gap-2 text-sm md:grid-cols-2">
+            <p><span className="text-muted">State:</span> <strong>{sdCardStatus.state}</strong></p>
+            <p><span className="text-muted">Mounted:</span> {sdCardStatus.mounted ? 'Yes' : 'No'}</p>
+            <p><span className="text-muted">Free:</span> {formatBytes(sdCardStatus.free_bytes)}</p>
+            <p><span className="text-muted">Total:</span> {formatBytes(sdCardStatus.total_bytes)}</p>
+            {sdCardStatus.card_name ? <p><span className="text-muted">Card:</span> {sdCardStatus.card_name}</p> : null}
+            {sdCardStatus.command_status ? <p><span className="text-muted">Command:</span> {sdCardStatus.command_status}</p> : null}
+            {sdCardStatus.last_error ? <p className="md:col-span-2 text-amber-700">{sdCardStatus.last_error}</p> : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted">SD-card status has not been loaded.</p>
+        )}
+      </div>
     </div>
   );
 }

@@ -125,6 +125,21 @@ export interface DeviceControllerSettingsUpdate {
   timezone?: string;
 }
 
+export interface DeviceSdCardStatus {
+  device_id: string;
+  local_url: string;
+  state: string;
+  mounted: boolean;
+  total_bytes?: number | null;
+  free_bytes?: number | null;
+  mount_point?: string | null;
+  card_name?: string | null;
+  last_error?: string | null;
+  source: string;
+  command_id?: string | null;
+  command_status?: string | null;
+}
+
 export interface HistoryPoint {
   bucket_start: string;
   value: number;

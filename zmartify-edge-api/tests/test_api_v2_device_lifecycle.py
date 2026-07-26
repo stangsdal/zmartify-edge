@@ -230,3 +230,96 @@ def test_api_v2_device_controller_settings_proxy(monkeypatch, tmp_path: Path):
     assert captured["command_type"] == "irrigation.config.network"
     assert captured["target_ref"] is None
     assert captured["payload"] == {"timezone": "UTC0", "ntp_server": "time.cloudflare.com"}
+
+
+def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    domain_id, site_id = _seed_domain_site(client, headers, suffix="sdcard")
+
+    import app.router_v2_device_lifecycle as lifecycle
+
+    monkeypatch.setattr(
+        lifecycle,
+        "discover_remote_device",
+        lambda _base_url: {
+            "base_url": "http://192.168.10.113",
+            "identity": {
+                "device_id": "zmartify-irrigation-sdcard01",
+                "mac": "AA:BB:CC:DD:EE:22",
+                "firmware_version": "v5.0.0",
+            },
+            "claim": {},
+            "status": {"state": "discoverable"},
+        },
+    )
+    monkeypatch.setattr(lifecycle, "push_remote_onboarding_config", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        lifecycle,
+        "get_remote_onboarding_status",
+        lambda _base_url: {
+            "state": "claimed",
+            "device_id": "zmartify-irrigation-sdcard01",
+            "edge_url": "https://pilot.zmartify.dk",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        },
+    )
+
+    claim = client.post(
+        "/api/v2/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "http://192.168.10.113",
+            "claim_token": "claim-token",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Irrigation SD Card",
+        },
+    )
+    assert claim.status_code == 201
+
+    monkeypatch.setattr(
+        lifecycle,
+        "get_remote_sd_card_status",
+        lambda _base_url: {
+            "state": "mounted",
+            "mounted": True,
+            "total_bytes": 31_000_000_000,
+            "free_bytes": 29_000_000_000,
+            "mount_point": "/sdcard",
+            "card_name": "SD32G",
+            "last_error": "",
+        },
+    )
+    captured: dict[str, object] = {}
+
+    def fake_publish_sd_command(device_id: str, command_type: str, target_ref: str | None, payload: dict) -> dict:
+        captured["device_id"] = device_id
+        captured["command_type"] = command_type
+        captured["target_ref"] = target_ref
+        captured["payload"] = payload
+        return {"command_id": "cmd-sd", "status": "published"}
+
+    monkeypatch.setattr(lifecycle, "publish_irrigation_command", fake_publish_sd_command)
+
+    status = client.get("/api/v2/devices/zmartify-irrigation-sdcard01/storage/sd-card", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["state"] == "mounted"
+    assert status.json()["mounted"] is True
+    assert status.json()["free_bytes"] == 29_000_000_000
+
+    initialize = client.post(
+        "/api/v2/devices/zmartify-irrigation-sdcard01/storage/sd-card/initialize",
+        headers=headers,
+        json={"format": True},
+    )
+    assert initialize.status_code == 200
+    assert initialize.json()["state"] == "initialize_requested"
+    assert initialize.json()["command_id"] == "cmd-sd"
+    assert captured["device_id"] == "zmartify-irrigation-sdcard01"
+    assert captured["command_type"] == "irrigation.config.storage.sd-card.initialize"
+    assert captured["target_ref"] is None
+    assert captured["payload"] == {"format": True}
