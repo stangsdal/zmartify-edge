@@ -101,7 +101,9 @@ export function IrrigationProgramsPage() {
       device_id: device.device_id,
       display_name: device.display_name,
     }));
-    const irrigationDevices = siteDevices.length ? siteDevices : overviewDevices;
+    const irrigationDevices = Array.from(
+      new Map([...siteDevices, ...overviewDevices].map((device) => [device.device_id, device])).values(),
+    );
     setDeviceIds(irrigationDevices.map((device) => device.device_id));
     const deviceProgramGroups = await Promise.all(
       irrigationDevices.map(async (device) => {
