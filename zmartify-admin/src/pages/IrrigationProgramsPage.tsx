@@ -1,4 +1,4 @@
-import { IonButton, IonContent, IonPage } from '@ionic/react';
+import { IonButton, IonContent, IonPage, IonToggle } from '@ionic/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
@@ -392,15 +392,14 @@ export function IrrigationProgramsPage() {
                   <h2 className="text-lg font-semibold">{row.program.name}</h2>
                   <p className="text-sm text-muted">{row.displayName} • {scheduleSummary}</p>
                 </div>
-                <span
-                  className="inline-flex rounded-full px-3 py-1 text-xs font-semibold"
-                  style={{
-                    color: row.program.enabled ? '#067647' : '#b54708',
-                    backgroundColor: row.program.enabled ? 'rgba(18,183,106,0.15)' : 'rgba(247,144,9,0.16)',
-                  }}
-                >
-                  {row.program.enabled ? 'Enabled' : 'Paused'}
-                </span>
+                <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                  <span>{row.program.enabled ? 'Enabled' : 'Not Enabled'}</span>
+                  <IonToggle
+                    checked={row.program.enabled}
+                    disabled={busyKey === `toggle:${row.deviceId}:${row.program.program_id}`}
+                    onIonChange={() => { void toggleProgramEnabled(row); }}
+                  />
+                </label>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mt-4">
@@ -570,14 +569,6 @@ export function IrrigationProgramsPage() {
                   onClick={() => { void runProgramNow(row); }}
                 >
                   Run now
-                </IonButton>
-                <IonButton
-                  size="small"
-                  fill="outline"
-                  disabled={busyKey === `toggle:${row.deviceId}:${row.program.program_id}`}
-                  onClick={() => { void toggleProgramEnabled(row); }}
-                >
-                  {row.program.enabled ? 'Pause' : 'Enable'}
                 </IonButton>
               </div>
             </section>
