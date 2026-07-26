@@ -98,6 +98,7 @@ def test_publish_irrigation_command_uses_v2_irrigation_topic(monkeypatch):
     message = cmd[cmd.index("-m") + 1]
 
     assert topic == "zmartify/v2/devices/zmartify-irrigation-01/commands/irrigation/zone/start"
+    assert "-r" not in cmd
     payload = json.loads(message)
     assert payload["command_id"] == result["command_id"]
     assert payload["source_timestamp"].endswith("Z")

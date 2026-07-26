@@ -115,7 +115,7 @@ def _publish_command(device_id: str, topic_suffix: str, payload: str) -> None:
         raise MqttCommandError(f"mosquitto_pub failed: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}")
 
 
-def _publish_to_topic(device_id: str, topic: str, payload: str) -> None:
+def _publish_to_topic(device_id: str, topic: str, payload: str, *, retain: bool = True) -> None:
     username, password = _device_mqtt_credentials(device_id)
 
     cmd = _mosquitto_pub_command()
@@ -135,9 +135,10 @@ def _publish_to_topic(device_id: str, topic: str, payload: str) -> None:
             payload,
             "-q",
             "1",
-            "-r",
         ]
     )
+    if retain:
+        cmd.append("-r")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
@@ -201,7 +202,7 @@ def publish_irrigation_command(device_id: str, command_type: str, target_ref: st
     }
 
     topic = command_topic_for_irrigation(device_id, command_type)
-    _publish_to_topic(device_id, topic, json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    _publish_to_topic(device_id, topic, json.dumps(payload, separators=(",", ":"), sort_keys=True), retain=False)
     return {"command_id": payload["command_id"], "status": "published", "topic": topic}
 
 
