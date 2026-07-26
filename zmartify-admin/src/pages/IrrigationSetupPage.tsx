@@ -89,8 +89,15 @@ export function IrrigationSetupPage() {
   useEffect(() => {
     if (!selectedSite) return;
     const loadDevices = async () => {
-      const site = await mobileApi.getSite(selectedSite);
-      const controllerDevices = (site.devices || []).filter(isIrrigationController);
+      const overview = await mobileApi.getIrrigationOverview(selectedSite);
+      const controllerDevices = (overview.devices || []).map((device) => ({
+        device_id: device.device_id,
+        display_name: device.display_name,
+        device_type: 'irrigation',
+        integration_mode: 'irrigation',
+        online: true,
+        mqtt_connected: true,
+      })).filter(isIrrigationController);
       setDevices(controllerDevices);
       setSelectedDeviceId((prev) => (controllerDevices.some((device) => device.device_id === prev) ? prev : controllerDevices[0]?.device_id || ''));
     };
