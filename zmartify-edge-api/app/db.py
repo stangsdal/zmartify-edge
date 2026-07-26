@@ -29,6 +29,10 @@ def get_database_backend() -> str:
     return "sqlite"
 
 
+def get_runtime_database_backend() -> str:
+    return "sqlite"
+
+
 def _ensure_db_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 

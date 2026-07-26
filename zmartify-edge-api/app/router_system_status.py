@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, audit_action
-from app.db import get_connection, get_database_backend, get_database_url, get_db_path
+from app.db import get_connection, get_database_backend, get_database_url, get_db_path, get_runtime_database_backend
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
 from app.registry import RegistryOperationError, regenerate_acl_now
 
@@ -17,9 +17,18 @@ def _database_check() -> dict:
     try:
         with get_connection() as conn:
             conn.execute("SELECT 1").fetchone()
-        return {"ok": True, "backend": get_database_backend()}
+        return {
+            "ok": True,
+            "runtime_backend": get_runtime_database_backend(),
+            "configured_backend": get_database_backend(),
+        }
     except Exception as exc:  # pragma: no cover - defensive for runtime readiness
-        return {"ok": False, "backend": get_database_backend(), "error": str(exc)}
+        return {
+            "ok": False,
+            "runtime_backend": get_runtime_database_backend(),
+            "configured_backend": get_database_backend(),
+            "error": str(exc),
+        }
 
 
 def _migration_check() -> dict:
@@ -80,7 +89,8 @@ def create_system_status_router(require_roles: Callable[[Request, set[str]], Non
             "ok": True,
             "service": "zmartify-edge-api",
             "db_path": str(get_db_path()),
-            "db_backend": get_database_backend(),
+            "db_backend": get_runtime_database_backend(),
+            "configured_database_backend": get_database_backend(),
             "database_url_scheme": db_scheme,
         }
 

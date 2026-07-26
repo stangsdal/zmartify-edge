@@ -24,6 +24,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: first SQLAlchemy-managed core v2 tables migration (`core_domains_v2`, `core_sites_v2`, `core_devices_v2`).
 - Completed: transitional dual-write bridge from registry writes into `core_*_v2` when tables exist.
 - Completed: full Postgres schema bootstrap (`zmartify-edge-api/db/postgres_schema.sql`, 37 tables + 40 indexes) machine-translated from the runtime schema and applied cleanly to the production TimescaleDB container.
+- Completed: readiness/health payloads now distinguish configured database backend from current runtime backend, making the remaining sqlite-to-Postgres cutover explicit during Phase 1.
 - Open: port runtime data access from sqlite3 API to the PostgreSQL backend (largest remaining work item).
 
 3. Phase 2 - Core platform extraction: `partially started`

@@ -51,6 +51,7 @@ def test_health_ready_reports_checks(monkeypatch, tmp_path: Path):
     payload = response.json()
     assert payload["ok"] is True
     assert payload["checks"]["database"]["ok"] is True
+    assert payload["checks"]["database"]["runtime_backend"] == "sqlite"
     assert payload["checks"]["migrations"]["applied_count"] >= 1
     assert payload["checks"]["mqtt"]["ok"] is True
     assert payload["checks"]["storage"]["ok"] is True
