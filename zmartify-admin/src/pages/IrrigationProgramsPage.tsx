@@ -146,12 +146,13 @@ export function IrrigationProgramsPage() {
     setActionFeedback('');
     try {
       const result = await mobileApi.startIrrigationProgramRun(row.deviceId, row.program.program_id);
-      await reloadPrograms(selectedSite);
+      setActiveRuns((prev) => ({ ...prev, [row.deviceId]: result.run }));
       const currentStep = result.run.steps.find((step) => step.status === 'running');
       setActionFeedback(`Run started for ${row.program.name}${currentStep ? ` on ${currentStep.zone_name || currentStep.local_ref}` : ''}.`);
+      setBusyKey('');
+      reloadPrograms(selectedSite).catch(console.error);
     } catch (error) {
       setActionFeedback(String(error));
-    } finally {
       setBusyKey('');
     }
   };
@@ -162,11 +163,16 @@ export function IrrigationProgramsPage() {
     setActionFeedback('Stopping program...');
     try {
       await mobileApi.stopIrrigationProgramRun(row.deviceId, run.run_id);
-      await reloadPrograms(selectedSite);
+      setActiveRuns((prev) => {
+        const next = { ...prev };
+        delete next[row.deviceId];
+        return next;
+      });
       setActionFeedback(`Stopped ${row.program.name}.`);
+      setBusyKey('');
+      reloadPrograms(selectedSite).catch(console.error);
     } catch (error) {
       setActionFeedback(String(error));
-    } finally {
       setBusyKey('');
     }
   };
@@ -177,12 +183,18 @@ export function IrrigationProgramsPage() {
     setActionFeedback('Skipping to the next zone...');
     try {
       const result = await mobileApi.skipIrrigationProgramRunStep(row.deviceId, run.run_id);
-      await reloadPrograms(selectedSite);
       const nextStep = result.run.steps.find((step) => step.status === 'running');
+      setActiveRuns((prev) => {
+        if (result.run.status === 'running') return { ...prev, [row.deviceId]: result.run };
+        const next = { ...prev };
+        delete next[row.deviceId];
+        return next;
+      });
       setActionFeedback(nextStep ? `Skipped to ${nextStep.zone_name || nextStep.local_ref}.` : `${row.program.name} completed.`);
+      setBusyKey('');
+      reloadPrograms(selectedSite).catch(console.error);
     } catch (error) {
       setActionFeedback(String(error));
-    } finally {
       setBusyKey('');
     }
   };
