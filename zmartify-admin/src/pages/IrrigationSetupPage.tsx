@@ -93,8 +93,8 @@ export function IrrigationSetupPage() {
       const controllerDevices = (overview.devices || []).map((device) => ({
         device_id: device.device_id,
         display_name: device.display_name,
-        device_type: 'irrigation',
-        integration_mode: 'irrigation',
+        device_type: device.device_type || undefined,
+        integration_mode: device.integration_mode || undefined,
         online: device.online,
         mqtt_connected: device.mqtt_connected,
       })).filter(isIrrigationController);

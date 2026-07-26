@@ -816,7 +816,7 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
 
         device_rows = conn.execute(
             """
-            SELECT d.id, d.device_id, d.display_name, ds.online, ds.mqtt_connected
+            SELECT d.id, d.device_id, d.display_name, d.device_type, d.integration_mode, ds.online, ds.mqtt_connected
             FROM devices d
             LEFT JOIN device_state ds ON ds.device_id = d.id
             WHERE d.site_id = ?
@@ -897,6 +897,8 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
                 {
                     "device_id": row["device_id"],
                     "display_name": row["display_name"],
+                    "device_type": row["device_type"],
+                    "integration_mode": row["integration_mode"],
                     "online": bool(row["online"]) if row["online"] is not None else False,
                     "mqtt_connected": bool(row["mqtt_connected"]) if row["mqtt_connected"] is not None else False,
                     "outputs": {

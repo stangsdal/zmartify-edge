@@ -77,6 +77,8 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     overview_initial = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_initial.status_code == 200
     assert overview_initial.json()["device_count"] == 1
+    assert overview_initial.json()["devices"][0]["device_type"] == "irrigation"
+    assert overview_initial.json()["devices"][0]["integration_mode"] == "mqtt"
     assert overview_initial.json()["devices"][0]["online"] is False
     assert overview_initial.json()["devices"][0]["mqtt_connected"] is False
 
