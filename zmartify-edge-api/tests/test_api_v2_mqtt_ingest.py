@@ -234,6 +234,7 @@ def test_v2_mqtt_irrigation_outcome_propagates_valve_fault(monkeypatch, tmp_path
         json={
             "schema_version": "2.0",
             "source_timestamp": "2026-07-12T15:25:00Z",
+            "command_id": "cmd-valve-7",
             "event_type": "valve.fault",
             "severity": "alarm",
             "result": "fault",
@@ -242,6 +243,7 @@ def test_v2_mqtt_irrigation_outcome_propagates_valve_fault(monkeypatch, tmp_path
         },
     )
     assert ingest_outcome.status_code == 200
+    assert ingest_outcome.json()["command_id"] == "cmd-valve-7"
     assert ingest_outcome.json()["category"] == "valve"
     assert "output.fault" in ingest_outcome.json()["side_effects"]
 
@@ -249,6 +251,10 @@ def test_v2_mqtt_irrigation_outcome_propagates_valve_fault(monkeypatch, tmp_path
     assert outputs.status_code == 200
     matched = [output for output in outputs.json()["outputs"] if output["local_ref"] == "out-7"]
     assert matched and matched[0]["fault"] == "stuck open"
+
+    events = client.get("/events/recent", headers=headers, params={"event_type": "controller_fault"})
+    assert events.status_code == 200
+    assert any(event["payload"].get("command_id") == "cmd-valve-7" for event in events.json())
 
 
 def test_v2_mqtt_reported_state_enforce_rejects_invalid_timestamp(monkeypatch, tmp_path: Path):

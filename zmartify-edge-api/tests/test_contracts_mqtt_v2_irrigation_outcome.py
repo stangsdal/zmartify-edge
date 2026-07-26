@@ -12,6 +12,7 @@ def test_irrigation_outcome_contract_accepts_valid_payload(monkeypatch):
         {
             "schema_version": "2.0",
             "source_timestamp": "2026-07-12T16:00:00Z",
+            "command_id": "cmd-irrig-123",
             "event_type": "run.step.completed",
             "severity": "info",
             "result": "ok",

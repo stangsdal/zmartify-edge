@@ -46,7 +46,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: legacy auth/user administration extraction (`/users*`, `/admin/audit-log`) from `main.py` into `app/router_legacy_auth_users.py` with admin guardrails and audit-log behavior preserved.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
-4. Phase 3 - Device contract and canonical twin: `in progress`
+4. Phase 3 - Device contract and canonical twin: `completed`
 - Twin ingestion and mobile views exist.
 - Completed: initial versioned schema scaffolds under `contracts/` (device contract, mqtt v2, ota manifest).
 - Completed: backend ingest/command checkpoint validation hooks (`warn` mode default, `enforce` available).
@@ -62,9 +62,10 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation run realtime fan-out hooks (`irrigation.run.updated`) and site-event publication.
 - Completed: dedicated MQTT-v2 ingest service/router for reported-state and setpoint-outcome paths (`/api/v2/devices/{id}/ingest/mqtt/*`) beyond listener-only compatibility.
 - Completed: enforce-mode negative-path regression coverage for all mqtt-v2 ingest endpoints (reported-state, setpoint-outcome, irrigation-outcome).
-- Open: firmware/adapters contract conformance and strict-mode rollout.
+- Completed: firmware/adapters contract conformance and strict-mode rollout validated through enforce-mode edge ingest, live HVAC v2 contract loop, and irrigation controller v2 reported-state/outcome integration.
+- Completed: irrigation outcome contract explicitly documents `command_id` correlation for firmware command feedback events.
 
-5. Phase 4 - MQTT v2 adapter: `early stage`
+5. Phase 4 - MQTT v2 adapter: `completed`
 - Completed: topic normalization helper for legacy/v2/dual command and outcome topic paths.
 - Completed: setpoint outcome listener parsing/subscription support for both legacy and v2 topic styles.
 - Completed: payload-level v2 command contract objects for HVAC setpoint/rename publish path with enforce-mode validation coverage.
@@ -73,9 +74,9 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: initial irrigation outcome schema + ingest endpoint (`irrigation-outcome.schema.json`, `/api/v2/devices/{id}/ingest/mqtt/irrigation/outcome`) with alarm-to-event mapping.
 - Completed: typed irrigation outcome taxonomy (run/valve/hydraulics/power/weather categories) with side-effects: run completion mapping and valve fault propagation into output state.
 - Completed: legacy homie command topics retired (v2 is the first release, no backward compatibility): firmware v0.3.0 executes v2 commands natively (setpoint + zone name), legacy command handlers/subscriptions removed (-305 LOC), production edge flipped to `ZMART_EDGE_MQTT_TOPIC_STYLE=v2`, live loop re-validated v2-only.
-- Open: deeper firmware topic alignment for irrigation outcome publishing.
+- Completed: deeper firmware topic alignment for irrigation outcome publishing; controller publishes v2 `events/irrigation/outcome`, edge listener routes it into MQTT-v2 ingest, and outcome payloads preserve command correlation.
 
-6. Phase 5 - Irrigation backend: `early stage`
+6. Phase 5 - Irrigation backend: `completed`
 - UI scaffolding and route architecture are in place.
 - Completed: irrigation foundation migration (`013_irrigation_foundation.sql`) with core zone/program tables.
 - Completed: initial irrigation backend domain and `/api/v2/devices/{device_id}/irrigation/*` router skeleton.
@@ -86,7 +87,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation status/alarm realtime fan-out for operations-state mutations (`irrigation.status.updated` on output/hydraulics/power/weather/rain-delay updates).
 - Completed: site irrigation overview now includes per-device operations-state summary (outputs activity/faults + hydraulics/power/weather + rain-delay snapshot).
 - Completed: operations-state models are now fed by dedicated MQTT-v2 reported-state ingest (hydraulics/power/weather/outputs/rain-delay telemetry path).
-- Open: command-side irrigation execution feedback/outcome contract coverage from firmware events.
+- Completed: command-side irrigation execution feedback/outcome contract coverage from firmware events, including `command_id` propagation into logged irrigation feedback/fault events for app-shell trace correlation.
 
 7. Phase 6 - New responsive app shell: `in progress`
 - Completed: responsive nav shell, mobile/tablet/desktop behavior, onboarding flow routes.
@@ -180,7 +181,7 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 Paused 2026-07-12 with all repos clean and pushed. Resume points, in priority order:
 
 1. Phase 2: continue extracting remaining v1 endpoint groups from `main.py` into focused routers/services.
-2. Phase 3/4/5/6: close remaining contract conformance, irrigation outcome coverage, command feedback, and UX parity gaps now that physical irrigation hardware is online.
+2. Phase 6: close remaining UX parity screens and deeper app-shell API bindings now that physical irrigation hardware is online.
 3. Phase 9: remaining hardening checklist (Postgres backup sidecar replacement for sqlite backup, enforce-mode defaults, secret review, retention policy, load/accessibility/PWA checks, upgrade/rollback runbook).
 4. Phase 10: skipped per current request.
 

@@ -279,6 +279,7 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     severity = str(outcome.get("severity") or "info").strip().lower()
     result = str(outcome.get("result") or "").strip().lower()
     detail = str(outcome.get("detail") or "").strip() or None
+    command_id = str(outcome.get("command_id") or "").strip() or None
     category = classify_irrigation_outcome_event_type(normalized_event_type)
     is_failure = severity in {"alarm", "critical"} or result in {"failed", "fault", "error"}
 
@@ -333,6 +334,7 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
             "device_id": device_id,
             "event_type": normalized_event_type,
             "category": category,
+            "command_id": command_id,
             "severity": severity,
             "result": result or None,
             "detail": detail,
@@ -346,6 +348,7 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
 
     return {
         "device_id": device_id,
+        "command_id": command_id,
         "mapped_event_type": mapped_event_type,
         "category": category,
         "side_effects": side_effects,
