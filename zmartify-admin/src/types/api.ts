@@ -131,6 +131,8 @@ export interface DeviceSdCardStatus {
   state: string;
   mounted: boolean;
   total_bytes?: number | null;
+  card_total_bytes?: number | null;
+  filesystem_total_bytes?: number | null;
   free_bytes?: number | null;
   mount_point?: string | null;
   card_name?: string | null;

@@ -288,6 +288,8 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
             "state": "mounted",
             "mounted": True,
             "total_bytes": 31_000_000_000,
+            "card_total_bytes": 31_000_000_000,
+            "filesystem_total_bytes": 31_000_000_000,
             "free_bytes": 29_000_000_000,
             "mount_point": "/sdcard",
             "card_name": "SD32G",
@@ -309,6 +311,8 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
     assert status.status_code == 200
     assert status.json()["state"] == "mounted"
     assert status.json()["mounted"] is True
+    assert status.json()["card_total_bytes"] == 31_000_000_000
+    assert status.json()["filesystem_total_bytes"] == 31_000_000_000
     assert status.json()["free_bytes"] == 29_000_000_000
 
     from app.domain_model import log_event
@@ -326,7 +330,9 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
                 "sd_card": {
                     "state": "mounted",
                     "mounted": True,
-                    "total_bytes": 534763520,
+                    "total_bytes": 15_931_539_456,
+                    "card_total_bytes": 15_931_539_456,
+                    "filesystem_total_bytes": 534763520,
                     "free_bytes": 464746496,
                     "mount_point": "/sdcard",
                     "card_name": "SL16G",
@@ -340,6 +346,8 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
     assert fallback_status.status_code == 200
     assert fallback_status.json()["source"] == "mqtt_reported_state"
     assert fallback_status.json()["mounted"] is True
+    assert fallback_status.json()["card_total_bytes"] == 15_931_539_456
+    assert fallback_status.json()["filesystem_total_bytes"] == 534763520
     assert fallback_status.json()["card_name"] == "SL16G"
 
     initialize = client.post(

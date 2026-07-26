@@ -140,6 +140,8 @@ def _sd_card_status_payload(device_id: str, local_url: str, status_payload: dict
         "state": status_payload.get("state") or "unknown",
         "mounted": bool(status_payload.get("mounted")),
         "total_bytes": status_payload.get("total_bytes"),
+        "card_total_bytes": status_payload.get("card_total_bytes") or status_payload.get("total_bytes"),
+        "filesystem_total_bytes": status_payload.get("filesystem_total_bytes"),
         "free_bytes": status_payload.get("free_bytes"),
         "mount_point": status_payload.get("mount_point"),
         "card_name": status_payload.get("card_name"),

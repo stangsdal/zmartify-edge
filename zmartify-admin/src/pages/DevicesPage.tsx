@@ -345,8 +345,9 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
           <div className="grid gap-2 text-sm md:grid-cols-2">
             <p><span className="text-muted">State:</span> <strong>{sdCardStatus.state}</strong></p>
             <p><span className="text-muted">Mounted:</span> {sdCardStatus.mounted ? 'Yes' : 'No'}</p>
-            <p><span className="text-muted">Free:</span> {formatBytes(sdCardStatus.free_bytes)}</p>
-            <p><span className="text-muted">Total:</span> {formatBytes(sdCardStatus.total_bytes)}</p>
+            <p><span className="text-muted">Card capacity:</span> {formatBytes(sdCardStatus.card_total_bytes ?? sdCardStatus.total_bytes)}</p>
+            <p><span className="text-muted">Filesystem size:</span> {formatBytes(sdCardStatus.filesystem_total_bytes ?? sdCardStatus.total_bytes)}</p>
+            <p><span className="text-muted">Filesystem free:</span> {formatBytes(sdCardStatus.free_bytes)}</p>
             {sdCardStatus.card_name ? <p><span className="text-muted">Card:</span> {sdCardStatus.card_name}</p> : null}
             {sdCardStatus.command_status ? <p><span className="text-muted">Command:</span> {sdCardStatus.command_status}</p> : null}
             {sdCardStatus.last_error ? <p className="md:col-span-2 text-amber-700">{sdCardStatus.last_error}</p> : null}

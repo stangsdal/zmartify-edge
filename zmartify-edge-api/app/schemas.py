@@ -186,6 +186,8 @@ class DeviceSdCardStatusOut(BaseModel):
     state: str
     mounted: bool = False
     total_bytes: int | None = None
+    card_total_bytes: int | None = None
+    filesystem_total_bytes: int | None = None
     free_bytes: int | None = None
     mount_point: str | None = None
     card_name: str | None = None
