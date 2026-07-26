@@ -1,10 +1,12 @@
 import { IonButton, IonContent, IonPage } from '@ionic/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary } from '../api/mobile';
+import { commandsApi } from '../api/commands';
 
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
+const TEST_RUN_SECONDS = 60;
 
 const zoneNumberFromRef = (ref: string): number | null => {
   const match = ref.match(/(?:zone|out|output|valve)[-_]?(\d+)$/i);
@@ -40,8 +42,10 @@ export function IrrigationSetupPage() {
   const [zones, setZones] = useState<IrrigationZone[]>([]);
   const [outputs, setOutputs] = useState<IrrigationOutput[]>([]);
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, { name: string; enabled: boolean }>>({});
+  const [testRunZoneRefs, setTestRunZoneRefs] = useState<Record<string, boolean>>({});
   const [busyAction, setBusyAction] = useState('');
   const [feedback, setFeedback] = useState('');
+  const testRunTimers = useRef<Record<string, number>>({});
 
   const selectedDevice = useMemo(
     () => devices.find((device) => device.device_id === selectedDeviceId) || null,
@@ -97,10 +101,15 @@ export function IrrigationSetupPage() {
     if (!selectedDeviceId) {
       setZones([]);
       setOutputs([]);
+      setTestRunZoneRefs({});
       return;
     }
     reloadDeviceSetup(selectedDeviceId).catch(console.error);
   }, [reloadDeviceSetup, selectedDeviceId]);
+
+  useEffect(() => () => {
+    Object.values(testRunTimers.current).forEach((timerId) => window.clearTimeout(timerId));
+  }, []);
 
   const outputRefForZone = useCallback((zoneRef: string) => {
     const zoneNumber = zoneNumberFromRef(zoneRef);
@@ -189,6 +198,53 @@ export function IrrigationSetupPage() {
     }));
   };
 
+  const clearTestRun = useCallback((zoneRef: string) => {
+    const timerId = testRunTimers.current[zoneRef];
+    if (timerId != null) {
+      window.clearTimeout(timerId);
+      delete testRunTimers.current[zoneRef];
+    }
+    setTestRunZoneRefs((prev) => {
+      const next = { ...prev };
+      delete next[zoneRef];
+      return next;
+    });
+  }, []);
+
+  const markTestRunning = useCallback((zoneRef: string) => {
+    clearTestRun(zoneRef);
+    setTestRunZoneRefs((prev) => ({ ...prev, [zoneRef]: true }));
+    testRunTimers.current[zoneRef] = window.setTimeout(() => {
+      clearTestRun(zoneRef);
+    }, TEST_RUN_SECONDS * 1000);
+  }, [clearTestRun]);
+
+  const toggleZoneTest = async (zone: IrrigationZone) => {
+    const localRef = zone.local_ref || zone.zone_id;
+    if (!selectedDeviceId || !localRef) {
+      setFeedback('Select a controller before testing a zone.');
+      return;
+    }
+    const isRunning = Boolean(testRunZoneRefs[localRef]);
+    setBusyAction(`test:${zone.zone_id}`);
+    setFeedback('');
+    try {
+      if (isRunning) {
+        await commandsApi.stopIrrigationZone(selectedDeviceId, localRef);
+        clearTestRun(localRef);
+        setFeedback(`Stopped test run for ${localRef}.`);
+      } else {
+        await commandsApi.startIrrigationZone(selectedDeviceId, localRef, TEST_RUN_SECONDS);
+        markTestRunning(localRef);
+        setFeedback(`Started ${TEST_RUN_SECONDS} second test run for ${localRef}.`);
+      }
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const masterValveEnabled = zones.some((zone) => zoneDrafts[zone.zone_id]?.enabled ?? zone.enabled);
 
   return (
@@ -242,6 +298,8 @@ export function IrrigationSetupPage() {
                 const localRef = zone.local_ref || zone.zone_id;
                 const output = outputs.find((item) => item.local_ref === outputRefForZone(localRef));
                 const isSaving = busyAction === `zone:${zone.zone_id}`;
+                const isTesting = busyAction === `test:${zone.zone_id}`;
+                const isTestRunning = Boolean(testRunZoneRefs[localRef]);
                 return (
                   <article key={zone.zone_id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -264,9 +322,20 @@ export function IrrigationSetupPage() {
                       value={draft.name}
                       onChange={(event) => updateZoneDraft(zone.zone_id, { name: event.target.value })}
                     />
-                    <IonButton className="mt-3" size="small" expand="block" disabled={!selectedDeviceId || isSaving} onClick={() => { void saveZone(zone, draft); }}>
-                      {isSaving ? 'Saving...' : 'Save'}
-                    </IonButton>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <IonButton size="small" expand="block" disabled={!selectedDeviceId || isSaving || isTesting} onClick={() => { void saveZone(zone, draft); }}>
+                        {isSaving ? 'Saving...' : 'Save'}
+                      </IonButton>
+                      <IonButton
+                        size="small"
+                        expand="block"
+                        color={isTestRunning ? 'danger' : 'medium'}
+                        disabled={!selectedDeviceId || isSaving || isTesting || (!draft.enabled && !isTestRunning)}
+                        onClick={() => { void toggleZoneTest(zone); }}
+                      >
+                        {isTesting ? 'Sending...' : isTestRunning ? 'Stop test' : 'Test 1 min'}
+                      </IonButton>
+                    </div>
                   </article>
                 );
               })}
