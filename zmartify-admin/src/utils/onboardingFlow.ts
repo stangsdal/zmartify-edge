@@ -12,19 +12,20 @@ export interface OnboardingFlowState {
 }
 
 const KEY = 'zmartify_onboarding_flow_v1';
+const DEFAULT_ONBOARDING_URL = 'http://zmartify-irrigation.local';
 
 export const onboardingFlow = {
   load(): OnboardingFlowState {
     try {
       const raw = localStorage.getItem(KEY);
-      if (!raw) return { baseUrl: 'http://192.168.10.57' };
+      if (!raw) return { baseUrl: DEFAULT_ONBOARDING_URL };
       const parsed = JSON.parse(raw) as OnboardingFlowState;
       return {
         ...parsed,
-        baseUrl: parsed.baseUrl || 'http://192.168.10.57',
+        baseUrl: parsed.baseUrl || DEFAULT_ONBOARDING_URL,
       };
     } catch {
-      return { baseUrl: 'http://192.168.10.57' };
+      return { baseUrl: DEFAULT_ONBOARDING_URL };
     }
   },
 

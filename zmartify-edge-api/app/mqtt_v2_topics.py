@@ -58,6 +58,15 @@ def command_topics_for_zone_name(device_id: str, zone_id: int) -> list[str]:
     return [legacy]
 
 
+def command_topic_for_irrigation(device_id: str, command_type: str) -> str:
+    safe_device = _clean_segment(device_id, "device")
+    action = str(command_type or "command").strip().lower()
+    if action.startswith("irrigation."):
+        action = action[len("irrigation.") :]
+    safe_action = "/".join(_clean_segment(part, "command") for part in action.replace(".", "/").split("/") if part)
+    return f"{_v2_base()}/devices/{safe_device}/commands/irrigation/{safe_action or 'command'}"
+
+
 def outcome_subscription_topics(device_id: str) -> list[str]:
     safe_device = _clean_segment(device_id, "device")
 

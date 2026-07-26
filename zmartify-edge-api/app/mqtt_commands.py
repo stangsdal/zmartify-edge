@@ -9,7 +9,7 @@ import uuid
 
 from app.contracts import ContractValidationError, validate_mqtt_v2_command
 from app.registry import get_device_mqtt_credentials
-from app.mqtt_v2_topics import command_topics_for_setpoint, command_topics_for_zone_name
+from app.mqtt_v2_topics import command_topic_for_irrigation, command_topics_for_setpoint, command_topics_for_zone_name
 
 
 class MqttCommandError(RuntimeError):
@@ -149,6 +149,26 @@ def _build_v2_command_payload(*, command_type: str, target_ref: str | None, para
     except ContractValidationError as exc:
         raise MqttCommandError(f"mqtt v2 command payload invalid: {exc}") from exc
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def publish_irrigation_command(device_id: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+    payload = {
+        "schema_version": "2.0",
+        "command_id": f"cmd-{uuid.uuid4().hex[:16]}",
+        "command_type": command_type,
+        "target_ref": target_ref,
+        "parameters": parameters or {},
+        "requested_at": _now_iso(),
+        "expires_at": None,
+    }
+    try:
+        validate_mqtt_v2_command(payload)
+    except ContractValidationError as exc:
+        raise MqttCommandError(f"mqtt v2 command payload invalid: {exc}") from exc
+
+    topic = command_topic_for_irrigation(device_id, command_type)
+    _publish_to_topic(device_id, topic, json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    return {"command_id": payload["command_id"], "status": "published", "topic": topic}
 
 
 def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c: float) -> None:

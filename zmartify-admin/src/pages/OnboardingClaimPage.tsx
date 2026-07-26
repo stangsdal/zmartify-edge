@@ -83,6 +83,10 @@ export function OnboardingClaimPage() {
     }
   };
 
+  const firmwareVersion = flow.discovery?.identity.firmware?.version || flow.discovery?.identity.firmware_version || 'unknown';
+  const productLabel = flow.discovery?.identity.product_model || flow.discovery?.identity.product_type || flow.discovery?.identity.hardware || 'Zmartify controller';
+  const capabilities = flow.discovery?.identity.capabilities || [];
+
   return (
     <IonPage>
       <AppHeader title="Onboarding" subtitle="Claim and provision" />
@@ -95,9 +99,11 @@ export function OnboardingClaimPage() {
             {flow.discovery ? (
               <div className="text-sm mt-2 text-muted">
                 <p>Device: {flow.discovery.identity.device_id}</p>
-                <p>Firmware: {flow.discovery.identity.firmware_version}</p>
+                <p>Product: {productLabel}</p>
+                <p>Firmware: {firmwareVersion}</p>
                 <p>State: {flow.discovery.status.state}</p>
                 <p>Mode: {flow.mode === 'new' ? 'New claim' : 'Re-claim existing device'}</p>
+                {capabilities.length ? <p>Capabilities: {capabilities.join(', ')}</p> : null}
               </div>
             ) : null}
 

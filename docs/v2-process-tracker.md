@@ -38,6 +38,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: setpoint-outcome MQTT listener extraction from `main.py` into dedicated module with unit tests.
 - Completed: system-status router extraction (`health`, `registry/status`, `admin/acl/*`) from `main.py` into `app/router_system_status.py` with dead-import cleanup.
 - Completed: mqtt-clients router extraction (`/mqtt/clients/*`) from `main.py` into `app/router_mqtt_clients.py`.
+- Completed: setup/auth/invite router extraction (`/setup/status`, `/auth/*`, `/admin/invites/register*`) from `main.py` into `app/router_auth_invites.py` with legacy route compatibility preserved.
+- Completed: legacy domain/site router extraction (`/domains*`, `/sites/{id}`) from `main.py` into `app/router_domains_sites.py` with audit and response-model behavior preserved.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`
@@ -91,6 +93,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: per-device irrigation alarm history navigation from Alerts into enriched irrigation detail surface with realtime event history and operations-state snapshots.
 - Completed: irrigation programs and hydraulics/power app-shell surfaces now consume real backend program/schedule data and realtime overview/status traces.
 - Completed: irrigation program management actions in app shell (create program, enable/pause toggle, add schedule, run now) bound to v2 program endpoints.
+- Completed: irrigation setup/control UX increment: app-shell setup screen binds zone/output configuration to v2 upsert endpoints, overview exposes setup navigation, and zone detail supports bounded start plus per-zone stop commands with realtime feedback history.
 - Open: complete remaining UX parity screens and deeper API bindings.
 
 8. Phase 7 - HVAC firmware alignment: `completed`
@@ -175,4 +178,4 @@ Paused 2026-07-12 with all repos clean and pushed. Resume points, in priority or
 4. Phase 9: remaining hardening checklist (homie state-topic retirement decision, backup restore drills in deployment, monitoring).
 5. Phase 10: native mobile packaging via Capacitor once UX parity is closed.
 
-Status snapshot at pause: Phases 0 and 7 `completed`; production runs v2-only topic style with enforce-mode contracts (HVAC firmware v0.3.0 live); irrigation v2 loop is code-complete on both sides and waits only on operational controller hardware.
+Status snapshot after irrigation UX increment: Phases 0 and 7 `completed`; production runs v2-only topic style with enforce-mode contracts (HVAC firmware v0.3.0 live); irrigation v2 loop is code-complete on both sides and waits only on operational controller hardware. App-shell irrigation setup/control now covers zone/output configuration, manual zone start/stop, stop-all, rain-delay, programs, hydraulics/power, weather, alerts, and realtime feedback surfaces.

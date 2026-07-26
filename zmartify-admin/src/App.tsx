@@ -26,6 +26,7 @@ import { IrrigationOverviewPage } from './pages/IrrigationOverviewPage';
 import { IrrigationProgramsPage } from './pages/IrrigationProgramsPage';
 import { IrrigationHydraulicsPage } from './pages/IrrigationHydraulicsPage';
 import { IrrigationManualPage } from './pages/IrrigationManualPage';
+import { IrrigationSetupPage } from './pages/IrrigationSetupPage';
 import { IrrigationWeatherPage } from './pages/IrrigationWeatherPage';
 import { IrrigationZoneDetailPage } from './pages/IrrigationZoneDetailPage';
 import { InsightsWaterPage } from './pages/InsightsWaterPage';
@@ -251,6 +252,11 @@ export function App() {
             exact
             path={`${appBase}/control/irrigation/manual`}
               render={() => requireAuth(<IrrigationManualPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/control/irrigation/setup`}
+              render={() => requireAuth(<IrrigationSetupPage />)}
           />
           <Route
             exact

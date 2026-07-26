@@ -22,22 +22,14 @@ from app.auth import (
     delete_user,
     ensure_bootstrap_owner,
     get_user,
-    issue_registration_invites_bulk,
-    issue_registration_invite,
-    is_initialized,
-    list_registration_invites,
     list_audit_logs,
     list_user_site_access,
     list_users,
-    login,
-    logout_token,
-    register_user_with_invite,
     require_any_role,
     reset_user_password,
     set_user_enabled,
     set_user_roles,
     set_user_site_access,
-    validate_registration_invite,
 )
 from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
 from app.db import get_connection, initialize_database
@@ -85,7 +77,6 @@ from app.mqtt_commands import (
     publish_zone_name_command,
     should_forward_setpoint_commands,
 )
-from app.irrigation_domain import set_irrigation_run_emit_hook
 from app.irrigation_domain import set_irrigation_run_emit_hook, set_irrigation_status_emit_hook
 from app.registry import (
     authenticate_device_admin_token,
@@ -94,27 +85,20 @@ from app.registry import (
     RegistryOperationError,
     assign_device_site,
     create_device,
-    create_domain,
-    create_site,
     delete_device,
-    delete_domain,
-    delete_site,
     get_device,
     get_device_admin_token,
     get_device_mqtt_credentials,
     get_device_onboarding_context,
-    get_domain,
-    get_site,
     list_devices,
-    list_domains,
-    list_sites,
-    rename_domain,
     rename_device,
     rotate_mqtt_client_password,
     ensure_device_admin_token,
     update_device_firmware_version,
     update_device_local_url,
 )
+from app.router_auth_invites import create_auth_invites_router
+from app.router_domains_sites import create_domains_sites_router
 from app.router_v2_auth_users import create_auth_users_v2_router
 from app.router_v2_core import create_core_v2_router
 from app.router_v2_device_ota import create_device_ota_v2_router
@@ -149,15 +133,11 @@ from app.schemas import (
     DevicePushConfigIn,
     DeviceRename,
     EventOut,
-    DomainCreate,
-    DomainRename,
-    DomainOut,
     MobileSetpointIn,
     MqttClientCreate,
     MqttClientOut,
     MqttCredentialOut,
     NotificationOut,
-    SetupStatusOut,
     ZoneMetadataIn,
     ZoneOut,
     ZoneRenameIn,
@@ -166,18 +146,7 @@ from app.schemas import (
     UserResetPasswordIn,
     UserRoleUpdateIn,
     UserSiteAccessUpdateIn,
-    AuthLoginIn,
-    AuthLoginOut,
     AuditLogOut,
-    AuthRegisterByInviteIn,
-    SiteCreate,
-    SiteOut,
-    InviteCreateIn,
-    InviteCreateOut,
-    InviteBulkCreateIn,
-    InviteBulkCreateOut,
-    InviteListItemOut,
-    InviteValidateOut,
 )
 
 app = FastAPI(title="Zmartify Edge API", version="0.1.0")
@@ -602,6 +571,8 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
 app.include_router(create_core_v2_router(_require_roles))
 app.include_router(create_system_status_router(_require_roles))
 app.include_router(create_mqtt_clients_router(_require_roles))
+app.include_router(create_auth_invites_router(_require_roles))
+app.include_router(create_domains_sites_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
@@ -669,195 +640,6 @@ def _build_device_push_payload(request: Request, device_id: str, claim_token: st
     if claim_token:
         payload["claim_token"] = claim_token
     return payload
-
-
-@app.get("/setup/status", response_model=SetupStatusOut)
-def setup_status() -> dict:
-    return {"initialized": is_initialized()}
-
-
-@app.post("/auth/login", response_model=AuthLoginOut)
-def auth_login(payload: AuthLoginIn) -> dict:
-    try:
-        token, expires_at, _user_id = login(payload.username, payload.password)
-        return {"access_token": token, "expires_at": expires_at}
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-
-
-@app.get("/auth/invite/validate", response_model=InviteValidateOut)
-def auth_validate_invite(token: str) -> dict:
-    return validate_registration_invite(token)
-
-
-@app.post("/auth/register", response_model=AuthLoginOut)
-def auth_register_by_invite(payload: AuthRegisterByInviteIn) -> dict:
-    try:
-        register_user_with_invite(
-            invite_token=payload.invite_token,
-            username=payload.username,
-            display_name=payload.display_name,
-            password=payload.password,
-            email=payload.email,
-        )
-        token, expires_at, _user_id = login(payload.username, payload.password)
-        return {"access_token": token, "expires_at": expires_at}
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.post("/auth/logout")
-def auth_logout(request: Request) -> dict:
-    auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    logout_token(auth_user.token_id, auth_user.user_id)
-    return {"ok": True}
-
-
-@app.get("/auth/me", response_model=UserOut)
-def auth_me(request: Request) -> dict:
-    auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    if auth_user.user_id is None:
-        return {
-            "id": 0,
-            "username": auth_user.username,
-            "email": None,
-            "display_name": "Emergency Owner",
-            "enabled": 1,
-            "created_at": "",
-            "updated_at": None,
-            "last_login_at": None,
-            "roles": sorted(auth_user.roles),
-        }
-    return get_user(auth_user.user_id)
-
-
-@app.post("/admin/invites/register", response_model=InviteCreateOut)
-def admin_create_registration_invite(payload: InviteCreateIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    auth_user = request.state.auth_user
-    try:
-        invite = issue_registration_invite(
-            actor_user_id=auth_user.user_id,
-            device_id=payload.device_id,
-            label=payload.label,
-            expires_hours=payload.expires_hours,
-        )
-        return invite
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.post("/admin/invites/register/bulk", response_model=InviteBulkCreateOut)
-def admin_create_registration_invites_bulk(payload: InviteBulkCreateIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    auth_user = request.state.auth_user
-    try:
-        return issue_registration_invites_bulk(
-            actor_user_id=auth_user.user_id,
-            device_ids=payload.device_ids,
-            label_prefix=payload.label_prefix,
-            expires_hours=payload.expires_hours,
-        )
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.get("/admin/invites/register", response_model=list[InviteListItemOut])
-def admin_list_registration_invites(request: Request, limit: int = 200) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
-    return list_registration_invites(limit=limit)
-
-
-@app.post("/domains", response_model=DomainOut, status_code=status.HTTP_201_CREATED)
-def api_create_domain(payload: DomainCreate, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        domain = create_domain(payload.slug, payload.name)
-        audit_action(actor_user_id=request.state.auth_user.user_id, action="create_domain", resource_type="domain", resource_id=str(domain["id"]))
-        return domain
-    except RegistryConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@app.get("/domains", response_model=list[DomainOut])
-def api_list_domains(request: Request) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return list_domains()
-
-
-@app.get("/domains/{domain_id}", response_model=DomainOut)
-def api_get_domain(domain_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    try:
-        return get_domain(domain_id)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.post("/domains/{domain_id}/rename", response_model=DomainOut)
-def api_rename_domain(domain_id: int, payload: DomainRename, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        return rename_domain(domain_id, payload.name)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.delete("/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_domain(domain_id: int, request: Request) -> Response:
-    _require_roles(request, {ROLE_OWNER})
-    try:
-        delete_domain(domain_id)
-        audit_action(actor_user_id=request.state.auth_user.user_id, action="delete_domain", resource_type="domain", resource_id=str(domain_id))
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@app.post("/domains/{domain_id}/sites", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
-def api_create_site(domain_id: int, payload: SiteCreate, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        site = create_site(domain_id, payload.slug, payload.name)
-        audit_action(actor_user_id=request.state.auth_user.user_id, action="create_site", resource_type="site", resource_id=str(site["id"]))
-        return site
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except RegistryConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@app.get("/domains/{domain_id}/sites", response_model=list[SiteOut])
-def api_list_sites(domain_id: int, request: Request) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    try:
-        return list_sites(domain_id)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.get("/sites/{site_id}", response_model=SiteOut)
-def api_get_site(site_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    try:
-        return get_site(site_id)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_site(site_id: int, request: Request) -> Response:
-    _require_roles(request, {ROLE_OWNER})
-    try:
-        delete_site(site_id)
-        audit_action(actor_user_id=request.state.auth_user.user_id, action="delete_site", resource_type="site", resource_id=str(site_id))
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/devices", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)

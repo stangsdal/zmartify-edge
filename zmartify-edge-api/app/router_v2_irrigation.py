@@ -27,6 +27,7 @@ from app.irrigation_domain import (
     upsert_irrigation_weather_state,
     upsert_irrigation_zone,
 )
+from app.mqtt_commands import MqttCommandError, publish_irrigation_command
 from app.registry import RegistryNotFoundError
 
 
@@ -110,6 +111,14 @@ class IrrigationWeatherIn(BaseModel):
 class RainDelayIn(BaseModel):
     delay_hours: int = Field(default=24, ge=1, le=168)
     reason: str | None = None
+
+
+class IrrigationCommandIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    command_type: str = Field(min_length=1)
+    target_ref: str | None = None
+    parameters: dict = Field(default_factory=dict)
 
 
 def create_irrigation_v2_router(require_roles) -> APIRouter:
@@ -341,6 +350,23 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
             return set_irrigation_rain_delay(device_id, delay_hours=payload.delay_hours, reason=payload.reason)
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.post("/api/v2/devices/{device_id}/commands")
+    def v2_publish_irrigation_command(device_id: str, payload: IrrigationCommandIn, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        if not payload.command_type.startswith("irrigation."):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only irrigation commands are supported by this endpoint")
+        try:
+            return publish_irrigation_command(
+                device_id,
+                command_type=payload.command_type,
+                target_ref=payload.target_ref,
+                parameters=payload.parameters,
+            )
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except MqttCommandError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     @router.post("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run")
     def v2_start_irrigation_program_run(device_id: str, program_id: str, request: Request, payload: IrrigationRunIn) -> dict:

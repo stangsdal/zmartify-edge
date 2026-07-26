@@ -77,6 +77,12 @@ export function OnboardingCompletePage() {
     }
   };
 
+  const discoveredCapabilities = flow.discovery?.identity.capabilities || [];
+  const isIrrigationController = discoveredCapabilities.some((capability) => capability.includes('irrigation'))
+    || flow.discovery?.identity.product_type?.includes('irrigation')
+    || flow.discovery?.identity.product_model?.includes('irrigation')
+    || deviceId?.includes('irrigation');
+
   return (
     <IonPage>
       <AppHeader title="Onboarding" subtitle="Completed" />
@@ -114,7 +120,9 @@ export function OnboardingCompletePage() {
               >
                 New onboarding
               </IonButton>
-              <IonButton onClick={() => history.push('/app/devices')}>Go to devices</IonButton>
+              <IonButton onClick={() => history.push(isIrrigationController ? '/app/control/irrigation/overview' : '/app/devices')}>
+                {isIrrigationController ? 'Open irrigation control' : 'Go to devices'}
+              </IonButton>
             </div>
           </section>
         </div>

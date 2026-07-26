@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { useLocation, useParams } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
-import { IrrigationDeviceOverview, mobileApi, MobileEvent, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
+import { IrrigationDeviceOverview, IrrigationZone, mobileApi, MobileEvent, subscribeRealtimeTopics } from '../api/mobile';
+import { commandsApi } from '../api/commands';
 
 interface RouteParams {
   zoneRef: string;
@@ -12,11 +13,14 @@ export function IrrigationZoneDetailPage() {
   const { zoneRef } = useParams<RouteParams>();
   const location = useLocation();
   const resolvedRef = decodeURIComponent(zoneRef);
-  const [zone, setZone] = useState<MobileZone | null>(null);
+  const [zone, setZone] = useState<IrrigationZone | null>(null);
   const [deviceId, setDeviceId] = useState('');
   const [siteId, setSiteId] = useState('');
   const [deviceOverview, setDeviceOverview] = useState<IrrigationDeviceOverview | null>(null);
   const [events, setEvents] = useState<MobileEvent[]>([]);
+  const [durationMinutes, setDurationMinutes] = useState(10);
+  const [busyAction, setBusyAction] = useState('');
+  const [commandFeedback, setCommandFeedback] = useState('');
 
   const locationDeviceId = useMemo(() => new URLSearchParams(location.search).get('deviceId') || '', [location.search]);
 
@@ -26,9 +30,10 @@ export function IrrigationZoneDetailPage() {
       for (const site of sites.sites || []) {
         const siteDetail = await mobileApi.getSite(site.site_id);
         for (const device of siteDetail.devices) {
-          const detail = await mobileApi.getDevice(device.device_id);
+          if (locationDeviceId && device.device_id !== locationDeviceId) continue;
+          const detail = await mobileApi.listIrrigationZones(device.device_id);
           for (const candidate of detail.zones || []) {
-            const candidateRef = candidate.zone_uuid || `${device.device_id}:${candidate.zone_id}`;
+            const candidateRef = candidate.zone_id;
             if (candidateRef === resolvedRef) {
               setZone(candidate);
               setDeviceId(device.device_id);
@@ -39,8 +44,8 @@ export function IrrigationZoneDetailPage() {
               const eventResponse = await mobileApi.listEvents(80, { siteId: site.site_id });
               const filtered = (eventResponse.events || []).filter((event) => {
                 const eventDeviceId = event.device_id || (typeof event.payload?.device_id === 'string' ? event.payload.device_id : '');
-                const eventZoneId = event.zone_id ?? (typeof event.payload?.zone_id === 'number' ? event.payload.zone_id : null);
-                return eventDeviceId === device.device_id && (eventZoneId == null || eventZoneId === candidate.zone_id);
+                const eventZoneRef = typeof event.payload?.target_ref === 'string' ? event.payload.target_ref : null;
+                return eventDeviceId === device.device_id && (eventZoneRef == null || eventZoneRef === candidate.local_ref || eventZoneRef === candidate.zone_id);
               });
               setEvents(filtered.slice(0, 20));
               return;
@@ -99,12 +104,34 @@ export function IrrigationZoneDetailPage() {
 
   const stateLabel = useMemo(() => {
     if (!zone) return 'Unknown';
-    if (zone.online === false) return 'Offline';
-    if (zone.active || zone.demand) return 'Running';
-    return 'Idle';
-  }, [zone]);
+    if (!zone.enabled) return 'Disabled';
+    if ((deviceOverview?.outputs?.active || 0) > 0) return 'Running';
+    return 'Ready';
+  }, [deviceOverview, zone]);
 
   const eventRows = useMemo(() => events.slice(0, 8), [events]);
+
+  const runZoneCommand = async (action: 'start' | 'stop') => {
+    if (!zone || !deviceId) {
+      setCommandFeedback('Zone command is unavailable until the controller and zone are loaded.');
+      return;
+    }
+    const targetRef = zone.local_ref || zone.zone_id;
+    setBusyAction(action);
+    setCommandFeedback('');
+    try {
+      const result = action === 'start'
+        ? await commandsApi.startIrrigationZone(deviceId, targetRef, durationMinutes * 60)
+        : await commandsApi.stopIrrigationZone(deviceId, targetRef);
+      const status = typeof result.status === 'string' ? result.status : 'submitted';
+      const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
+      setCommandFeedback(`${action === 'start' ? 'Start' : 'Stop'} command ${status}. Command id: ${commandId}`);
+    } catch (error) {
+      setCommandFeedback(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
 
   return (
     <IonPage>
@@ -114,28 +141,48 @@ export function IrrigationZoneDetailPage() {
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Status</p>
             <p className="text-xl font-bold mt-1">{stateLabel}</p>
-            <p className="text-sm text-muted mt-2">Zone ref: {resolvedRef}</p>
+            <p className="text-sm text-muted mt-2">Local ref: {zone?.local_ref || resolvedRef}</p>
             {deviceId ? <p className="text-sm text-muted mt-1">Device: {deviceId}</p> : null}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <select
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                value={durationMinutes}
+                onChange={(event) => setDurationMinutes(Number(event.target.value))}
+              >
+                {[5, 10, 15, 20, 30, 45].map((value) => <option key={value} value={value}>{value} min</option>)}
+              </select>
+              <button
+                type="button"
+                className="rounded-xl bg-teal-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                disabled={!zone || !deviceId || busyAction === 'start'}
+                onClick={() => { void runZoneCommand('start'); }}
+              >
+                {busyAction === 'start' ? 'Starting...' : 'Start zone'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                disabled={!zone || !deviceId || busyAction === 'stop'}
+                onClick={() => { void runZoneCommand('stop'); }}
+              >
+                {busyAction === 'stop' ? 'Stopping...' : 'Stop zone'}
+              </button>
+            </div>
+            {commandFeedback ? <p className="text-sm text-muted mt-2">{commandFeedback}</p> : null}
           </section>
 
           <section className="grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
               <p className="text-xs uppercase tracking-wide text-muted">Current reading</p>
-              <p className="text-2xl font-bold mt-1">
-                {zone?.current_temperature_c == null ? '--' : `${zone.current_temperature_c.toFixed(1)}°`}
-              </p>
+              <p className="text-2xl font-bold mt-1">{deviceOverview?.hydraulics?.water_liters == null ? '--' : `${Math.round(deviceOverview.hydraulics.water_liters).toLocaleString()} L`}</p>
             </div>
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
-              <p className="text-xs uppercase tracking-wide text-muted">Target value</p>
-              <p className="text-2xl font-bold mt-1">
-                {zone?.target_temperature_c == null ? '--' : `${zone.target_temperature_c.toFixed(1)}°`}
-              </p>
+              <p className="text-xs uppercase tracking-wide text-muted">Output ref</p>
+              <p className="text-2xl font-bold mt-1">{zone?.local_ref || '--'}</p>
             </div>
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
-              <p className="text-xs uppercase tracking-wide text-muted">Freshness</p>
-              <p className="text-2xl font-bold mt-1">
-                {zone?.freshness_age_ms == null ? '--' : `${Math.floor(zone.freshness_age_ms / 1000)}s`}
-              </p>
+              <p className="text-xs uppercase tracking-wide text-muted">Enabled</p>
+              <p className="text-2xl font-bold mt-1">{zone?.enabled ? 'Yes' : 'No'}</p>
             </div>
           </section>
 

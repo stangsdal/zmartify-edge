@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
+import { IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 import { commandsApi } from '../api/commands';
 
 const durations = [5, 10, 15, 20, 30, 45];
 
 interface ZoneCandidate {
   deviceId: string;
-  zone: MobileZone;
+  displayName: string;
+  zone: IrrigationZone;
+  active: boolean;
   zoneRef: string;
 }
 
@@ -39,14 +41,19 @@ export function IrrigationManualPage() {
     if (!selectedSite) return;
     const loadSiteZones = async () => {
       const site = await mobileApi.getSite(selectedSite);
-      const detailRows = await Promise.all(site.devices.map((device) => mobileApi.getDevice(device.device_id)));
-      const nextZones = detailRows.flatMap((detail) =>
-        (detail.zones || []).map((zone) => ({
-          deviceId: detail.device_id,
+      const overview = await mobileApi.getIrrigationOverview(selectedSite);
+      const activeDeviceIds = new Set((overview.devices || []).filter((device) => device.outputs.active > 0).map((device) => device.device_id));
+      const detailRows = await Promise.all(site.devices.map(async (device) => {
+        const response = await mobileApi.listIrrigationZones(device.device_id);
+        return (response.zones || []).map((zone: IrrigationZone) => ({
+          deviceId: device.device_id,
+          displayName: device.display_name,
           zone,
-          zoneRef: zone.zone_uuid || `${detail.device_id}:${zone.zone_id}`,
-        }))
-      );
+          active: activeDeviceIds.has(device.device_id),
+          zoneRef: zone.local_ref || zone.zone_id,
+        }));
+      }));
+      const nextZones = detailRows.flat();
       setZones(nextZones);
       if (nextZones.length) {
         const firstRef = nextZones[0].zoneRef;
@@ -148,8 +155,8 @@ export function IrrigationManualPage() {
                     className={`text-left rounded-xl px-3 py-2 border ${active ? 'border-teal-500 bg-teal-50' : 'border-slate-200'}`}
                     onClick={() => setSelectedZoneRef(ref)}
                   >
-                    <p className="font-semibold">{zone.zone.name || `Zone ${zone.zone.zone_id}`}</p>
-                    <p className="text-sm text-muted">{zone.zone.active || zone.zone.demand ? 'Running' : 'Idle'}</p>
+                    <p className="font-semibold">{zone.zone.name || zone.zone.local_ref}</p>
+                    <p className="text-sm text-muted">{zone.displayName} · {!zone.zone.enabled ? 'Disabled' : zone.active ? 'Running' : 'Ready'}</p>
                   </button>
                 );
               })}
@@ -176,7 +183,7 @@ export function IrrigationManualPage() {
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Command preview</p>
             <p className="text-base mt-1 font-semibold">
-              {selectedZone ? `${selectedZone.zone.name || `Zone ${selectedZone.zone.zone_id}`} for ${duration} minutes` : 'Select a zone'}
+              {selectedZone ? `${selectedZone.zone.name || selectedZone.zone.local_ref} for ${duration} minutes` : 'Select a zone'}
             </p>
             <button
               type="button"

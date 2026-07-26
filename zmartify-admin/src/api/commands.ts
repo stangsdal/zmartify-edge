@@ -12,13 +12,16 @@ const normalizeError = (error: unknown): string => {
 };
 
 export const commandsApi = {
-  async startIrrigationZone(deviceId: string, zoneRef: string, durationSeconds: number): Promise<DeviceCommandResult> {
+  async sendIrrigationCommand(
+    deviceId: string,
+    commandType: string,
+    targetRef?: string | null,
+    parameters: Record<string, unknown> = {},
+  ): Promise<DeviceCommandResult> {
     const commandPayload = {
-      command_type: 'irrigation.zone.start',
-      target_ref: zoneRef,
-      parameters: {
-        duration_seconds: durationSeconds,
-      },
+      command_type: commandType,
+      target_ref: targetRef || undefined,
+      parameters,
     };
 
     try {
@@ -32,5 +35,21 @@ export const commandsApi = {
         throw new Error(`No compatible command endpoint detected. Tried v2 and legacy path. Details: ${first} | ${second}`);
       }
     }
+  },
+
+  async startIrrigationZone(deviceId: string, zoneRef: string, durationSeconds: number): Promise<DeviceCommandResult> {
+    return this.sendIrrigationCommand(deviceId, 'irrigation.zone.start', zoneRef, { duration_seconds: durationSeconds });
+  },
+
+  async stopIrrigationZone(deviceId: string, zoneRef: string): Promise<DeviceCommandResult> {
+    return this.sendIrrigationCommand(deviceId, 'irrigation.zone.stop', zoneRef);
+  },
+
+  async stopIrrigation(deviceId: string): Promise<DeviceCommandResult> {
+    return this.sendIrrigationCommand(deviceId, 'irrigation.stop_all');
+  },
+
+  async setIrrigationRainDelay(deviceId: string, delayHours: number, reason = 'app'): Promise<DeviceCommandResult> {
+    return this.sendIrrigationCommand(deviceId, 'irrigation.rain_delay', null, { delay_hours: delayHours, reason });
   },
 };

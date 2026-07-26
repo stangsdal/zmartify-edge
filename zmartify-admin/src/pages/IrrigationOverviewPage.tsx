@@ -3,7 +3,14 @@ import { IonContent, IonPage } from '@ionic/react';
 import { NavLink } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { IrrigationSiteOverview, IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
+import { commandsApi } from '../api/commands';
+
+interface DeviceZoneRow {
+  deviceId: string;
+  displayName: string;
+  zone: IrrigationZone;
+}
 
 const parseNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -35,8 +42,11 @@ const extractFromPayload = (payload: unknown, keys: string[]): number | null => 
 export function IrrigationOverviewPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
-  const [zones, setZones] = useState<MobileZone[]>([]);
+  const [overview, setOverview] = useState<IrrigationSiteOverview | null>(null);
+  const [zones, setZones] = useState<DeviceZoneRow[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
+  const [busyAction, setBusyAction] = useState('');
+  const [actionFeedback, setActionFeedback] = useState('');
 
   useEffect(() => {
     const loadSites = async () => {
@@ -54,39 +64,78 @@ export function IrrigationOverviewPage() {
   useEffect(() => {
     if (!selectedSite) return;
     const loadSiteZones = async () => {
-      const site = await mobileApi.getSite(selectedSite);
-      const detailRows = await Promise.all(site.devices.map((device) => mobileApi.getDevice(device.device_id)));
-      setZones(detailRows.flatMap((detail) => detail.zones || []));
+      const [site, irrigationOverview] = await Promise.all([
+        mobileApi.getSite(selectedSite),
+        mobileApi.getIrrigationOverview(selectedSite),
+      ]);
+      setOverview(irrigationOverview);
+      const detailRows = await Promise.all(
+        site.devices.map(async (device) => {
+          const response = await mobileApi.listIrrigationZones(device.device_id);
+          return (response.zones || []).map((zone) => ({
+            deviceId: device.device_id,
+            displayName: device.display_name,
+            zone,
+          }));
+        })
+      );
+      setZones(detailRows.flat());
     };
     loadSiteZones().catch(console.error);
   }, [selectedSite]);
 
-  const activeZones = useMemo(() => zones.filter((zone) => zone.demand || zone.active), [zones]);
+  const activeDeviceIds = useMemo(() => new Set((overview?.devices || []).filter((device) => device.outputs.active > 0).map((device) => device.device_id)), [overview]);
+  const activeZones = useMemo(() => zones.filter((row) => activeDeviceIds.has(row.deviceId)), [activeDeviceIds, zones]);
   const activeZone = activeZones[0] || null;
+  const commandDeviceId = useMemo(() => activeZone?.deviceId || overview?.devices[0]?.device_id || zones[0]?.deviceId || '', [activeZone, overview, zones]);
+
+  const runDeviceAction = async (action: 'stop' | 'rain-delay') => {
+    if (!commandDeviceId) {
+      setActionFeedback('No irrigation controller is available for this site.');
+      return;
+    }
+    setBusyAction(action);
+    setActionFeedback('');
+    try {
+      const result = action === 'stop'
+        ? await commandsApi.stopIrrigation(commandDeviceId)
+        : await commandsApi.setIrrigationRainDelay(commandDeviceId, 24, 'app');
+      const status = typeof result.status === 'string' ? result.status : 'submitted';
+      const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
+      setActionFeedback(`${action === 'stop' ? 'Stop all' : 'Rain delay'} command ${status}. Command id: ${commandId}`);
+    } catch (error) {
+      setActionFeedback(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
 
   const flowLpm = useMemo(() => {
     for (const event of events) {
       const value = extractFromPayload(event.payload, ['flow_lpm', 'flow']);
       if (value != null) return value;
     }
-    return activeZone ? 26 + Math.min(9, activeZones.length * 1.8) : null;
-  }, [activeZone, activeZones.length, events]);
+    const value = overview?.devices.find((device) => device.hydraulics?.flow_lpm != null)?.hydraulics?.flow_lpm;
+    return value == null ? null : value;
+  }, [events, overview]);
 
   const pressureBar = useMemo(() => {
     for (const event of events) {
       const value = extractFromPayload(event.payload, ['pressure_bar', 'pressure']);
       if (value != null) return value;
     }
-    return activeZone ? 3.2 + Math.min(0.6, activeZones.length * 0.08) : null;
-  }, [activeZone, activeZones.length, events]);
+    const value = overview?.devices.find((device) => device.hydraulics?.pressure_bar != null)?.hydraulics?.pressure_bar;
+    return value == null ? null : value;
+  }, [events, overview]);
 
   const waterTodayLiters = useMemo(() => {
     for (const event of events) {
       const value = extractFromPayload(event.payload, ['water_liters', 'water_today_liters']);
       if (value != null) return Math.round(value);
     }
-    return Math.max(0, Math.round(zones.length * 112 + activeZones.length * 240));
-  }, [activeZones.length, events, zones.length]);
+    const water = (overview?.devices || []).reduce((sum, device) => sum + (device.hydraulics?.water_liters || 0), 0);
+    return Math.round(water);
+  }, [events, overview]);
 
   return (
     <IonPage>
@@ -104,7 +153,7 @@ export function IrrigationOverviewPage() {
             <p className="text-sm opacity-90">Status</p>
             <h1 className="text-3xl font-bold mt-1">{activeZone ? 'Running' : 'Idle'}</h1>
             <p className="mt-2 text-sm opacity-90">
-              {activeZone ? `${activeZone.name || 'Zone'} is active with normal hydraulic profile.` : 'No active irrigation run.'}
+              {activeZone ? `${activeZone.zone.name || 'Zone'} is active on ${activeZone.displayName}.` : 'No active irrigation run.'}
             </p>
             <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
               <div>
@@ -116,6 +165,25 @@ export function IrrigationOverviewPage() {
                 <p className="text-xl font-semibold">{pressureBar == null ? '--' : `${pressureBar.toFixed(1)} bar`}</p>
               </div>
             </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-xl bg-white/95 px-4 py-2 text-sm font-semibold text-teal-800 disabled:opacity-60"
+                disabled={!commandDeviceId || busyAction === 'stop'}
+                onClick={() => { void runDeviceAction('stop'); }}
+              >
+                {busyAction === 'stop' ? 'Stopping...' : 'Stop all'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-white/70 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={!commandDeviceId || busyAction === 'rain-delay'}
+                onClick={() => { void runDeviceAction('rain-delay'); }}
+              >
+                {busyAction === 'rain-delay' ? 'Setting...' : 'Rain delay 24h'}
+              </button>
+            </div>
+            {actionFeedback ? <p className="mt-3 text-sm opacity-90">{actionFeedback}</p> : null}
           </section>
 
           <section className="grid gap-3 md:grid-cols-3">
@@ -125,11 +193,11 @@ export function IrrigationOverviewPage() {
             </div>
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
               <p className="text-xs uppercase tracking-wide text-muted">Active zones</p>
-              <p className="text-2xl font-bold mt-1">{activeZones.length}</p>
+              <p className="text-2xl font-bold mt-1">{overview?.active_run_count || activeZones.length}</p>
             </div>
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
               <p className="text-xs uppercase tracking-wide text-muted">Total zones</p>
-              <p className="text-2xl font-bold mt-1">{zones.length}</p>
+              <p className="text-2xl font-bold mt-1">{overview?.zone_count || zones.length}</p>
             </div>
           </section>
 
@@ -141,6 +209,10 @@ export function IrrigationOverviewPage() {
             <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/manual">
               <p className="font-semibold">Manual run</p>
               <p className="text-sm text-muted mt-1">Start temporary irrigation with controlled duration.</p>
+            </NavLink>
+            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/setup">
+              <p className="font-semibold">Setup</p>
+              <p className="text-sm text-muted mt-1">Configure controller zones and valve outputs.</p>
             </NavLink>
             <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/programs">
               <p className="font-semibold">Programs</p>
@@ -155,16 +227,17 @@ export function IrrigationOverviewPage() {
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <h2 className="text-lg font-semibold mb-2">Zones</h2>
             <div className="space-y-2">
-              {zones.map((zone) => {
-                const zoneRef = zone.zone_uuid || `zone:${zone.zone_id}`;
+              {zones.map((row) => {
+                const zoneRef = row.zone.zone_id;
+                const active = activeDeviceIds.has(row.deviceId);
                 return (
                   <NavLink
                     key={zoneRef}
-                    to={`/app/control/irrigation/zones/${encodeURIComponent(zoneRef)}`}
+                    to={`/app/control/irrigation/zones/${encodeURIComponent(zoneRef)}?deviceId=${encodeURIComponent(row.deviceId)}`}
                     className="block rounded-xl border border-slate-200/70 p-3 no-underline text-current"
                   >
-                    <p className="font-semibold">{zone.name || `Zone ${zone.zone_id}`}</p>
-                    <p className="text-sm text-muted">State: {zone.active || zone.demand ? 'Running' : 'Idle'}</p>
+                    <p className="font-semibold">{row.zone.name || row.zone.local_ref}</p>
+                    <p className="text-sm text-muted">{row.displayName} · {row.zone.enabled ? (active ? 'Running' : 'Ready') : 'Disabled'}</p>
                   </NavLink>
                 );
               })}

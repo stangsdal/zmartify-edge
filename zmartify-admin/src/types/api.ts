@@ -29,10 +29,19 @@ export interface DeviceDiscovery {
   base_url: string;
   identity: {
     device_id: string;
-    mac: string;
-    firmware_version: string;
-    hardware: string;
-    capabilities: string[];
+    mac?: string;
+    firmware_version?: string;
+    hardware?: string;
+    manufacturer?: string;
+    product_type?: string;
+    product_model?: string;
+    hardware_revision?: string;
+    capabilities?: string[];
+    firmware?: {
+      version?: string;
+      build_id?: string;
+      esp_idf_version?: string;
+    };
   };
   claim: {
     device_id: string;

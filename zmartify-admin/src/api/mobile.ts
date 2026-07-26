@@ -236,6 +236,75 @@ export interface IrrigationDeviceOverview {
   } | null;
 }
 
+export interface IrrigationZone {
+  zone_id: string;
+  local_ref: string;
+  name: string;
+  enabled: boolean;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface IrrigationOutput {
+  output_id: string;
+  local_ref: string;
+  name: string;
+  enabled: boolean;
+  active: boolean;
+  fault?: string | null;
+  is_master_valve: boolean;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface IrrigationZoneUpsertPayload {
+  local_ref: string;
+  name: string;
+  enabled?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface IrrigationOutputUpsertPayload {
+  local_ref: string;
+  name: string;
+  enabled?: boolean;
+  active?: boolean;
+  fault?: string | null;
+  is_master_valve?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface IrrigationHydraulicsState {
+  device_id: string;
+  flow_lpm?: number | null;
+  pressure_bar?: number | null;
+  water_liters?: number | null;
+  source_timestamp?: string | null;
+  updated_at?: string | null;
+}
+
+export interface IrrigationPowerState {
+  device_id: string;
+  voltage_rms_v?: number | null;
+  current_rms_a?: number | null;
+  real_power_w?: number | null;
+  power_factor?: number | null;
+  source_timestamp?: string | null;
+  updated_at?: string | null;
+}
+
+export interface IrrigationWeatherState {
+  device_id: string;
+  temperature_c?: number | null;
+  rain_mm?: number | null;
+  wind_mps?: number | null;
+  eto_mm?: number | null;
+  source_timestamp?: string | null;
+  updated_at?: string | null;
+}
+
 export interface IrrigationSiteOverview {
   site_id: string;
   site_name: string;
@@ -291,7 +360,34 @@ export const mobileApi = {
   },
 
   getIrrigationOverview: (siteId: string): Promise<IrrigationSiteOverview> =>
-    apiClient.get(`/sites/${encodeURIComponent(siteId)}/irrigation/overview`),
+    apiClient.get(`/api/v2/sites/${encodeURIComponent(siteId)}/irrigation/overview`),
+
+  listIrrigationZones: (deviceId: string): Promise<{ device_id: string; zones: IrrigationZone[] }> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/zones`),
+
+  upsertIrrigationZone: (
+    deviceId: string,
+    payload: IrrigationZoneUpsertPayload,
+  ): Promise<{ device_id: string; zone: IrrigationZone }> =>
+    apiClient.put(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/zones`, payload),
+
+  listIrrigationOutputs: (deviceId: string): Promise<{ device_id: string; outputs: IrrigationOutput[] }> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/outputs`),
+
+  upsertIrrigationOutput: (
+    deviceId: string,
+    payload: IrrigationOutputUpsertPayload,
+  ): Promise<{ device_id: string; output: IrrigationOutput }> =>
+    apiClient.put(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/outputs`, payload),
+
+  getIrrigationHydraulics: (deviceId: string): Promise<IrrigationHydraulicsState> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/hydraulics`),
+
+  getIrrigationPower: (deviceId: string): Promise<IrrigationPowerState> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/power`),
+
+  getIrrigationWeather: (deviceId: string): Promise<IrrigationWeatherState> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/weather`),
 
   setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<MobileSetpointResponse> =>
     apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {

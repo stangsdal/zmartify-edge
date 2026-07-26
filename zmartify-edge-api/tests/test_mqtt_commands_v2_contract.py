@@ -70,3 +70,37 @@ def test_publish_zone_name_command_dual_mode_keeps_legacy_and_v2(monkeypatch):
     v2_payload = json.loads(messages[v2_idx])
     assert v2_payload["command_type"] == "hvac.zone.rename"
     assert v2_payload["parameters"]["name"] == "Kitchen"
+
+
+def test_publish_irrigation_command_uses_v2_irrigation_topic(monkeypatch):
+    calls: list[list[str]] = []
+
+    monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+
+    def _fake_run(cmd, capture_output, text, timeout):
+        calls.append(list(cmd))
+        return _Result(returncode=0)
+
+    monkeypatch.setattr(mqtt_commands.subprocess, "run", _fake_run)
+
+    result = mqtt_commands.publish_irrigation_command(
+        "zmartify-irrigation-01",
+        "irrigation.zone.start",
+        "zone:3",
+        {"duration_seconds": 600},
+    )
+
+    assert result["status"] == "published"
+    assert len(calls) == 1
+    cmd = calls[0]
+    topic = cmd[cmd.index("-t") + 1]
+    message = cmd[cmd.index("-m") + 1]
+
+    assert topic == "zmartify/v2/devices/zmartify-irrigation-01/commands/irrigation/zone/start"
+    payload = json.loads(message)
+    assert payload["schema_version"] == "2.0"
+    assert payload["command_id"] == result["command_id"]
+    assert payload["command_type"] == "irrigation.zone.start"
+    assert payload["target_ref"] == "zone:3"
+    assert payload["parameters"]["duration_seconds"] == 600
