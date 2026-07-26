@@ -202,6 +202,8 @@ export interface MobileDeviceFreshness {
 export interface IrrigationDeviceOverview {
   device_id: string;
   display_name: string;
+  online: boolean;
+  mqtt_connected: boolean;
   outputs: {
     total: number;
     active: number;

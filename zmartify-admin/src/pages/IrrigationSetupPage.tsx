@@ -95,8 +95,8 @@ export function IrrigationSetupPage() {
         display_name: device.display_name,
         device_type: 'irrigation',
         integration_mode: 'irrigation',
-        online: true,
-        mqtt_connected: true,
+        online: device.online,
+        mqtt_connected: device.mqtt_connected,
       })).filter(isIrrigationController);
       setDevices(controllerDevices);
       setSelectedDeviceId((prev) => (controllerDevices.some((device) => device.device_id === prev) ? prev : controllerDevices[0]?.device_id || ''));

@@ -815,7 +815,13 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
         site = _resolve_site(conn, site_ref)
 
         device_rows = conn.execute(
-            "SELECT id, device_id, display_name FROM devices WHERE site_id = ? ORDER BY id",
+            """
+            SELECT d.id, d.device_id, d.display_name, ds.online, ds.mqtt_connected
+            FROM devices d
+            LEFT JOIN device_state ds ON ds.device_id = d.id
+            WHERE d.site_id = ?
+            ORDER BY d.id
+            """,
             (site["id"],),
         ).fetchall()
         device_ids = [int(row["id"]) for row in device_rows]
@@ -891,6 +897,8 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
                 {
                     "device_id": row["device_id"],
                     "display_name": row["display_name"],
+                    "online": bool(row["online"]) if row["online"] is not None else False,
+                    "mqtt_connected": bool(row["mqtt_connected"]) if row["mqtt_connected"] is not None else False,
                     "outputs": {
                         "total": int(output_counts_row["total_count"] if output_counts_row is not None and output_counts_row["total_count"] is not None else 0),
                         "active": int(output_counts_row["active_count"] if output_counts_row is not None and output_counts_row["active_count"] is not None else 0),
