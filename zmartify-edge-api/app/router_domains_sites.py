@@ -17,8 +17,9 @@ from app.registry import (
     list_domains,
     list_sites,
     rename_domain,
+    update_site,
 )
-from app.schemas import DomainCreate, DomainOut, DomainRename, SiteCreate, SiteOut
+from app.schemas import DomainCreate, DomainOut, DomainRename, SiteCreate, SiteOut, SiteUpdate
 
 
 def create_domains_sites_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
@@ -69,7 +70,7 @@ def create_domains_sites_router(require_roles: Callable[[Request, set[str]], Non
     def api_create_site(domain_id: int, payload: SiteCreate, request: Request) -> dict:
         require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
         try:
-            site = create_site(domain_id, payload.slug, payload.name)
+            site = create_site(domain_id, payload.slug, payload.name, payload.address)
             audit_action(actor_user_id=request.state.auth_user.user_id, action="create_site", resource_type="site", resource_id=str(site["id"]))
             return site
         except RegistryNotFoundError as exc:
@@ -90,6 +91,16 @@ def create_domains_sites_router(require_roles: Callable[[Request, set[str]], Non
         require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         try:
             return get_site(site_id)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.put("/sites/{site_id}", response_model=SiteOut)
+    def api_update_site(site_id: int, payload: SiteUpdate, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        try:
+            site = update_site(site_id, name=payload.name, address=payload.address)
+            audit_action(actor_user_id=request.state.auth_user.user_id, action="update_site", resource_type="site", resource_id=str(site_id))
+            return site
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

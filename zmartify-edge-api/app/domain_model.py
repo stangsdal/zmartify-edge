@@ -495,7 +495,7 @@ def _resolve_device(conn: Any, device_external_id: str) -> dict[str, Any]:
 def _resolve_site(conn: Any, site_ref: str) -> dict[str, Any]:
     row = conn.execute(
         """
-        SELECT s.id, s.uuid, s.name, s.slug, s.domain_id,
+        SELECT s.id, s.uuid, s.name, s.slug, s.address, s.domain_id,
                d.uuid AS domain_uuid, d.slug AS domain_slug, d.name AS domain_name
         FROM sites s
         JOIN domains d ON d.id = s.domain_id
@@ -1821,6 +1821,7 @@ def list_mobile_sites(*, site_ids: set[int] | None = None) -> list[dict[str, Any
         rows = conn.execute(
             """
                  SELECT COALESCE(s.uuid, s.slug) AS site_id, s.slug AS site_slug, s.name AS site_name,
+                     s.address AS site_address,
                      COALESCE(d.uuid, d.slug) AS domain_id, d.name AS domain_name, d.slug AS domain_slug,
                    COUNT(dev.id) AS device_count
             FROM sites s
@@ -1854,6 +1855,7 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
         "site_id": site["uuid"] or site["slug"],
         "site_name": site["name"],
         "site_slug": site["slug"],
+        "site_address": site["address"],
         "domain": {
             "domain_id": site["domain_uuid"] or site["domain_slug"],
             "domain_name": site["domain_name"],

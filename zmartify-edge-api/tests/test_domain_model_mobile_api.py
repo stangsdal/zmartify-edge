@@ -59,9 +59,15 @@ def test_zone_metadata_and_mobile_shape(monkeypatch, tmp_path: Path):
     assert domain.status_code == 201
     domain_id = domain.json()["id"]
 
-    site = client.post(f"/domains/{domain_id}/sites", headers=headers, json={"slug": "main", "name": "Main"})
+    site = client.post(f"/domains/{domain_id}/sites", headers=headers, json={"slug": "main", "name": "Main", "address": "1 Main Street"})
     assert site.status_code == 201
     site_id = site.json()["id"]
+    assert site.json()["address"] == "1 Main Street"
+
+    update_site = client.put(f"/sites/{site_id}", headers=headers, json={"name": "Garden", "address": "2 Garden Lane"})
+    assert update_site.status_code == 200
+    assert update_site.json()["name"] == "Garden"
+    assert update_site.json()["address"] == "2 Garden Lane"
 
     device = client.post(
         "/devices",
@@ -77,6 +83,10 @@ def test_zone_metadata_and_mobile_shape(monkeypatch, tmp_path: Path):
 
     assign = client.post("/devices/hvac-gateway-aabbcc/assign-site", headers=headers, json={"site_id": site_id})
     assert assign.status_code == 200
+
+    mobile_site = client.get(f"/mobile/sites/{update_site.json()['uuid']}", headers=headers)
+    assert mobile_site.status_code == 200
+    assert mobile_site.json()["site_address"] == "2 Garden Lane"
 
     zones = client.get("/devices/hvac-gateway-aabbcc/zones", headers=headers)
     assert zones.status_code == 200

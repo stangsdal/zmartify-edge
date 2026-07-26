@@ -4,6 +4,7 @@ export interface MobileSiteSummary {
   site_id: string;
   site_slug: string;
   site_name: string;
+  site_address?: string | null;
   domain_id: string;
   domain_name: string;
   domain_slug: string;
@@ -26,6 +27,7 @@ export interface MobileSiteDetail {
   site_id: string;
   site_name: string;
   site_slug: string;
+  site_address?: string | null;
   domain: {
     domain_id: string;
     domain_name: string;

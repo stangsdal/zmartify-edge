@@ -40,6 +40,7 @@ class SiteCreate(BaseModel):
 
     slug: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    address: str | None = None
 
     @field_validator("slug")
     @classmethod
@@ -55,7 +56,15 @@ class SiteOut(BaseModel):
     domain_id: int
     slug: str
     name: str
+    address: str | None = None
     created_at: str
+
+
+class SiteUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
+    address: str | None = None
 
 
 class DeviceCreate(BaseModel):

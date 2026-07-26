@@ -9,6 +9,7 @@ export interface Site {
   domain_id: number;
   slug: string;
   name: string;
+  address?: string | null;
 }
 
 export interface Device {

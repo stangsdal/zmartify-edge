@@ -16,6 +16,7 @@ from app.registry import (
     list_domains,
     list_sites,
     rename_device,
+    update_site,
 )
 
 
@@ -46,10 +47,16 @@ def test_domain_site_device_crud(monkeypatch, tmp_path):
     assert len(list_domains()) == 1
     assert get_domain(domain["id"])["name"] == "Main House"
 
-    site = create_site(domain["id"], "ground-floor", "Ground Floor")
+    site = create_site(domain["id"], "ground-floor", "Ground Floor", "1 Main Street")
     assert site["domain_id"] == domain["id"]
+    assert site["address"] == "1 Main Street"
     assert len(list_sites(domain["id"])) == 1
     assert get_site(site["id"])["slug"] == "ground-floor"
+
+    updated_site = update_site(site["id"], name="Garden", address="2 Garden Lane")
+    assert updated_site["name"] == "Garden"
+    assert updated_site["address"] == "2 Garden Lane"
+    assert get_site(site["id"])["address"] == "2 Garden Lane"
 
     device = create_device(
         device_id="hvac-gateway-7a254c",

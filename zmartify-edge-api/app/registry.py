@@ -257,7 +257,7 @@ def rename_domain(domain_id: int, name: str) -> dict[str, Any]:
         return domain
 
 
-def create_site(domain_id: int, slug: str, name: str) -> dict[str, Any]:
+def create_site(domain_id: int, slug: str, name: str, address: str | None = None) -> dict[str, Any]:
     with get_connection() as conn:
         exists = conn.execute("SELECT 1 FROM domains WHERE id = ?", (domain_id,)).fetchone()
         if exists is None:
@@ -265,14 +265,14 @@ def create_site(domain_id: int, slug: str, name: str) -> dict[str, Any]:
 
         try:
             cur = conn.execute(
-                "INSERT INTO sites(uuid, domain_id, slug, name) VALUES (?, ?, ?, ?)",
-                (_new_uuid(), domain_id, slug, name),
+                "INSERT INTO sites(uuid, domain_id, slug, name, address) VALUES (?, ?, ?, ?, ?)",
+                (_new_uuid(), domain_id, slug, name, address),
             )
         except sqlite3.IntegrityError as exc:
             raise RegistryConflictError("site slug already exists in this domain") from exc
 
         row = conn.execute(
-            "SELECT id, uuid, domain_id, slug, name, created_at FROM sites WHERE id = ?",
+            "SELECT id, uuid, domain_id, slug, name, address, created_at FROM sites WHERE id = ?",
             (cur.lastrowid,),
         ).fetchone()
         site = _row_to_dict(row) or {}
@@ -288,7 +288,7 @@ def list_sites(domain_id: int) -> list[dict[str, Any]]:
             raise RegistryNotFoundError("domain not found")
 
         rows = conn.execute(
-            "SELECT id, uuid, domain_id, slug, name, created_at FROM sites WHERE domain_id = ? ORDER BY id",
+            "SELECT id, uuid, domain_id, slug, name, address, created_at FROM sites WHERE domain_id = ? ORDER BY id",
             (domain_id,),
         ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]
@@ -297,13 +297,31 @@ def list_sites(domain_id: int) -> list[dict[str, Any]]:
 def get_site(site_id: int) -> dict[str, Any]:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, uuid, domain_id, slug, name, created_at FROM sites WHERE id = ?",
+            "SELECT id, uuid, domain_id, slug, name, address, created_at FROM sites WHERE id = ?",
             (site_id,),
         ).fetchone()
         result = _row_to_dict(row)
         if result is None:
             raise RegistryNotFoundError("site not found")
         return result
+
+
+def update_site(site_id: int, *, name: str, address: str | None = None) -> dict[str, Any]:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE sites SET name = ?, address = ? WHERE id = ?",
+            (name, address, site_id),
+        )
+        if cur.rowcount == 0:
+            raise RegistryNotFoundError("site not found")
+        row = conn.execute(
+            "SELECT id, uuid, domain_id, slug, name, address, created_at FROM sites WHERE id = ?",
+            (site_id,),
+        ).fetchone()
+        site = _row_to_dict(row) or {}
+        if site:
+            _sync_site_to_core_v2(conn, site)
+        return site
 
 
 def delete_site(site_id: int) -> None:

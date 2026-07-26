@@ -23,7 +23,10 @@ export function SitesPage() {
   const [selectedDomainId, setSelectedDomainId] = useState('');
   const [newSiteSlug, setNewSiteSlug] = useState('');
   const [newSiteName, setNewSiteName] = useState('');
+  const [newSiteAddress, setNewSiteAddress] = useState('');
+  const [siteDrafts, setSiteDrafts] = useState<Record<number, { name: string; address: string }>>({});
   const [creating, setCreating] = useState(false);
+  const [savingSiteId, setSavingSiteId] = useState<number | null>(null);
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
@@ -65,6 +68,16 @@ export function SitesPage() {
     }
   }, [domains]);
 
+  useEffect(() => {
+    setSiteDrafts((prev) => {
+      const next: Record<number, { name: string; address: string }> = {};
+      for (const site of sites) {
+        next[site.id] = prev[site.id] || { name: site.name, address: site.address || '' };
+      }
+      return next;
+    });
+  }, [sites]);
+
   const handleCreateSite = async () => {
     if (!selectedDomainId || !newSiteSlug.trim() || !newSiteName.trim()) {
       setError('Domain, slug, and name are required');
@@ -72,9 +85,10 @@ export function SitesPage() {
     }
     try {
       setCreating(true);
-      await siteApi.create(parseInt(selectedDomainId), newSiteSlug, newSiteName);
+      await siteApi.create(parseInt(selectedDomainId), newSiteSlug, newSiteName, newSiteAddress.trim());
       setNewSiteSlug('');
       setNewSiteName('');
+      setNewSiteAddress('');
       setSelectedDomainId('');
       setShowForm(false);
       setError('');
@@ -83,6 +97,36 @@ export function SitesPage() {
       setError(String(e));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const updateSiteDraft = (siteId: number, patch: Partial<{ name: string; address: string }>) => {
+    setSiteDrafts((prev) => ({
+      ...prev,
+      [siteId]: {
+        name: prev[siteId]?.name || '',
+        address: prev[siteId]?.address || '',
+        ...patch,
+      },
+    }));
+  };
+
+  const handleUpdateSite = async (site: Site) => {
+    const draft = siteDrafts[site.id] || { name: site.name, address: site.address || '' };
+    const name = draft.name.trim();
+    if (!name) {
+      setError('Site name is required');
+      return;
+    }
+    try {
+      setSavingSiteId(site.id);
+      await siteApi.update(site.id, { name, address: draft.address.trim() || null });
+      setError('');
+      await fetchSites();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingSiteId(null);
     }
   };
 
@@ -179,6 +223,14 @@ export function SitesPage() {
                   placeholder="e.g., Main Floor"
                 />
               </IonItem>
+              <IonItem>
+                <IonLabel position="stacked">Address</IonLabel>
+                <IonInput
+                  value={newSiteAddress}
+                  onIonChange={(e) => setNewSiteAddress(e.detail.value || '')}
+                  placeholder="e.g., 1 Main Street"
+                />
+              </IonItem>
               <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
                 <IonButton expand="block" onClick={handleCreateSite}>
                   Create
@@ -194,20 +246,44 @@ export function SitesPage() {
               {sites.map((site) => (
                 <article key={site.id} className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
                   <p className="text-xs uppercase tracking-wide text-muted">{getDomainName(site.domain_id)}</p>
-                  <h3 className="text-lg font-semibold mt-1">{site.name}</h3>
                   <p className="text-sm text-muted mt-1">{site.slug}</p>
-                  <IonButton
-                    color="danger"
-                    size="small"
-                    fill="outline"
-                    className="mt-3"
-                    onClick={() => {
-                      setDeleteTarget(site.id);
-                      setShowDeleteAlert(true);
-                    }}
-                  >
-                    Delete
-                  </IonButton>
+                  <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                    Name
+                    <input
+                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                      value={(siteDrafts[site.id] || { name: site.name, address: site.address || '' }).name}
+                      onChange={(event) => updateSiteDraft(site.id, { name: event.target.value })}
+                    />
+                  </label>
+                  <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                    Address
+                    <input
+                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                      value={(siteDrafts[site.id] || { name: site.name, address: site.address || '' }).address}
+                      onChange={(event) => updateSiteDraft(site.id, { address: event.target.value })}
+                      placeholder="No address set"
+                    />
+                  </label>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <IonButton
+                      size="small"
+                      disabled={savingSiteId === site.id}
+                      onClick={() => { void handleUpdateSite(site); }}
+                    >
+                      {savingSiteId === site.id ? 'Saving...' : 'Save'}
+                    </IonButton>
+                    <IonButton
+                      color="danger"
+                      size="small"
+                      fill="outline"
+                      onClick={() => {
+                        setDeleteTarget(site.id);
+                        setShowDeleteAlert(true);
+                      }}
+                    >
+                      Delete
+                    </IonButton>
+                  </div>
                 </article>
               ))}
             </section>

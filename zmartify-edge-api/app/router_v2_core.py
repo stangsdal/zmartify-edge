@@ -68,6 +68,7 @@ def _site_v2_payload(site: dict) -> dict:
         "domain_id": site.get("domain_id"),
         "slug": site.get("slug"),
         "name": site.get("name"),
+        "address": site.get("address"),
         "created_at": site.get("created_at"),
     }
 
@@ -122,7 +123,7 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
         require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
         domain_id = _resolve_domain_id(domain_ref)
         try:
-            return _site_v2_payload(create_site(domain_id, payload.slug, payload.name))
+            return _site_v2_payload(create_site(domain_id, payload.slug, payload.name, payload.address))
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except RegistryConflictError as exc:

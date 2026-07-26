@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS sites (
     domain_id INTEGER NOT NULL,
     slug TEXT NOT NULL,
     name TEXT NOT NULL,
+    address TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, uuid TEXT,
     UNIQUE(domain_id, slug),
     FOREIGN KEY(domain_id) REFERENCES domains(id) ON DELETE CASCADE
