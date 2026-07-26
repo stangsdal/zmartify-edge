@@ -445,6 +445,18 @@ def create_program_run(device_external_id: str, program_id: str, *, trigger_type
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         program = _resolve_program(conn, device["id"], program_id)
+        active_row = conn.execute(
+            """
+            SELECT uuid
+            FROM irrigation_runs
+            WHERE device_id = ? AND status = 'running'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (device["id"],),
+        ).fetchone()
+        if active_row is not None:
+            raise ValueError("an irrigation program is already running")
 
         cur = conn.execute(
             """
@@ -557,6 +569,63 @@ def start_next_irrigation_run_step(device_external_id: str, run_id: str) -> dict
         }
 
 
+def finish_current_irrigation_run_step(device_external_id: str, run_id: str, *, status: str = "skipped") -> dict[str, Any] | None:
+    now = _now_iso()
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        run_row = conn.execute(
+            """
+            SELECT id
+            FROM irrigation_runs
+            WHERE device_id = ? AND uuid = ? AND status = 'running'
+            """,
+            (device["id"], run_id),
+        ).fetchone()
+        if run_row is None:
+            raise RegistryNotFoundError("irrigation run not found")
+
+        step_row = conn.execute(
+            """
+            SELECT rs.id, rs.uuid, rs.duration_seconds, z.local_ref, rs.zone_name
+            FROM irrigation_run_steps rs
+            LEFT JOIN irrigation_zones z ON z.id = rs.zone_id
+            WHERE rs.run_id = ? AND rs.status = 'running'
+            ORDER BY rs.id
+            LIMIT 1
+            """,
+            (int(run_row["id"]),),
+        ).fetchone()
+        if step_row is None:
+            return None
+
+        conn.execute(
+            """
+            UPDATE irrigation_run_steps
+            SET status = ?, finished_at = ?
+            WHERE id = ?
+            """,
+            (status, now, int(step_row["id"])),
+        )
+        conn.execute(
+            """
+            UPDATE irrigation_runs
+            SET updated_at = ?
+            WHERE id = ?
+            """,
+            (now, int(run_row["id"])),
+        )
+        conn.commit()
+
+        return {
+            "step_id": step_row["uuid"],
+            "local_ref": step_row["local_ref"],
+            "zone_name": step_row["zone_name"],
+            "duration_seconds": int(step_row["duration_seconds"]),
+            "finished_at": now,
+            "status": status,
+        }
+
+
 def list_irrigation_runs(device_external_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 500))
     with get_connection() as conn:
@@ -578,10 +647,11 @@ def list_irrigation_runs(device_external_id: str, *, limit: int = 50) -> list[di
         for row in rows:
             step_rows = conn.execute(
                 """
-                SELECT uuid, zone_name, duration_seconds, status, started_at, finished_at
-                FROM irrigation_run_steps
-                WHERE run_id = ?
-                ORDER BY id
+                SELECT rs.uuid, z.local_ref, rs.zone_name, rs.duration_seconds, rs.status, rs.started_at, rs.finished_at
+                FROM irrigation_run_steps rs
+                LEFT JOIN irrigation_zones z ON z.id = rs.zone_id
+                WHERE rs.run_id = ?
+                ORDER BY rs.id
                 """,
                 (int(row["id"]),),
             ).fetchall()
@@ -599,6 +669,7 @@ def list_irrigation_runs(device_external_id: str, *, limit: int = 50) -> list[di
                     "steps": [
                         {
                             "step_id": step_row["uuid"],
+                            "local_ref": step_row["local_ref"],
                             "zone_name": step_row["zone_name"],
                             "duration_seconds": int(step_row["duration_seconds"]),
                             "status": step_row["status"],

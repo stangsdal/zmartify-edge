@@ -9,6 +9,7 @@ from app.irrigation_domain import (
     create_program_schedule,
     create_irrigation_program,
     delete_irrigation_program,
+    finish_current_irrigation_run_step,
     get_irrigation_program,
     get_irrigation_hydraulics,
     get_irrigation_power,
@@ -433,9 +434,71 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
             return {"device_id": device_id, "program_id": program_id, "run": run, "command": command}
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         except MqttCommandError as exc:
             if run is not None:
                 complete_irrigation_run(device_id, run["run_id"], status="failed")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/stop")
+    def v2_stop_irrigation_program_run(device_id: str, run_id: str, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        try:
+            current_step = finish_current_irrigation_run_step(device_id, run_id, status="stopped")
+            command = None
+            if current_step is not None and current_step.get("local_ref"):
+                command = publish_irrigation_command(
+                    device_id,
+                    command_type="irrigation.zone.stop",
+                    target_ref=str(current_step["local_ref"]),
+                    parameters={},
+                )
+            run = complete_irrigation_run(device_id, run_id, status="aborted")
+            return {"device_id": device_id, "run": run, "stopped_step": current_step, "command": command}
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except MqttCommandError as exc:
+            complete_irrigation_run(device_id, run_id, status="failed")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/skip")
+    def v2_skip_irrigation_program_run_step(device_id: str, run_id: str, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        try:
+            skipped_step = finish_current_irrigation_run_step(device_id, run_id, status="skipped")
+            stop_command = None
+            if skipped_step is not None and skipped_step.get("local_ref"):
+                stop_command = publish_irrigation_command(
+                    device_id,
+                    command_type="irrigation.zone.stop",
+                    target_ref=str(skipped_step["local_ref"]),
+                    parameters={},
+                )
+            next_step = start_next_irrigation_run_step(device_id, run_id)
+            start_command = None
+            if next_step is not None:
+                start_command = publish_irrigation_command(
+                    device_id,
+                    command_type="irrigation.zone.start",
+                    target_ref=next_step["local_ref"],
+                    parameters={"duration_seconds": next_step["duration_seconds"]},
+                )
+                run = next((item for item in list_irrigation_runs(device_id, limit=20) if item["run_id"] == run_id), None)
+            else:
+                run = complete_irrigation_run(device_id, run_id, status="completed")
+            return {
+                "device_id": device_id,
+                "run": run,
+                "skipped_step": skipped_step,
+                "next_step": next_step,
+                "stop_command": stop_command,
+                "start_command": start_command,
+            }
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except MqttCommandError as exc:
+            complete_irrigation_run(device_id, run_id, status="failed")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/complete")

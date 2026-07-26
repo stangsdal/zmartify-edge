@@ -355,6 +355,29 @@ export interface IrrigationProgramZoneSummary {
   updated_at?: string;
 }
 
+export interface IrrigationRunStepSummary {
+  step_id: string;
+  local_ref?: string | null;
+  zone_name?: string | null;
+  duration_seconds: number;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface IrrigationRunSummary {
+  run_id: string;
+  program_id?: string | null;
+  trigger_type: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  total_runtime_seconds?: number | null;
+  created_at: string;
+  updated_at: string;
+  steps: IrrigationRunStepSummary[];
+}
+
 export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
@@ -422,6 +445,9 @@ export const mobileApi = {
   listIrrigationPrograms: (deviceId: string): Promise<{ device_id: string; programs: IrrigationProgramSummary[] }> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs`),
 
+  listIrrigationRuns: (deviceId: string, limit = 20): Promise<{ device_id: string; runs: IrrigationRunSummary[] }> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/runs?limit=${encodeURIComponent(String(limit))}`),
+
   listIrrigationProgramSchedules: (
     deviceId: string,
     programId: string,
@@ -477,8 +503,27 @@ export const mobileApi = {
     deviceId: string,
     programId: string,
     triggerType = 'manual',
-  ): Promise<{ device_id: string; program_id: string; run: Record<string, unknown> }> =>
+  ): Promise<{ device_id: string; program_id: string; run: IrrigationRunSummary; command?: Record<string, unknown> | null }> =>
     apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/run`, {
       trigger_type: triggerType,
     }),
+
+  stopIrrigationProgramRun: (
+    deviceId: string,
+    runId: string,
+  ): Promise<{ device_id: string; run: IrrigationRunSummary; stopped_step?: IrrigationRunStepSummary | null; command?: Record<string, unknown> | null }> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/runs/${encodeURIComponent(runId)}/stop`, {}),
+
+  skipIrrigationProgramRunStep: (
+    deviceId: string,
+    runId: string,
+  ): Promise<{
+    device_id: string;
+    run: IrrigationRunSummary;
+    skipped_step?: IrrigationRunStepSummary | null;
+    next_step?: IrrigationRunStepSummary | null;
+    stop_command?: Record<string, unknown> | null;
+    start_command?: Record<string, unknown> | null;
+  }> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/runs/${encodeURIComponent(runId)}/skip`, {}),
 };

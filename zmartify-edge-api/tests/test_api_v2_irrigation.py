@@ -221,6 +221,19 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert get_program.status_code == 200
     assert get_program.json()["program"]["program_id"] == program_id
 
+    upsert_zone_b = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/zones",
+        headers=headers,
+        json={
+            "local_ref": "zone-b",
+            "name": "Back Lawn",
+            "enabled": True,
+            "metadata": {"flow_lpm": 10.0},
+        },
+    )
+    assert upsert_zone_b.status_code == 200
+    zone_b = upsert_zone_b.json()["zone"]
+
     replace_program_zones = client.put(
         f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/zones",
         headers=headers,
@@ -230,6 +243,12 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
                     "zone_id": zone["zone_id"],
                     "duration_seconds": 420,
                     "sort_order": 0,
+                    "enabled": True,
+                },
+                {
+                    "zone_id": zone_b["zone_id"],
+                    "duration_seconds": 300,
+                    "sort_order": 1,
                     "enabled": True,
                 }
             ]
@@ -299,6 +318,29 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert published_commands[-1]["target_ref"] == "zone-a"
     assert published_commands[-1]["parameters"]["duration_seconds"] == 420
 
+    run_conflict = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run",
+        headers=headers,
+        json={"trigger_type": "manual"},
+    )
+    assert run_conflict.status_code == 409
+
+    skip_run = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/runs/{run_id}/skip",
+        headers=headers,
+    )
+    assert skip_run.status_code == 200
+    skip_payload = skip_run.json()
+    assert skip_payload["skipped_step"]["local_ref"] == "zone-a"
+    assert skip_payload["next_step"]["local_ref"] == "zone-b"
+    assert skip_payload["run"]["steps"][0]["status"] == "skipped"
+    assert skip_payload["run"]["steps"][1]["status"] == "running"
+    assert published_commands[-2]["command_type"] == "irrigation.zone.stop"
+    assert published_commands[-2]["target_ref"] == "zone-a"
+    assert published_commands[-1]["command_type"] == "irrigation.zone.start"
+    assert published_commands[-1]["target_ref"] == "zone-b"
+    assert published_commands[-1]["parameters"]["duration_seconds"] == 300
+
     overview_running = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_running.status_code == 200
     assert overview_running.json()["active_run_count"] >= 1
@@ -307,12 +349,15 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert list_runs.status_code == 200
     assert len(list_runs.json()["runs"]) >= 1
 
-    complete_run = client.post(
-        f"/api/v2/devices/{device_id}/irrigation/runs/{run_id}/complete",
+    stop_run = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/runs/{run_id}/stop",
         headers=headers,
     )
-    assert complete_run.status_code == 200
-    assert complete_run.json()["run"]["status"] == "completed"
+    assert stop_run.status_code == 200
+    assert stop_run.json()["run"]["status"] == "aborted"
+    assert stop_run.json()["stopped_step"]["local_ref"] == "zone-b"
+    assert published_commands[-1]["command_type"] == "irrigation.zone.stop"
+    assert published_commands[-1]["target_ref"] == "zone-b"
 
     overview_completed = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_completed.status_code == 200
