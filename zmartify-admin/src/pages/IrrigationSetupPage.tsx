@@ -2,7 +2,7 @@ import { IonButton, IonContent, IonPage } from '@ionic/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary } from '../api/mobile';
+import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 import { commandsApi } from '../api/commands';
 
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
@@ -16,6 +16,10 @@ const zoneNumberFromRef = (ref: string): number | null => {
 };
 
 const zoneRefForNumber = (zoneNumber: number) => `zone-${zoneNumber}`;
+const zoneRefFromId = (zoneId: unknown) => {
+  const parsed = Number(zoneId);
+  return Number.isInteger(parsed) && parsed > 0 ? zoneRefForNumber(parsed) : '';
+};
 const fallbackOutputRefForZone = (zoneRef: string) => {
   const zoneNumber = zoneNumberFromRef(zoneRef);
   return zoneNumber == null ? `${zoneRef}-valve` : `output-${zoneNumber}`;
@@ -228,6 +232,35 @@ export function IrrigationSetupPage() {
 
   const activeTestZoneRef = Object.keys(testRunZoneRefs)[0] || '';
 
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+
+    const unsubscribe = subscribeRealtimeTopics(['events'], (event) => {
+      if (event.event_type !== 'event.created') return;
+      const payload = event.payload || {};
+      if (payload.event_type !== 'irrigation_status_feedback') return;
+      const outcome = (payload.payload || {}) as Record<string, unknown>;
+      if (outcome.device_id !== selectedDeviceId) return;
+
+      const zoneRef = zoneRefFromId(payload.zone_id);
+      const outcomeType = String(outcome.event_type || '');
+      const result = String(outcome.result || '');
+      const detail = typeof outcome.detail === 'string' ? outcome.detail : '';
+      if (zoneRef && outcomeType === 'run.started') {
+        markTestRunning(zoneRef);
+        setFeedback(`Controller started test run for ${zoneRef}.`);
+      } else if (zoneRef && (outcomeType === 'run.stopped' || outcomeType === 'run.completed')) {
+        clearTestRun(zoneRef);
+        setFeedback(`Controller stopped test run for ${zoneRef}.`);
+      } else if (zoneRef && result === 'rejected') {
+        clearTestRun(zoneRef);
+        setFeedback(`Controller rejected ${zoneRef}: ${detail || outcomeType || 'command rejected'}.`);
+      }
+    });
+
+    return unsubscribe;
+  }, [clearTestRun, markTestRunning, selectedDeviceId]);
+
   const toggleZoneTest = async (zone: IrrigationZone) => {
     const localRef = zone.local_ref || zone.zone_id;
     if (!selectedDeviceId || !localRef) {
@@ -244,8 +277,7 @@ export function IrrigationSetupPage() {
     try {
       if (isRunning) {
         await commandsApi.stopIrrigationZone(selectedDeviceId, localRef);
-        clearTestRun(localRef);
-        setFeedback(`Stopped test run for ${localRef}.`);
+        setFeedback(`Stop command sent for ${localRef}. Waiting for controller confirmation.`);
       } else {
         await commandsApi.startIrrigationZone(selectedDeviceId, localRef, TEST_RUN_SECONDS);
         markTestRunning(localRef);
