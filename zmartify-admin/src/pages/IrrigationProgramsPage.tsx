@@ -13,6 +13,14 @@ type DeviceProgram = {
 
 const weekdayLabel = (weekday: number): string => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekday] || String(weekday);
 
+const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string; integration_mode?: string }): boolean => {
+  const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes('irrigation');
+};
+
 export function IrrigationProgramsPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
@@ -24,10 +32,22 @@ export function IrrigationProgramsPage() {
   const [newProgramName, setNewProgramName] = useState('');
 
   const reloadPrograms = useCallback(async (siteId: string) => {
-    const site = await mobileApi.getSite(siteId);
-    setDeviceIds(site.devices.map((device) => device.device_id));
+    const [site, overview] = await Promise.all([
+      mobileApi.getSite(siteId),
+      mobileApi.getIrrigationOverview(siteId).catch(() => null),
+    ]);
+    const siteDevices = site.devices.filter(isIrrigationController).map((device) => ({
+      device_id: device.device_id,
+      display_name: device.display_name,
+    }));
+    const overviewDevices = (overview?.devices || []).map((device) => ({
+      device_id: device.device_id,
+      display_name: device.display_name,
+    }));
+    const irrigationDevices = siteDevices.length ? siteDevices : overviewDevices;
+    setDeviceIds(irrigationDevices.map((device) => device.device_id));
     const nextRows = await Promise.all(
-      site.devices.map(async (device) => {
+      irrigationDevices.map(async (device) => {
         const programsResponse = await mobileApi.listIrrigationPrograms(device.device_id);
         return Promise.all(
           (programsResponse.programs || []).map(async (program) => {
