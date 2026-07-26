@@ -311,6 +311,37 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
     assert status.json()["mounted"] is True
     assert status.json()["free_bytes"] == 29_000_000_000
 
+    from app.domain_model import log_event
+    from app.registry import get_device
+
+    device = get_device("zmartify-irrigation-sdcard01")
+    log_event(
+        "device_storage_status",
+        domain_id=domain_id,
+        site_id=site_id,
+        device_pk_id=int(device["id"]),
+        payload={
+            "device_id": "zmartify-irrigation-sdcard01",
+            "storage": {
+                "sd_card": {
+                    "state": "mounted",
+                    "mounted": True,
+                    "total_bytes": 534763520,
+                    "free_bytes": 464746496,
+                    "mount_point": "/sdcard",
+                    "card_name": "SL16G",
+                    "last_error": "",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(lifecycle, "get_remote_sd_card_status", lambda _base_url: (_ for _ in ()).throw(lifecycle.DeviceOnboardingError("timed out")))
+    fallback_status = client.get("/api/v2/devices/zmartify-irrigation-sdcard01/storage/sd-card", headers=headers)
+    assert fallback_status.status_code == 200
+    assert fallback_status.json()["source"] == "mqtt_reported_state"
+    assert fallback_status.json()["mounted"] is True
+    assert fallback_status.json()["card_name"] == "SL16G"
+
     initialize = client.post(
         "/api/v2/devices/zmartify-irrigation-sdcard01/storage/sd-card/initialize",
         headers=headers,

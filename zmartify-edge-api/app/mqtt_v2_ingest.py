@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,6 +37,29 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _latest_sd_card_status(device_id: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT e.payload_json
+            FROM event_log e
+            JOIN devices d ON d.id = e.device_id
+            WHERE d.device_id = ? AND e.event_type = 'device_storage_status'
+            ORDER BY e.id DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+    if row is None:
+        return {}
+    try:
+        payload = json.loads(row["payload_json"] or "{}")
+    except json.JSONDecodeError:
+        return {}
+    storage = _as_dict(payload.get("storage"))
+    return _as_dict(storage.get("sd_card"))
 
 
 def ingest_mqtt_v2_reported_state(
@@ -134,6 +158,25 @@ def ingest_mqtt_v2_reported_state(
         )
         weather_updated = True
 
+    storage = _as_dict(reported.get("storage"))
+    sd_card = _as_dict(storage.get("sd_card"))
+    storage_updated = False
+    if sd_card and sd_card != _latest_sd_card_status(device_id):
+        context = _resolve_device_context(device_id)
+        log_event(
+            "device_storage_status",
+            domain_id=context.get("domain_id"),
+            site_id=context.get("site_id"),
+            device_pk_id=context.get("device_pk_id"),
+            payload={
+                "device_id": device_id,
+                "source": source,
+                "source_timestamp": reported.get("source_timestamp"),
+                "storage": {"sd_card": sd_card},
+            },
+        )
+        storage_updated = True
+
     rain_delay_set = False
     rain_delay_payload = _as_dict(irrigation.get("rain_delay"))
     delay_hours_raw = rain_delay_payload.get("delay_hours", irrigation.get("rain_delay_hours"))
@@ -155,6 +198,7 @@ def ingest_mqtt_v2_reported_state(
             "hydraulics_updated": hydraulics_updated,
             "power_updated": power_updated,
             "weather_updated": weather_updated,
+            "storage_updated": storage_updated,
             "rain_delay_set": rain_delay_set,
         },
     }

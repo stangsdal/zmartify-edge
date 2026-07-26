@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import json
 from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, ROLE_VIEWER, audit_action
+from app.db import get_connection
 from app.device_onboarding import (
     DeviceOnboardingError,
     discover_remote_device,
@@ -149,6 +151,9 @@ def _sd_card_status_payload(device_id: str, local_url: str, status_payload: dict
 
 
 def _fallback_sd_card_status(device_id: str, local_url: str, detail: str | None = None) -> dict:
+    mqtt_status = _latest_mqtt_sd_card_status(device_id, local_url)
+    if mqtt_status is not None:
+        return mqtt_status
     return _sd_card_status_payload(
         device_id,
         local_url,
@@ -159,6 +164,32 @@ def _fallback_sd_card_status(device_id: str, local_url: str, detail: str | None 
         },
         source="edge_fallback",
     )
+
+
+def _latest_mqtt_sd_card_status(device_id: str, local_url: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT e.payload_json
+            FROM event_log e
+            JOIN devices d ON d.id = e.device_id
+            WHERE d.device_id = ? AND e.event_type = 'device_storage_status'
+            ORDER BY e.id DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["payload_json"] or "{}")
+    except json.JSONDecodeError:
+        return None
+    storage = payload.get("storage") if isinstance(payload.get("storage"), dict) else {}
+    sd_card = storage.get("sd_card") if isinstance(storage.get("sd_card"), dict) else None
+    if sd_card is None:
+        return None
+    return _sd_card_status_payload(device_id, local_url, sd_card, source="mqtt_reported_state")
 
 
 def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
