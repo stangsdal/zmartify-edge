@@ -601,6 +601,42 @@ def test_mobile_viewer_without_site_assignments_sees_no_properties(monkeypatch, 
     assert detail.status_code == 404
 
 
+def test_mobile_owner_without_site_assignments_sees_all_properties(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    emergency = {"Authorization": "Bearer emergency-token"}
+
+    domain = client.post("/domains", headers=emergency, json={"slug": "house-owner", "name": "House Owner"})
+    assert domain.status_code == 201
+    domain_id = domain.json()["id"]
+
+    site = client.post(f"/domains/{domain_id}/sites", headers=emergency, json={"slug": "site-owner", "name": "Site Owner"})
+    assert site.status_code == 201
+
+    user = client.post(
+        "/users",
+        headers=emergency,
+        json={
+            "username": "owner-no-sites",
+            "display_name": "Owner No Sites",
+            "password": "VeryStrongPass123!",
+            "roles": ["owner"],
+        },
+    )
+    assert user.status_code == 201
+
+    login = client.post("/auth/login", json={"username": "owner-no-sites", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    sites = client.get("/mobile/sites", headers=bearer)
+    assert sites.status_code == 200
+    assert [item["site_slug"] for item in sites.json()["sites"]] == ["site-owner"]
+
+    detail = client.get("/mobile/sites/site-owner", headers=bearer)
+    assert detail.status_code == 200
+    assert detail.json()["site_slug"] == "site-owner"
+
+
 def test_mobile_viewer_can_change_setpoint_within_scoped_site(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     emergency = {"Authorization": "Bearer emergency-token"}

@@ -332,7 +332,7 @@ def _mobile_site_scope_ids(request: Request) -> set[int] | None:
     auth_user = getattr(request.state, "auth_user", None)
     if auth_user is None or auth_user.user_id is None:
         return None
-    if ROLE_ADMIN in auth_user.roles:
+    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
         return None
     return set(list_user_site_access(auth_user.user_id))
 
@@ -340,7 +340,7 @@ def _mobile_site_scope_ids(request: Request) -> set[int] | None:
 def _mobile_site_scope_ids_for_user(auth_user) -> set[int] | None:
     if auth_user is None or auth_user.user_id is None:
         return None
-    if ROLE_ADMIN in auth_user.roles:
+    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
         return None
     return set(list_user_site_access(auth_user.user_id))
 
