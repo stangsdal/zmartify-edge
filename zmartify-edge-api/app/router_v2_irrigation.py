@@ -467,15 +467,8 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
         require_roles(request, {"owner", "admin", "installer"})
         try:
             skipped_step = finish_current_irrigation_run_step(device_id, run_id, status="skipped")
-            stop_command = None
-            if skipped_step is not None and skipped_step.get("local_ref"):
-                stop_command = publish_irrigation_command(
-                    device_id,
-                    command_type="irrigation.zone.stop",
-                    target_ref=str(skipped_step["local_ref"]),
-                    parameters={},
-                )
             next_step = start_next_irrigation_run_step(device_id, run_id)
+            stop_command = None
             start_command = None
             if next_step is not None:
                 start_command = publish_irrigation_command(
@@ -486,6 +479,13 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
                 )
                 run = next((item for item in list_irrigation_runs(device_id, limit=20) if item["run_id"] == run_id), None)
             else:
+                if skipped_step is not None and skipped_step.get("local_ref"):
+                    stop_command = publish_irrigation_command(
+                        device_id,
+                        command_type="irrigation.zone.stop",
+                        target_ref=str(skipped_step["local_ref"]),
+                        parameters={},
+                    )
                 run = complete_irrigation_run(device_id, run_id, status="completed")
             return {
                 "device_id": device_id,

@@ -335,8 +335,7 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert skip_payload["next_step"]["local_ref"] == "zone-b"
     assert skip_payload["run"]["steps"][0]["status"] == "skipped"
     assert skip_payload["run"]["steps"][1]["status"] == "running"
-    assert published_commands[-2]["command_type"] == "irrigation.zone.stop"
-    assert published_commands[-2]["target_ref"] == "zone-a"
+    assert skip_payload["stop_command"] is None
     assert published_commands[-1]["command_type"] == "irrigation.zone.start"
     assert published_commands[-1]["target_ref"] == "zone-b"
     assert published_commands[-1]["parameters"]["duration_seconds"] == 300
