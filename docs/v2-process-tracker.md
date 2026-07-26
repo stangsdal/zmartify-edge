@@ -131,16 +131,18 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Latest helper-script rerun (after irrigation outcome taxonomy increment): baseline fallback still valid, 3 passed / 2 skipped.
 - Latest helper-script rerun (after enforce-mode ingest coverage increment): baseline fallback still valid, 3 passed / 2 skipped.
 
-9. Phase 8 - Irrigation firmware integration: `in progress`
+9. Phase 8 - Irrigation firmware integration: `completed`
 - Completed: `zic_v2` contract adapter component added to the zmartify-irrigation firmware repo (commit 160f123): v2 topic builders plus reported-state and outcome payload builders, host-compiled and validated against the edge schemas under enforce mode.
 - Completed: all four edge-side irrigation v2 endpoints verified live in production (reported-state ingest, irrigation outcome ingest, zones API, site overview).
 - Completed: `zic_v2` wired into the controller runtime (commit d74ff1f): v2 command subscription/routing (`zone/start`, `zone/stop`, `stop_all`, `rain_delay` with command_id capture), periodic v2 reported-state on the telemetry cadence, and outcome publication on command application; full firmware build green.
 - Completed: edge MQTT listener extended and deployed to production (commit e54e38d): subscribes to `events/irrigation/outcome` and `state/reported` v2 topics per device and routes them into the mqtt-v2 ingest service.
-- Open: onboard the irrigation controller hardware (register device `zmartify-irrigation-01`, issue MQTT credentials, regenerate ACL), then run the live loop validation.
+- Completed: physical irrigation controller `zmartify-irrigation-01` onboarded and operational through Edge v2; MQTT credentials/ACL path validated in production, v2 reported-state/outcome ingestion active, zone 1-15 command path validated, and SD-card status/initialize support deployed through firmware commits `8380fc9`, `1780c44`, and `7c3d048`.
+- Completed: live SD-card validation after reformat shows card capacity `15931539456`, filesystem size `15923707904`, free bytes `15923691520`, source `mqtt_reported_state`, and app-visible values `Card capacity: 15 GB`, `Filesystem size: 15 GB`, `Filesystem free: 15 GB`.
 
 10. Phase 9 - Production hardening: `started`
 - Completed: database backup + restore-drill helper (`scripts/backup_edge_db.sh`) with integrity verification and retention pruning; validated end-to-end against a freshly initialized edge database.
 - Completed: scheduled backup sidecar (`edge-db-backup` compose service) running daily snapshots into a dedicated `edge-backups` volume with configurable interval/retention.
+- Completed: liveness/readiness endpoints added (`/health/live`, `/health/ready`) with database, migration, MQTT broker, and storage checks plus focused regression coverage.
 - Open: enforce-mode default rollout and remaining hardening checklist items.
 
 11. Phase 10 - Native mobile packaging: `not started`
@@ -172,10 +174,10 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 Paused 2026-07-12 with all repos clean and pushed. Resume points, in priority order:
 
-1. Phase 8: finish the irrigation controller so it is operational, then onboard it — register device `zmartify-irrigation-01` (must match `ZIC_V2_DEVICE_ID` in `main/main.c`), issue MQTT credentials, regenerate the broker ACL, restart mosquitto, and run the live loop validation. All edge/firmware v2 wiring is already deployed and build-green.
-2. Phase 1: port runtime data access from the sqlite3 API to PostgreSQL (schema bootstrap already applied to the production TimescaleDB; largest remaining work item).
-3. Phase 2: extract remaining v1 endpoint groups from `main.py` (domains/sites, devices/lifecycle, mobile API, auth/invites; mqtt-clients and system-status are done).
-4. Phase 9: remaining hardening checklist (homie state-topic retirement decision, backup restore drills in deployment, monitoring).
-5. Phase 10: native mobile packaging via Capacitor once UX parity is closed.
+1. Phase 1: port runtime data access from the sqlite3 API to PostgreSQL (schema bootstrap already applied to the production TimescaleDB; largest remaining work item).
+2. Phase 2: continue extracting remaining v1 endpoint groups from `main.py` into focused routers/services.
+3. Phase 3/4/5/6: close remaining contract conformance, irrigation outcome coverage, command feedback, and UX parity gaps now that physical irrigation hardware is online.
+4. Phase 9: remaining hardening checklist (enforce-mode defaults, secret review, rate limiting, retention policy, load/accessibility/PWA checks, upgrade/rollback runbook).
+5. Phase 10: skipped per current request.
 
 Status snapshot after irrigation UX increment: Phases 0 and 7 `completed`; production runs v2-only topic style with enforce-mode contracts (HVAC firmware v0.3.0 live); irrigation v2 loop is code-complete on both sides and waits only on operational controller hardware. App-shell irrigation setup/control now covers zone/output configuration, manual zone start/stop, stop-all, rain-delay, programs, hydraulics/power, weather, alerts, and realtime feedback surfaces.
