@@ -7,6 +7,14 @@ import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSi
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
 const defaultOutputName = (ref: string) => `Output ${ref.replace(/^out[-_]?/i, '') || ref}`;
 
+const isIrrigationController = (device: MobileSiteDevice): boolean => {
+  const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes('irrigation');
+};
+
 export function IrrigationSetupPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
@@ -53,8 +61,9 @@ export function IrrigationSetupPage() {
     if (!selectedSite) return;
     const loadDevices = async () => {
       const site = await mobileApi.getSite(selectedSite);
-      setDevices(site.devices || []);
-      setSelectedDeviceId((prev) => (site.devices || []).some((device) => device.device_id === prev) ? prev : site.devices[0]?.device_id || '');
+      const controllerDevices = (site.devices || []).filter(isIrrigationController);
+      setDevices(controllerDevices);
+      setSelectedDeviceId((prev) => (controllerDevices.some((device) => device.device_id === prev) ? prev : controllerDevices[0]?.device_id || ''));
     };
     loadDevices().catch(console.error);
   }, [selectedSite]);
@@ -150,7 +159,9 @@ export function IrrigationSetupPage() {
               className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
               value={selectedDeviceId}
               onChange={(event) => setSelectedDeviceId(event.target.value)}
+              disabled={!devices.length}
             >
+              {!devices.length ? <option value="">No irrigation controllers found</option> : null}
               {devices.map((device) => (
                 <option key={device.device_id} value={device.device_id}>{device.display_name} ({device.device_id})</option>
               ))}
@@ -159,7 +170,7 @@ export function IrrigationSetupPage() {
               <p className="text-xs text-muted mt-2">
                 {selectedDevice.online ? 'Online' : 'Offline'} · MQTT {selectedDevice.mqtt_connected ? 'connected' : 'not connected'}
               </p>
-            ) : <p className="text-sm text-muted mt-2">No devices are assigned to this site.</p>}
+            ) : <p className="text-sm text-muted mt-2">No irrigation controllers are assigned to this site.</p>}
           </section>
 
           <section className="grid gap-3 lg:grid-cols-2">

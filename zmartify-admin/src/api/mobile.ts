@@ -15,6 +15,8 @@ export interface MobileSiteDevice {
   device_uuid?: string;
   display_name: string;
   firmware_version?: string;
+  device_type?: string;
+  integration_mode?: string;
   online: boolean;
   mqtt_connected?: boolean;
   updated_at?: string;

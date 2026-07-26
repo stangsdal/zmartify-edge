@@ -491,9 +491,16 @@ def test_mobile_api_hides_internal_database_ids(monkeypatch, tmp_path: Path):
     assert mobile_device.status_code == 200
     site_id = mobile_device.json()["site"]["site_id"]
 
+    mobile_site = client.get(f"/mobile/sites/{site_id}", headers=headers)
+    assert mobile_site.status_code == 200
+    assert mobile_site.json()["devices"][0]["device_type"] == "hvac_gateway"
+    assert mobile_site.json()["devices"][0]["integration_mode"] == "mqtt"
+
     site_devices = client.get(f"/mobile/sites/{site_id}/devices", headers=headers)
     assert site_devices.status_code == 200
     assert isinstance(site_devices.json()["site_id"], str)
+    assert site_devices.json()["devices"][0]["device_type"] == "hvac_gateway"
+    assert site_devices.json()["devices"][0]["integration_mode"] == "mqtt"
 
     assert isinstance(mobile_device.json()["site"]["site_id"], str)
 

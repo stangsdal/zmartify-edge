@@ -1842,7 +1842,7 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
         rows = conn.execute(
             """
                  SELECT d.device_id, d.uuid, d.display_name, d.firmware_version, d.local_url,
-                   ds.online, ds.mqtt_connected, ds.updated_at
+                   d.device_type, d.integration_mode, ds.online, ds.mqtt_connected, ds.updated_at
             FROM devices d
             LEFT JOIN device_state ds ON ds.device_id = d.id
             WHERE d.site_id = ?
@@ -1865,6 +1865,8 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
                 "display_name": row["display_name"],
                 "firmware_version": row["firmware_version"],
                 "local_url": row["local_url"],
+                "device_type": row["device_type"],
+                "integration_mode": row["integration_mode"],
                 "online": bool(row["online"]) if row["online"] is not None else False,
                 "mqtt_connected": bool(row["mqtt_connected"]) if row["mqtt_connected"] is not None else False,
                 "updated_at": row["updated_at"],

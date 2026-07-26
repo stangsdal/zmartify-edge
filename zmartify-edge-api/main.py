@@ -1138,7 +1138,8 @@ def mobile_site_devices(site_id: str, request: Request) -> dict:
                 "display_name": item.get("display_name"),
                 "firmware_version": item.get("firmware_version"),
                 "online": bool(item.get("online")),
-                "integration_mode": "gateway",
+                "device_type": item.get("device_type"),
+                "integration_mode": item.get("integration_mode"),
             }
             for item in site.get("devices", [])
         ],
