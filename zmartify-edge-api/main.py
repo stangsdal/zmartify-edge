@@ -112,6 +112,7 @@ from app.router_v2_mqtt_ingest import create_mqtt_ingest_v2_router
 from app.router_system_status import create_system_status_router
 from app.router_v2_realtime_ws import create_realtime_ws_v2_router
 from app.router_v2_irrigation import create_irrigation_v2_router
+from app.rate_limit import check_rate_limit
 from app.realtime_topic_hub import RealtimeTopicHub
 from app.setpoint_outcome_listener import create_setpoint_outcome_listener
 from app.schemas import (
@@ -507,6 +508,18 @@ def _resolve_device_site_pk_id(device_id: str) -> int | None:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
     return int(row["site_id"]) if row["site_id"] is not None else None
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    allowed, retry_after = check_rate_limit(request)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "too many requests"},
+            headers={"Retry-After": str(retry_after)},
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")

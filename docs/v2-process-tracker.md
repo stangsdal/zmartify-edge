@@ -143,6 +143,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: database backup + restore-drill helper (`scripts/backup_edge_db.sh`) with integrity verification and retention pruning; validated end-to-end against a freshly initialized edge database.
 - Completed: scheduled backup sidecar (`edge-db-backup` compose service) running daily snapshots into a dedicated `edge-backups` volume with configurable interval/retention.
 - Completed: liveness/readiness endpoints added (`/health/live`, `/health/ready`) with database, migration, MQTT broker, and storage checks plus focused regression coverage.
+- Completed: scoped in-memory rate limiting added for sensitive public auth endpoints (`/auth/login`, `/auth/register`, `/auth/invite/validate`) with configurable limits and regression coverage.
 - Open: enforce-mode default rollout and remaining hardening checklist items.
 
 11. Phase 10 - Native mobile packaging: `not started`
