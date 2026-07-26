@@ -56,6 +56,23 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     device_id = _seed_device(client)
     headers = _auth_headers()
+    published_commands: list[dict] = []
+
+    from app import router_v2_irrigation
+
+    def _fake_publish_irrigation_command(device_id_arg: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+        command = {
+            "command_id": "cmd-test",
+            "device_id": device_id_arg,
+            "command_type": command_type,
+            "target_ref": target_ref,
+            "parameters": parameters or {},
+            "status": "published",
+        }
+        published_commands.append(command)
+        return command
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
 
     overview_initial = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_initial.status_code == 200
@@ -276,6 +293,11 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     run_id = run_start.json()["run"]["run_id"]
     assert isinstance(run_start.json()["run"].get("steps"), list)
     assert run_start.json()["run"]["steps"][0]["duration_seconds"] == 420
+    assert run_start.json()["run"]["steps"][0]["status"] == "running"
+    assert run_start.json()["command"]["status"] == "published"
+    assert published_commands[-1]["command_type"] == "irrigation.zone.start"
+    assert published_commands[-1]["target_ref"] == "zone-a"
+    assert published_commands[-1]["parameters"]["duration_seconds"] == 420
 
     overview_running = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_running.status_code == 200

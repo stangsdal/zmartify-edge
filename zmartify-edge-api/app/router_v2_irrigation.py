@@ -22,6 +22,7 @@ from app.irrigation_domain import (
     list_irrigation_zones,
     replace_program_zones,
     set_irrigation_rain_delay,
+    start_next_irrigation_run_step,
     update_irrigation_program,
     upsert_irrigation_hydraulics_state,
     upsert_irrigation_output_state,
@@ -418,9 +419,21 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
         require_roles(request, {"owner", "admin", "installer"})
         try:
             run = create_program_run(device_id, program_id, trigger_type=payload.trigger_type)
-            return {"device_id": device_id, "program_id": program_id, "run": run}
+            command = None
+            first_step = start_next_irrigation_run_step(device_id, run["run_id"])
+            if first_step is not None:
+                command = publish_irrigation_command(
+                    device_id,
+                    command_type="irrigation.zone.start",
+                    target_ref=first_step["local_ref"],
+                    parameters={"duration_seconds": first_step["duration_seconds"]},
+                )
+                run = next((item for item in list_irrigation_runs(device_id, limit=20) if item["run_id"] == run["run_id"]), run)
+            return {"device_id": device_id, "program_id": program_id, "run": run, "command": command}
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except MqttCommandError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/complete")
     def v2_complete_irrigation_run(device_id: str, run_id: str, request: Request) -> dict:
