@@ -5,7 +5,24 @@ import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary } from '../api/mobile';
 
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
-const defaultOutputName = (ref: string) => `Output ${ref.replace(/^out[-_]?/i, '') || ref}`;
+
+const zoneNumberFromRef = (ref: string): number | null => {
+  const match = ref.match(/(?:zone|out|output|valve)[-_]?(\d+)$/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const zoneRefForNumber = (zoneNumber: number) => `zone-${zoneNumber}`;
+const fallbackOutputRefForZone = (zoneRef: string) => {
+  const zoneNumber = zoneNumberFromRef(zoneRef);
+  return zoneNumber == null ? `${zoneRef}-valve` : `output-${zoneNumber}`;
+};
+
+const valveLabelForZone = (zoneRef: string) => {
+  const zoneNumber = zoneNumberFromRef(zoneRef);
+  return zoneNumber == null ? 'Valve' : `Valve ${zoneNumber}`;
+};
 
 const isIrrigationController = (device: MobileSiteDevice): boolean => {
   const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
@@ -22,13 +39,7 @@ export function IrrigationSetupPage() {
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [zones, setZones] = useState<IrrigationZone[]>([]);
   const [outputs, setOutputs] = useState<IrrigationOutput[]>([]);
-  const [zoneRef, setZoneRef] = useState('zone-1');
-  const [zoneName, setZoneName] = useState('Zone 1');
-  const [zoneEnabled, setZoneEnabled] = useState(true);
-  const [outputRef, setOutputRef] = useState('out-1');
-  const [outputName, setOutputName] = useState('Output 1');
-  const [outputEnabled, setOutputEnabled] = useState(true);
-  const [isMasterValve, setIsMasterValve] = useState(false);
+  const [zoneDrafts, setZoneDrafts] = useState<Record<string, { name: string; enabled: boolean }>>({});
   const [busyAction, setBusyAction] = useState('');
   const [feedback, setFeedback] = useState('');
 
@@ -45,6 +56,20 @@ export function IrrigationSetupPage() {
     setZones(zoneResponse.zones || []);
     setOutputs(outputResponse.outputs || []);
   }, []);
+
+  useEffect(() => {
+    setZoneDrafts((prev) => {
+      const next: Record<string, { name: string; enabled: boolean }> = {};
+      for (const zone of zones) {
+        const key = zone.zone_id;
+        next[key] = prev[key] || {
+          name: zone.name || defaultZoneName(zone.local_ref || zone.zone_id),
+          enabled: zone.enabled,
+        };
+      }
+      return next;
+    });
+  }, [zones]);
 
   useEffect(() => {
     const loadSites = async () => {
@@ -77,20 +102,36 @@ export function IrrigationSetupPage() {
     reloadDeviceSetup(selectedDeviceId).catch(console.error);
   }, [reloadDeviceSetup, selectedDeviceId]);
 
-  const saveZone = async () => {
-    const localRef = zoneRef.trim();
-    if (!selectedDeviceId || !localRef) {
-      setFeedback('Select a controller and provide a zone reference.');
+  const outputRefForZone = useCallback((zoneRef: string) => {
+    const zoneNumber = zoneNumberFromRef(zoneRef);
+    const matchingOutput = zoneNumber == null
+      ? null
+      : outputs.find((output) => zoneNumberFromRef(output.local_ref || output.output_id) === zoneNumber && !output.is_master_valve);
+    return matchingOutput?.local_ref || fallbackOutputRefForZone(zoneRef);
+  }, [outputs]);
+
+  const saveZone = async (zone: IrrigationZone, draft = zoneDrafts[zone.zone_id]) => {
+    const localRef = (zone.local_ref || zone.zone_id).trim();
+    if (!selectedDeviceId || !localRef || !draft) {
+      setFeedback('Select a controller before saving zones.');
       return;
     }
-    setBusyAction('zone');
+    setBusyAction(`zone:${zone.zone_id}`);
     setFeedback('');
     try {
-      const name = zoneName.trim() || defaultZoneName(localRef);
+      const name = draft.name.trim() || defaultZoneName(localRef);
       await mobileApi.upsertIrrigationZone(selectedDeviceId, {
         local_ref: localRef,
         name,
-        enabled: zoneEnabled,
+        enabled: draft.enabled,
+      });
+      await mobileApi.upsertIrrigationOutput(selectedDeviceId, {
+        local_ref: outputRefForZone(localRef),
+        name: valveLabelForZone(localRef),
+        enabled: draft.enabled,
+        active: false,
+        fault: null,
+        is_master_valve: false,
       });
       await reloadDeviceSetup(selectedDeviceId);
       setFeedback(`Saved zone ${name}.`);
@@ -101,26 +142,35 @@ export function IrrigationSetupPage() {
     }
   };
 
-  const saveOutput = async () => {
-    const localRef = outputRef.trim();
-    if (!selectedDeviceId || !localRef) {
-      setFeedback('Select a controller and provide an output reference.');
+  const addZone = async () => {
+    if (!selectedDeviceId) {
+      setFeedback('Select a controller before adding a zone.');
       return;
     }
-    setBusyAction('output');
+    const usedNumbers = new Set(zones.map((zone) => zoneNumberFromRef(zone.local_ref || zone.zone_id)).filter((value): value is number => value != null));
+    let nextNumber = 1;
+    while (usedNumbers.has(nextNumber)) nextNumber += 1;
+
+    const localRef = zoneRefForNumber(nextNumber);
+    const name = defaultZoneName(localRef);
+    setBusyAction('add-zone');
     setFeedback('');
     try {
-      const name = outputName.trim() || defaultOutputName(localRef);
-      await mobileApi.upsertIrrigationOutput(selectedDeviceId, {
+      await mobileApi.upsertIrrigationZone(selectedDeviceId, {
         local_ref: localRef,
         name,
-        enabled: outputEnabled,
+        enabled: true,
+      });
+      await mobileApi.upsertIrrigationOutput(selectedDeviceId, {
+        local_ref: fallbackOutputRefForZone(localRef),
+        name: valveLabelForZone(localRef),
+        enabled: true,
         active: false,
         fault: null,
-        is_master_valve: isMasterValve,
+        is_master_valve: false,
       });
       await reloadDeviceSetup(selectedDeviceId);
-      setFeedback(`Saved output ${name}.`);
+      setFeedback(`Added ${name}.`);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : String(error));
     } finally {
@@ -128,22 +178,22 @@ export function IrrigationSetupPage() {
     }
   };
 
-  const loadZoneIntoForm = (zone: IrrigationZone) => {
-    setZoneRef(zone.local_ref || zone.zone_id);
-    setZoneName(zone.name || defaultZoneName(zone.local_ref || zone.zone_id));
-    setZoneEnabled(zone.enabled);
+  const updateZoneDraft = (zoneId: string, patch: Partial<{ name: string; enabled: boolean }>) => {
+    setZoneDrafts((prev) => ({
+      ...prev,
+      [zoneId]: {
+        name: prev[zoneId]?.name || '',
+        enabled: prev[zoneId]?.enabled ?? true,
+        ...patch,
+      },
+    }));
   };
 
-  const loadOutputIntoForm = (output: IrrigationOutput) => {
-    setOutputRef(output.local_ref || output.output_id);
-    setOutputName(output.name || defaultOutputName(output.local_ref || output.output_id));
-    setOutputEnabled(output.enabled);
-    setIsMasterValve(output.is_master_valve);
-  };
+  const masterValveEnabled = zones.some((zone) => zoneDrafts[zone.zone_id]?.enabled ?? zone.enabled);
 
   return (
     <IonPage>
-      <AppHeader title="Irrigation setup" subtitle="Controller zone and valve output configuration" />
+      <AppHeader title="Irrigation setup" subtitle="Controller zone configuration" />
       <IonContent className="ion-padding">
         <div className="space-y-4 pb-20 lg:pb-8">
           <SiteSelector
@@ -173,99 +223,62 @@ export function IrrigationSetupPage() {
             ) : <p className="text-sm text-muted mt-2">No irrigation controllers are assigned to this site.</p>}
           </section>
 
-          <section className="grid gap-3 lg:grid-cols-2">
-            <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
-              <h2 className="text-lg font-semibold">Zones</h2>
-              <p className="text-sm text-muted mt-1">Name watering areas and bind them to controller local refs.</p>
-              <div className="grid gap-2 mt-3">
-                <input
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                  placeholder="Local ref, e.g. zone-1"
-                  value={zoneRef}
-                  onChange={(event) => {
-                    setZoneRef(event.target.value);
-                    if (!zoneName.trim()) setZoneName(defaultZoneName(event.target.value));
-                  }}
-                />
-                <input
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                  placeholder="Zone name"
-                  value={zoneName}
-                  onChange={(event) => setZoneName(event.target.value)}
-                />
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={zoneEnabled} onChange={(event) => setZoneEnabled(event.target.checked)} />
-                  Enabled
-                </label>
-                <IonButton size="small" disabled={!selectedDeviceId || busyAction === 'zone'} onClick={() => { void saveZone(); }}>
-                  {busyAction === 'zone' ? 'Saving...' : 'Save zone'}
-                </IonButton>
-              </div>
-            </div>
-
-            <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
-              <h2 className="text-lg font-semibold">Valve outputs</h2>
-              <p className="text-sm text-muted mt-1">Configure output labels and mark the master valve relay.</p>
-              <div className="grid gap-2 mt-3">
-                <input
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                  placeholder="Local ref, e.g. out-1"
-                  value={outputRef}
-                  onChange={(event) => {
-                    setOutputRef(event.target.value);
-                    if (!outputName.trim()) setOutputName(defaultOutputName(event.target.value));
-                  }}
-                />
-                <input
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                  placeholder="Output name"
-                  value={outputName}
-                  onChange={(event) => setOutputName(event.target.value)}
-                />
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={outputEnabled} onChange={(event) => setOutputEnabled(event.target.checked)} />
-                  Enabled
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={isMasterValve} onChange={(event) => setIsMasterValve(event.target.checked)} />
-                  Master valve
-                </label>
-                <IonButton size="small" disabled={!selectedDeviceId || busyAction === 'output'} onClick={() => { void saveOutput(); }}>
-                  {busyAction === 'output' ? 'Saving...' : 'Save output'}
-                </IonButton>
-              </div>
-            </div>
-          </section>
-
           {feedback ? <p className="text-sm text-muted">{feedback}</p> : null}
 
-          <section className="grid gap-3 lg:grid-cols-2">
-            <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
-              <h2 className="text-lg font-semibold mb-3">Configured zones</h2>
-              <div className="space-y-2">
-                {zones.map((zone) => (
-                  <button key={zone.zone_id} type="button" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left" onClick={() => loadZoneIntoForm(zone)}>
-                    <p className="font-semibold">{zone.name || zone.local_ref}</p>
-                    <p className="text-xs text-muted">{zone.local_ref} · {zone.enabled ? 'Enabled' : 'Disabled'}</p>
-                  </button>
-                ))}
-                {!zones.length ? <p className="text-sm text-muted">No zones configured yet.</p> : null}
+          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Irrigation zones</h2>
+                <p className="text-sm text-muted mt-1">Fixed zone identifiers map directly to valve numbers.</p>
               </div>
+              <IonButton size="small" disabled={!selectedDeviceId || busyAction === 'add-zone'} onClick={() => { void addZone(); }}>
+                {busyAction === 'add-zone' ? 'Adding...' : 'Add zone'}
+              </IonButton>
             </div>
 
-            <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
-              <h2 className="text-lg font-semibold mb-3">Configured outputs</h2>
-              <div className="space-y-2">
-                {outputs.map((output) => (
-                  <button key={output.output_id} type="button" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left" onClick={() => loadOutputIntoForm(output)}>
-                    <p className="font-semibold">{output.name || output.local_ref}</p>
-                    <p className="text-xs text-muted">
-                      {output.local_ref} · {output.enabled ? 'Enabled' : 'Disabled'}{output.is_master_valve ? ' · Master valve' : ''}{output.fault ? ` · Fault: ${output.fault}` : ''}
-                    </p>
-                  </button>
-                ))}
-                {!outputs.length ? <p className="text-sm text-muted">No valve outputs configured yet.</p> : null}
-              </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {zones.map((zone) => {
+                const draft = zoneDrafts[zone.zone_id] || { name: zone.name || defaultZoneName(zone.local_ref || zone.zone_id), enabled: zone.enabled };
+                const localRef = zone.local_ref || zone.zone_id;
+                const output = outputs.find((item) => item.local_ref === outputRefForZone(localRef));
+                const isSaving = busyAction === `zone:${zone.zone_id}`;
+                return (
+                  <article key={zone.zone_id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{localRef}</p>
+                        <p className="text-xs text-muted">{valveLabelForZone(localRef)}{output?.fault ? ` · Fault: ${output.fault}` : ''}</p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={draft.enabled}
+                          onChange={(event) => updateZoneDraft(zone.zone_id, { enabled: event.target.checked })}
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                    <input
+                      className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                      placeholder="Description"
+                      value={draft.name}
+                      onChange={(event) => updateZoneDraft(zone.zone_id, { name: event.target.value })}
+                    />
+                    <IonButton className="mt-3" size="small" expand="block" disabled={!selectedDeviceId || isSaving} onClick={() => { void saveZone(zone, draft); }}>
+                      {isSaving ? 'Saving...' : 'Save'}
+                    </IonButton>
+                  </article>
+                );
+              })}
+              {!zones.length ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-muted">
+                  No zones configured yet.
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-muted">
+              Master valve: {masterValveEnabled ? 'enabled when at least one zone is enabled' : 'disabled until a zone is enabled'}.
             </div>
           </section>
         </div>
