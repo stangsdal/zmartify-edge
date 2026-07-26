@@ -417,6 +417,7 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
     @router.post("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run")
     def v2_start_irrigation_program_run(device_id: str, program_id: str, request: Request, payload: IrrigationRunIn) -> dict:
         require_roles(request, {"owner", "admin", "installer"})
+        run = None
         try:
             run = create_program_run(device_id, program_id, trigger_type=payload.trigger_type)
             command = None
@@ -433,6 +434,8 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except MqttCommandError as exc:
+            if run is not None:
+                complete_irrigation_run(device_id, run["run_id"], status="failed")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/complete")
