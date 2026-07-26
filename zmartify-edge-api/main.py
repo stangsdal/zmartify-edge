@@ -37,21 +37,14 @@ from app.device_onboarding import (
 from app.domain_model import (
     DomainModelError,
     get_device_channel,
-    get_device_history,
-    get_device_freshness,
     get_device_zone,
-    get_zone_history,
     get_mobile_site,
     ingest_device_twin_snapshot,
     list_device_channels,
     list_device_zones,
-    list_events,
     list_mobile_domains,
     list_mobile_sites,
-    list_notifications_for_user,
     log_event,
-    mark_all_notifications_read,
-    mark_notification_read,
     rename_zone,
     resolve_zone_ref,
     set_realtime_emit_hooks,
@@ -91,6 +84,7 @@ from app.registry import (
 from app.router_auth_invites import create_auth_invites_router
 from app.router_domains_sites import create_domains_sites_router
 from app.router_legacy_auth_users import create_legacy_auth_users_router
+from app.router_legacy_mobile_telemetry import create_legacy_mobile_telemetry_router
 from app.router_v2_auth_users import create_auth_users_v2_router
 from app.router_v2_core import create_core_v2_router
 from app.router_v2_device_ota import create_device_ota_v2_router
@@ -112,7 +106,6 @@ from app.schemas import (
     ChannelOut,
     ChannelStateIn,
     ChannelZoneLinksIn,
-    DeviceFreshnessOut,
     DeviceTwinIngestIn,
     DeviceTwinIngestResult,
     DeviceAssignSite,
@@ -125,12 +118,10 @@ from app.schemas import (
     DeviceOut,
     DevicePushConfigIn,
     DeviceRename,
-    EventOut,
     MobileSetpointIn,
     MqttClientCreate,
     MqttClientOut,
     MqttCredentialOut,
-    NotificationOut,
     ZoneMetadataIn,
     ZoneOut,
     ZoneRenameIn,
@@ -277,19 +268,6 @@ def _is_protected_path(path: str) -> bool:
     return False
 
 
-def _resolve_domain_filter_id(domain_ref: str | None) -> int | None:
-    if not domain_ref:
-        return None
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT id FROM domains WHERE uuid = ? OR slug = ? OR CAST(id AS TEXT) = ?",
-            (domain_ref, domain_ref, domain_ref),
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="domain not found")
-    return int(row["id"])
-
-
 def _resolve_site_filter_id(site_ref: str | None) -> int | None:
     if not site_ref:
         return None
@@ -301,18 +279,6 @@ def _resolve_site_filter_id(site_ref: str | None) -> int | None:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
     return int(row["id"])
-
-
-def _mobile_event_projection(event: dict) -> dict:
-    payload = dict(event.get("payload") or {})
-    return {
-        "event_id": event.get("uuid"),
-        "event_type": event.get("event_type"),
-        "created_at": event.get("created_at"),
-        "device_id": event.get("device_external_id") or payload.get("device_id"),
-        "zone_id": event.get("zone_id"),
-        "payload": payload,
-    }
 
 
 def _mobile_site_scope_ids(request: Request) -> set[int] | None:
@@ -573,6 +539,8 @@ app.include_router(create_mqtt_clients_router(_require_roles))
 app.include_router(create_auth_invites_router(_require_roles))
 app.include_router(create_legacy_auth_users_router(_require_roles))
 app.include_router(create_domains_sites_router(_require_roles))
+app.include_router(create_mobile_events_v2_router(_require_roles, prefix="", tags=["legacy-mobile-events"]))
+app.include_router(create_legacy_mobile_telemetry_router(_require_roles, _resolve_device_site_pk_id, _enforce_mobile_site_scope))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
 app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
@@ -1029,19 +997,6 @@ def api_refresh_device_firmware(
     )
 
 
-@app.get("/mobile/devices/{device_id}/freshness", response_model=DeviceFreshnessOut)
-def mobile_device_freshness(device_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    site_pk_id = _resolve_device_site_pk_id(device_id)
-    if site_pk_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
-    _enforce_mobile_site_scope(request, site_pk_id)
-    try:
-        return get_device_freshness(device_id)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
 @app.post("/devices/{device_id}/assign-site", response_model=DeviceOut)
 def api_assign_site(device_id: str, payload: DeviceAssignSite, request: Request) -> dict:
     _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
@@ -1372,134 +1327,5 @@ def mobile_rename_zone(zone_ref: str, payload: ZoneRenameIn, request: Request) -
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.get("/mobile/zones/{zone_ref}/history")
-def mobile_zone_history(zone_ref: str, request: Request, window: str = "24h", offset_ms: int = 0) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    try:
-        device_id, _zone_id = resolve_zone_ref(zone_ref)
-        site_pk_id = _resolve_device_site_pk_id(device_id)
-        if site_pk_id is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
-        _enforce_mobile_site_scope(request, site_pk_id)
-        return get_zone_history(zone_ref, window=window, offset_ms=offset_ms)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DomainModelError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.get("/mobile/devices/{device_id}/history")
-def mobile_device_history(device_id: str, request: Request, window: str = "24h", offset_ms: int = 0) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    try:
-        site_pk_id = _resolve_device_site_pk_id(device_id)
-        if site_pk_id is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
-        _enforce_mobile_site_scope(request, site_pk_id)
-        return get_device_history(device_id, window=window, offset_ms=offset_ms)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DomainModelError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.get("/events", response_model=list[EventOut])
-def events_list(
-    request: Request,
-    limit: int = 100,
-    event_type: str | None = None,
-    domain_id: int | None = None,
-    site_id: int | None = None,
-) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)
-
-
-@app.get("/events/recent", response_model=list[EventOut])
-def events_recent(
-    request: Request,
-    limit: int = 50,
-    event_type: str | None = None,
-    domain_id: int | None = None,
-    site_id: int | None = None,
-) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    return list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)
-
-
-@app.get("/events/device/{device_id}", response_model=list[EventOut])
-def events_for_device(
-    device_id: str,
-    request: Request,
-    limit: int = 100,
-    event_type: str | None = None,
-) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    try:
-        return list_events(limit=limit, device_external_id=device_id, event_type=event_type)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.get("/mobile/events")
-def mobile_events(
-    request: Request,
-    limit: int = 50,
-    event_type: str | None = None,
-    domain_id: str | None = None,
-    site_id: str | None = None,
-) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    scoped_site_ids = _mobile_site_scope_ids(request)
-    resolved_domain_id = _resolve_domain_filter_id(domain_id)
-    resolved_site_id = _resolve_site_filter_id(site_id)
-    if scoped_site_ids is not None and resolved_site_id is not None and resolved_site_id not in scoped_site_ids:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
-    events = list_events(
-        limit=limit,
-        event_type=event_type,
-        domain_id=resolved_domain_id,
-        site_id=resolved_site_id,
-        allowed_site_ids=scoped_site_ids,
-    )
-    return {"events": [_mobile_event_projection(event) for event in events]}
-
-
-@app.get("/mobile/notifications", response_model=list[NotificationOut])
-def mobile_notifications(request: Request, limit: int = 100, unread_only: bool = False) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    if auth_user.user_id is None:
-        return []
-    notifications = list_notifications_for_user(auth_user.user_id, limit=limit)
-    if unread_only:
-        return [item for item in notifications if not item["read"]]
-    return notifications
-
-
-@app.post("/mobile/notifications/read-all")
-def mobile_mark_all_notifications_read(request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None or auth_user.user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    updated_count = mark_all_notifications_read(user_id=auth_user.user_id)
-    return {"updated": updated_count}
-
-
-@app.post("/mobile/notifications/{notification_id}/read", response_model=NotificationOut)
-def mobile_mark_notification_read(notification_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-    auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None or auth_user.user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    try:
-        return mark_notification_read(notification_id, user_id=auth_user.user_id, read=True)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 

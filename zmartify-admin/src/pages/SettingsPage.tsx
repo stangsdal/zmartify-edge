@@ -4,15 +4,32 @@ import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { authApi } from '../api/auth';
 import { apiClient } from '../api/client';
+import { deviceApi } from '../api/devices';
 import { mobileApi } from '../api/mobile';
 
 interface DeviceHealthRow {
   deviceId: string;
   displayName: string;
   firmwareVersion: string;
+  deviceType?: string;
+  integrationMode?: string;
   online: boolean;
   mqttConnected: boolean;
   freshnessAgeMs: number | null;
+  controller?: {
+    timezone?: string | null;
+    ntpServer?: string | null;
+    mqttTlsEnabled?: boolean | null;
+    rebootRequired?: boolean;
+  } | null;
+  storage?: {
+    state: string;
+    mounted: boolean;
+    cardTotalBytes?: number | null;
+    filesystemTotalBytes?: number | null;
+    freeBytes?: number | null;
+    source: string;
+  } | null;
 }
 
 export function SettingsPage() {
@@ -32,6 +49,24 @@ export function SettingsPage() {
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
     return `${hours}h ago`;
+  };
+
+  const formatBytes = (value?: number | null): string => {
+    if (value == null || !Number.isFinite(value)) return 'Unknown';
+    if (value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string; integration_mode?: string }): boolean => {
+    const text = [device.device_id, device.display_name, device.device_type, device.integration_mode].filter(Boolean).join(' ').toLowerCase();
+    return text.includes('irrigation');
   };
 
   useEffect(() => {
@@ -68,14 +103,42 @@ export function SettingsPage() {
         const site = await mobileApi.getSite(activeSite);
         const rows = await Promise.all(
           (site.devices || []).map(async (device) => {
-            const freshness = await mobileApi.getDeviceFreshness(device.device_id);
+            const [freshness, controller, storage] = await Promise.all([
+              mobileApi.getDeviceFreshness(device.device_id),
+              isIrrigationController(device)
+                ? deviceApi.getControllerSettings(device.device_id).catch(() => null)
+                : Promise.resolve(null),
+              isIrrigationController(device)
+                ? deviceApi.getSdCardStatus(device.device_id).catch(() => null)
+                : Promise.resolve(null),
+            ]);
             return {
               deviceId: device.device_id,
               displayName: device.display_name,
+              deviceType: device.device_type,
+              integrationMode: device.integration_mode,
               firmwareVersion: device.firmware_version || 'Unknown',
               online: freshness.device.online ?? device.online,
               mqttConnected: freshness.device.mqtt_connected ?? !!device.mqtt_connected,
               freshnessAgeMs: freshness.device.freshness_age_ms ?? null,
+              controller: controller
+                ? {
+                    timezone: controller.timezone,
+                    ntpServer: controller.ntp_server,
+                    mqttTlsEnabled: controller.mqtt_tls_enabled,
+                    rebootRequired: controller.reboot_required,
+                  }
+                : null,
+              storage: storage
+                ? {
+                    state: storage.state,
+                    mounted: storage.mounted,
+                    cardTotalBytes: storage.card_total_bytes ?? storage.total_bytes,
+                    filesystemTotalBytes: storage.filesystem_total_bytes ?? storage.total_bytes,
+                    freeBytes: storage.free_bytes,
+                    source: storage.source,
+                  }
+                : null,
             };
           })
         );
@@ -167,6 +230,29 @@ export function SettingsPage() {
                   <p className="text-muted">Gateway: {row.online ? 'Online' : 'Offline'}</p>
                   <p className="text-muted">MQTT: {row.mqttConnected ? 'Connected' : 'Disconnected'}</p>
                   <p className="text-muted">Last Seen: {formatAge(row.freshnessAgeMs)}</p>
+                  {row.controller || row.storage ? (
+                    <div className="mt-3 grid gap-2 border-t border-slate-200/70 pt-3 md:grid-cols-2">
+                      {row.controller ? (
+                        <div>
+                          <p className="font-semibold">Controller</p>
+                          <p className="text-muted">Timezone: {row.controller.timezone || 'Unknown'}</p>
+                          <p className="text-muted">NTP: {row.controller.ntpServer || 'Unknown'}</p>
+                          <p className="text-muted">TLS: {row.controller.mqttTlsEnabled ? 'Enabled' : 'Disabled'}</p>
+                          {row.controller.rebootRequired ? <p className="text-amber-700">Reboot required</p> : null}
+                        </div>
+                      ) : null}
+                      {row.storage ? (
+                        <div>
+                          <p className="font-semibold">SD card</p>
+                          <p className="text-muted">State: {row.storage.state}</p>
+                          <p className="text-muted">Mounted: {row.storage.mounted ? 'Yes' : 'No'}</p>
+                          <p className="text-muted">Capacity: {formatBytes(row.storage.cardTotalBytes)}</p>
+                          <p className="text-muted">Free: {formatBytes(row.storage.freeBytes)}</p>
+                          <p className="text-muted">Source: {row.storage.source}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>

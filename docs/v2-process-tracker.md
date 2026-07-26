@@ -44,6 +44,8 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: setup/auth/invite router extraction (`/setup/status`, `/auth/*`, `/admin/invites/register*`) from `main.py` into `app/router_auth_invites.py` with legacy route compatibility preserved.
 - Completed: legacy domain/site router extraction (`/domains*`, `/sites/{id}`) from `main.py` into `app/router_domains_sites.py` with audit and response-model behavior preserved.
 - Completed: legacy auth/user administration extraction (`/users*`, `/admin/audit-log`) from `main.py` into `app/router_legacy_auth_users.py` with admin guardrails and audit-log behavior preserved.
+- Completed: legacy event/notification extraction (`/events*`, `/mobile/events`, `/mobile/notifications*`) now reuses `app/router_v2_mobile_events.py` with legacy route compatibility preserved.
+- Completed: legacy mobile telemetry extraction (`/mobile/devices/{id}/freshness`, `/mobile/zones/{ref}/history`, `/mobile/devices/{id}/history`) from `main.py` into `app/router_legacy_mobile_telemetry.py`.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `completed`
@@ -99,6 +101,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: irrigation programs and hydraulics/power app-shell surfaces now consume real backend program/schedule data and realtime overview/status traces.
 - Completed: irrigation program management actions in app shell (create program, enable/pause toggle, add schedule, run now) bound to v2 program endpoints.
 - Completed: irrigation setup/control UX increment: app-shell setup screen binds zone/output configuration to v2 upsert endpoints, overview exposes setup navigation, and zone detail supports bounded start plus per-zone stop commands with realtime feedback history.
+- Completed: Settings app-shell parity increment: Advanced Device Health now surfaces irrigation controller timezone/NTP/TLS status and SD-card state/capacity/free-space using existing controller settings and storage APIs.
 - Open: complete remaining UX parity screens and deeper API bindings.
 
 8. Phase 7 - HVAC firmware alignment: `completed`
@@ -147,6 +150,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 10. Phase 9 - Production hardening: `started`
 - Completed: database backup + restore-drill helper (`scripts/backup_edge_db.sh`) with integrity verification and retention pruning; validated end-to-end against a freshly initialized edge database.
 - Completed: scheduled backup sidecar (`edge-db-backup` compose service) running daily snapshots into a dedicated `edge-backups` volume with configurable interval/retention.
+- Completed: backup helper and scheduled sidecar migrated from SQLite snapshots to PostgreSQL `pg_dump` custom-format backups with catalog verification and SQLite fallback retained for explicit local use.
 - Completed: liveness/readiness endpoints added (`/health/live`, `/health/ready`) with database, migration, MQTT broker, and storage checks plus focused regression coverage.
 - Completed: scoped in-memory rate limiting added for sensitive public auth endpoints (`/auth/login`, `/auth/register`, `/auth/invite/validate`) with configurable limits and regression coverage.
 - Open: enforce-mode default rollout and remaining hardening checklist items.

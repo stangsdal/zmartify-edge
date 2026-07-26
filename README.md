@@ -5,6 +5,7 @@ Edge control-plane repository for Zmartify HVAC.
 This repository contains:
 - Public Edge API (FastAPI)
 - Admin and mobile web apps
+- PostgreSQL/TimescaleDB runtime storage
 - MQTT broker configuration
 - Docker Compose deployment setup
 
@@ -14,6 +15,7 @@ This repository contains:
 - zmartify-admin/: Ionic admin/mobile UI
 - admin-ui/: operational admin UI
 - mosquitto/: broker config and runtime paths
+- scripts/backup_edge_db.sh: PostgreSQL backup and restore-drill helper
 - docs/: operations and setup guides
 - docker-compose.yml: production-oriented service orchestration
 
@@ -57,6 +59,7 @@ docker compose up -d --build
 
 ```bash
 curl -k https://localhost/health
+curl -k https://localhost/health/ready
 curl -k https://localhost/registry/status
 ```
 
@@ -66,7 +69,9 @@ Configured in docker-compose.yml for zmartify-edge-api:
 
 - MQTT_HOST=mosquitto
 - MQTT_PORT=1883
-- ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
+- DATABASE_URL=postgresql://zmartify:<password>@postgres-timescale:5432/zmartify
+- ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite (legacy/test SQLite fallback path; production runtime follows DATABASE_URL)
+- ZMART_EDGE_CONTRACT_VALIDATION_MODE=warn|enforce
 - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
 - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
 - ZMART_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
@@ -81,6 +86,8 @@ Optional:
 
 - ZMART_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH=1 (enables manual firmware refresh endpoint)
 - ZMART_EDGE_OTA_STAGE_DIR=/data/ota-stage
+- ZMART_EDGE_BACKUP_INTERVAL_SECONDS=86400 (scheduled PostgreSQL backup interval)
+- ZMART_EDGE_BACKUP_KEEP=14 (number of PostgreSQL dump snapshots retained)
 
 ## API Overview
 
@@ -217,6 +224,7 @@ Base URL examples:
 docker compose ps
 docker compose logs --tail=200 zmartify-edge-api
 docker compose logs --tail=200 mosquitto
+docker compose logs --tail=200 edge-db-backup
 ```
 
 - Restart API only:
@@ -229,6 +237,20 @@ docker compose restart zmartify-edge-api
 
 ```bash
 docker compose up -d --build zmartify-edge-api
+```
+
+- Run an immediate PostgreSQL backup into the `edge-backups` volume:
+
+```bash
+docker compose run --rm --entrypoint bash edge-db-backup \
+	/usr/local/bin/backup_edge_db.sh backup --backend postgres --out /backups --keep "${ZMART_EDGE_BACKUP_KEEP:-14}"
+```
+
+- Verify the newest PostgreSQL backup catalog without writing to the live database:
+
+```bash
+docker compose run --rm --entrypoint bash edge-db-backup \
+	/usr/local/bin/backup_edge_db.sh restore-drill --backend postgres --out /backups
 ```
 
 ## Documentation

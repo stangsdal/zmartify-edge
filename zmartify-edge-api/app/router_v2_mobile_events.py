@@ -63,8 +63,13 @@ def _mobile_site_scope_ids(request: Request) -> set[int] | None:
     return set(list_user_site_access(auth_user.user_id))
 
 
-def create_mobile_events_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
-    router = APIRouter(prefix="/api/v2", tags=["api-v2-mobile-events"])
+def create_mobile_events_v2_router(
+    require_roles: Callable[[Request, set[str]], None],
+    *,
+    prefix: str = "/api/v2",
+    tags: list[str] | None = None,
+) -> APIRouter:
+    router = APIRouter(prefix=prefix, tags=tags or ["api-v2-mobile-events"])
 
     @router.get("/events", response_model=list[EventOut])
     def v2_events_list(
