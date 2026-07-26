@@ -43,6 +43,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: mqtt-clients router extraction (`/mqtt/clients/*`) from `main.py` into `app/router_mqtt_clients.py`.
 - Completed: setup/auth/invite router extraction (`/setup/status`, `/auth/*`, `/admin/invites/register*`) from `main.py` into `app/router_auth_invites.py` with legacy route compatibility preserved.
 - Completed: legacy domain/site router extraction (`/domains*`, `/sites/{id}`) from `main.py` into `app/router_domains_sites.py` with audit and response-model behavior preserved.
+- Completed: legacy auth/user administration extraction (`/users*`, `/admin/audit-log`) from `main.py` into `app/router_legacy_auth_users.py` with admin guardrails and audit-log behavior preserved.
 - Open: continue extraction from `main.py` into v2 service/router modules.
 
 4. Phase 3 - Device contract and canonical twin: `in progress`

@@ -18,18 +18,9 @@ from app.auth import (
     authenticate_bearer_token,
     authenticate_emergency_token,
     audit_action,
-    create_user,
-    delete_user,
     ensure_bootstrap_owner,
-    get_user,
-    list_audit_logs,
     list_user_site_access,
-    list_users,
     require_any_role,
-    reset_user_password,
-    set_user_enabled,
-    set_user_roles,
-    set_user_site_access,
 )
 from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
 from app.db import get_connection, initialize_database
@@ -99,6 +90,7 @@ from app.registry import (
 )
 from app.router_auth_invites import create_auth_invites_router
 from app.router_domains_sites import create_domains_sites_router
+from app.router_legacy_auth_users import create_legacy_auth_users_router
 from app.router_v2_auth_users import create_auth_users_v2_router
 from app.router_v2_core import create_core_v2_router
 from app.router_v2_device_ota import create_device_ota_v2_router
@@ -142,12 +134,6 @@ from app.schemas import (
     ZoneMetadataIn,
     ZoneOut,
     ZoneRenameIn,
-    UserCreateIn,
-    UserOut,
-    UserResetPasswordIn,
-    UserRoleUpdateIn,
-    UserSiteAccessUpdateIn,
-    AuditLogOut,
 )
 
 app = FastAPI(title="Zmartify Edge API", version="0.1.0")
@@ -585,6 +571,7 @@ app.include_router(create_core_v2_router(_require_roles))
 app.include_router(create_system_status_router(_require_roles))
 app.include_router(create_mqtt_clients_router(_require_roles))
 app.include_router(create_auth_invites_router(_require_roles))
+app.include_router(create_legacy_auth_users_router(_require_roles))
 app.include_router(create_domains_sites_router(_require_roles))
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router(_require_roles))
@@ -603,18 +590,6 @@ app.include_router(
         _publish_zone_state_update,
     )
 )
-
-
-def _enforce_admin_user_guardrails(actor_roles: set[str], target_roles: list[str], action: str) -> None:
-    if ROLE_ADMIN not in actor_roles or ROLE_OWNER in actor_roles:
-        return
-
-    target_role_set = set(target_roles)
-    if ROLE_OWNER in target_role_set:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin cannot manage owner user")
-
-    if action in {"delete_user", "set_roles"} and ROLE_ADMIN in target_role_set:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin cannot modify peer admin user")
 
 
 def _edge_public_base_url(request: Request) -> str:
@@ -1528,138 +1503,3 @@ def mobile_mark_notification_read(notification_id: str, request: Request) -> dic
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def api_create_user(payload: UserCreateIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    actor = request.state.auth_user
-    if ROLE_ADMIN in actor.roles and ROLE_OWNER not in actor.roles:
-        disallowed = {ROLE_OWNER, ROLE_ADMIN}
-        if disallowed & set(payload.roles):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin may only assign installer/viewer roles")
-    try:
-        return create_user(
-            actor_user_id=actor.user_id,
-            username=payload.username,
-            display_name=payload.display_name,
-            password=payload.password,
-            email=payload.email,
-            roles=payload.roles,
-        )
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.get("/users", response_model=list[UserOut])
-def api_list_users(request: Request) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    return list_users()
-
-
-@app.get("/users/{user_id}", response_model=UserOut)
-def api_get_user(user_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        return get_user(user_id)
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.post("/users/{user_id}/disable", response_model=UserOut)
-def api_disable_user(user_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    actor = request.state.auth_user
-    target = get_user(user_id)
-    _enforce_admin_user_guardrails(actor.roles, target["roles"], "disable_user")
-    try:
-        return set_user_enabled(actor_user_id=actor.user_id, user_id=user_id, enabled=False)
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.post("/users/{user_id}/enable", response_model=UserOut)
-def api_enable_user(user_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    actor = request.state.auth_user
-    target = get_user(user_id)
-    _enforce_admin_user_guardrails(actor.roles, target["roles"], "enable_user")
-    try:
-        return set_user_enabled(actor_user_id=actor.user_id, user_id=user_id, enabled=True)
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.post("/users/{user_id}/reset-password", response_model=UserOut)
-def api_reset_user_password(user_id: int, payload: UserResetPasswordIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    actor = request.state.auth_user
-    target = get_user(user_id)
-    _enforce_admin_user_guardrails(actor.roles, target["roles"], "reset_password")
-    try:
-        return reset_user_password(
-            actor_user_id=actor.user_id,
-            user_id=user_id,
-            password=payload.password,
-        )
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.post("/users/{user_id}/roles", response_model=UserOut)
-def api_set_user_roles(user_id: int, payload: UserRoleUpdateIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    actor = request.state.auth_user
-    target = get_user(user_id)
-    _enforce_admin_user_guardrails(actor.roles, target["roles"], "set_roles")
-    if ROLE_ADMIN in actor.roles and ROLE_OWNER in set(payload.roles):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin cannot assign owner role")
-    if ROLE_ADMIN in actor.roles and ROLE_ADMIN in set(payload.roles):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin cannot assign admin role")
-    try:
-        return set_user_roles(
-            actor_user_id=actor.user_id,
-            user_id=user_id,
-            roles=payload.roles,
-        )
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def api_delete_user(user_id: int, request: Request) -> Response:
-    _require_roles(request, {ROLE_OWNER})
-    actor = request.state.auth_user
-    target = get_user(user_id)
-    if ROLE_OWNER in target["roles"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="owner user cannot be deleted")
-    try:
-        delete_user(actor_user_id=actor.user_id, user_id=user_id)
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@app.get("/users/{user_id}/site-access")
-def api_get_user_site_access(user_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    try:
-        site_ids = list_user_site_access(user_id)
-        return {"user_id": user_id, "site_ids": site_ids}
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@app.post("/users/{user_id}/site-access")
-def api_set_user_site_access(user_id: int, payload: UserSiteAccessUpdateIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    actor = request.state.auth_user
-    try:
-        site_ids = set_user_site_access(actor_user_id=actor.user_id, user_id=user_id, site_ids=payload.site_ids)
-        return {"user_id": user_id, "site_ids": site_ids}
-    except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@app.get("/admin/audit-log", response_model=list[AuditLogOut])
-def api_audit_log(request: Request, limit: int = 200) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
-    return list_audit_logs(limit=limit)
