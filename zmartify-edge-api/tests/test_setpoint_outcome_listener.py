@@ -9,6 +9,36 @@ class _Msg:
         self.payload = payload
 
 
+class _FakeMqttClient:
+    def __init__(self, client_id: str, userdata: str):
+        self.client_id = client_id
+        self.userdata = userdata
+        self.connected_to = None
+        self.loop_kwargs = None
+        self.on_connect = None
+        self.on_message = None
+
+    def username_pw_set(self, username: str, password: str):
+        self.username = username
+        self.password = password
+
+    def connect_async(self, host: str, port: int, keepalive: int):
+        self.connected_to = (host, port, keepalive)
+
+    def loop_forever(self, **kwargs):
+        self.loop_kwargs = kwargs
+
+
+class _FakeMqttModule:
+    def __init__(self):
+        self.clients = []
+
+    def Client(self, client_id: str, userdata: str):
+        client = _FakeMqttClient(client_id, userdata)
+        self.clients.append(client)
+        return client
+
+
 def test_parse_zone_topic_valid_and_invalid():
     parsed = SetpointOutcomeMqttListener._parse_zone_topic("homie/5/device-a/zone-3/last-setpoint-command")
     assert parsed == ("device-a", 3)
@@ -143,3 +173,23 @@ def test_device_listener_targets_respects_override(monkeypatch):
 
     targets = listener._device_listener_targets()
     assert targets == [("device-b", "device-b-u", "pw")]
+
+
+def test_start_uses_async_connect_and_retries_first_connection(monkeypatch):
+    monkeypatch.setenv("MQTT_HOST", "mosquitto")
+    monkeypatch.setenv("MQTT_PORT", "1883")
+    fake_mqtt = _FakeMqttModule()
+
+    listener = SetpointOutcomeMqttListener(
+        list_devices_fn=lambda: [{"device_id": "device-a"}],
+        get_device_mqtt_credentials_fn=lambda _device_id: {"username": "device-a-u", "password": "pw"},
+        ingest_setpoint_command_outcome_fn=lambda *_args, **_kwargs: None,
+        mqtt_client_module=fake_mqtt,
+    )
+
+    listener.start()
+
+    assert listener._running is True
+    assert len(fake_mqtt.clients) == 1
+    assert fake_mqtt.clients[0].connected_to == ("mosquitto", 1883, 30)
+    assert fake_mqtt.clients[0].loop_kwargs == {"retry_first_connection": True}

@@ -181,9 +181,10 @@ class SetpointOutcomeMqttListener:
             client.username_pw_set(username=username, password=password)
             client.on_connect = self._on_connect
             client.on_message = self._on_message
-            client.connect(self._mqtt_host(), self._mqtt_port(), keepalive=30)
+            client.connect_async(self._mqtt_host(), self._mqtt_port(), keepalive=30)
             thread = threading.Thread(
                 target=client.loop_forever,
+                kwargs={"retry_first_connection": True},
                 name=f"setpoint-outcome-{device_id}",
                 daemon=True,
             )
