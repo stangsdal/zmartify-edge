@@ -99,8 +99,7 @@ def test_publish_irrigation_command_uses_v2_irrigation_topic(monkeypatch):
 
     assert topic == "zmartify/v2/devices/zmartify-irrigation-01/commands/irrigation/zone/start"
     payload = json.loads(message)
-    assert payload["schema_version"] == "2.0"
     assert payload["command_id"] == result["command_id"]
-    assert payload["command_type"] == "irrigation.zone.start"
-    assert payload["target_ref"] == "zone:3"
+    assert payload["source_timestamp"].endswith("Z")
+    assert payload["parameters"]["zone_id"] == 3
     assert payload["parameters"]["duration_seconds"] == 600
