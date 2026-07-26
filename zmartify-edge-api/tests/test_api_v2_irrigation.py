@@ -302,6 +302,48 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert create_schedule.json()["schedule"]["name"] == "Weekday AM"
     assert create_schedule.json()["schedule"]["recurrence_type"] == "cyclic"
     assert create_schedule.json()["schedule"]["interval_days"] == 4
+    schedule_id = create_schedule.json()["schedule"]["schedule_id"]
+
+    update_schedule = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{schedule_id}",
+        headers=headers,
+        json={
+            "name": "Every Other AM",
+            "start_local_time": "07:15",
+            "weekdays": [],
+            "recurrence_type": "even_days",
+            "enabled": False,
+        },
+    )
+    assert update_schedule.status_code == 200
+    assert update_schedule.json()["schedule"]["name"] == "Every Other AM"
+    assert update_schedule.json()["schedule"]["start_local_time"] == "07:15"
+    assert update_schedule.json()["schedule"]["recurrence_type"] == "even_days"
+    assert update_schedule.json()["schedule"]["enabled"] is False
+
+    create_schedule_two = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules",
+        headers=headers,
+        json={
+            "name": "Delete Me",
+            "start_local_time": "08:00",
+            "weekdays": [0],
+            "recurrence_type": "weekdays",
+            "enabled": True,
+        },
+    )
+    assert create_schedule_two.status_code == 200
+    delete_schedule = client.delete(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{create_schedule_two.json()['schedule']['schedule_id']}",
+        headers=headers,
+    )
+    assert delete_schedule.status_code == 200
+    schedules_after_delete = client.get(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules",
+        headers=headers,
+    )
+    assert schedules_after_delete.status_code == 200
+    assert [schedule["schedule_id"] for schedule in schedules_after_delete.json()["schedules"]] == [schedule_id]
 
     run_start = client.post(
         f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run",

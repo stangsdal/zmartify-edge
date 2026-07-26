@@ -9,6 +9,7 @@ from app.irrigation_domain import (
     create_program_schedule,
     create_irrigation_program,
     delete_irrigation_program,
+    delete_program_schedule,
     finish_current_irrigation_run_step,
     get_irrigation_program,
     get_irrigation_hydraulics,
@@ -25,6 +26,7 @@ from app.irrigation_domain import (
     set_irrigation_rain_delay,
     start_next_irrigation_run_step,
     update_irrigation_program,
+    update_program_schedule,
     upsert_irrigation_hydraulics_state,
     upsert_irrigation_output_state,
     upsert_irrigation_power_state,
@@ -64,6 +66,10 @@ class IrrigationScheduleCreateIn(BaseModel):
     anchor_date: str | None = None
     dates: list[str] = Field(default_factory=list)
     enabled: bool = True
+
+
+class IrrigationScheduleUpdateIn(IrrigationScheduleCreateIn):
+    pass
 
 
 class IrrigationProgramZoneIn(BaseModel):
@@ -311,6 +317,42 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
                 enabled=payload.enabled,
             )
             return {"device_id": device_id, "program_id": program_id, "schedule": schedule}
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.put("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{schedule_id}")
+    def v2_update_irrigation_program_schedule(
+        device_id: str,
+        program_id: str,
+        schedule_id: str,
+        payload: IrrigationScheduleUpdateIn,
+        request: Request,
+    ) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        try:
+            schedule = update_program_schedule(
+                device_id,
+                program_id,
+                schedule_id,
+                name=payload.name,
+                start_local_time=payload.start_local_time,
+                weekdays=payload.weekdays,
+                recurrence_type=payload.recurrence_type,
+                interval_days=payload.interval_days,
+                anchor_date=payload.anchor_date,
+                dates=payload.dates,
+                enabled=payload.enabled,
+            )
+            return {"device_id": device_id, "program_id": program_id, "schedule": schedule}
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.delete("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{schedule_id}")
+    def v2_delete_irrigation_program_schedule(device_id: str, program_id: str, schedule_id: str, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        try:
+            delete_program_schedule(device_id, program_id, schedule_id)
+            return {"deleted": True}
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

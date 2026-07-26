@@ -439,6 +439,73 @@ def create_program_schedule(
     raise RegistryNotFoundError("irrigation schedule not found")
 
 
+def update_program_schedule(
+    device_external_id: str,
+    program_id: str,
+    schedule_id: str,
+    *,
+    name: str,
+    start_local_time: str,
+    weekdays: list[int],
+    recurrence_type: str = "weekdays",
+    interval_days: int | None = None,
+    anchor_date: str | None = None,
+    dates: list[str] | None = None,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    weekdays_json = json.dumps([int(day) for day in weekdays], separators=(",", ":"))
+    dates_json = json.dumps([str(date) for date in (dates or [])], separators=(",", ":"))
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        program = _resolve_program(conn, device["id"], program_id)
+        cur = conn.execute(
+            """
+            UPDATE irrigation_schedule_rules
+            SET name = ?, start_local_time = ?, weekdays_json = ?, recurrence_type = ?, interval_days = ?,
+                anchor_date = ?, dates_json = ?, enabled = ?, updated_at = ?
+            WHERE program_id = ? AND uuid = ?
+            """,
+            (
+                name,
+                start_local_time,
+                weekdays_json,
+                recurrence_type,
+                interval_days,
+                anchor_date,
+                dates_json,
+                1 if enabled else 0,
+                _now_iso(),
+                program["id"],
+                schedule_id,
+            ),
+        )
+        if cur.rowcount == 0:
+            raise RegistryNotFoundError("irrigation schedule not found")
+        conn.commit()
+
+    schedules = list_program_schedules(device_external_id, program_id)
+    for schedule in schedules:
+        if schedule["schedule_id"] == schedule_id:
+            return schedule
+    raise RegistryNotFoundError("irrigation schedule not found")
+
+
+def delete_program_schedule(device_external_id: str, program_id: str, schedule_id: str) -> None:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        program = _resolve_program(conn, device["id"], program_id)
+        cur = conn.execute(
+            """
+            DELETE FROM irrigation_schedule_rules
+            WHERE program_id = ? AND uuid = ?
+            """,
+            (program["id"], schedule_id),
+        )
+        if cur.rowcount == 0:
+            raise RegistryNotFoundError("irrigation schedule not found")
+        conn.commit()
+
+
 def create_program_run(device_external_id: str, program_id: str, *, trigger_type: str = "manual") -> dict[str, Any]:
     run_uuid = str(uuid.uuid4())
     now = _now_iso()

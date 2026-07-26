@@ -56,6 +56,33 @@ const defaultScheduleDraft = (): ScheduleDraft => ({
   datesText: '',
 });
 
+const scheduleToDraft = (schedule: IrrigationScheduleSummary): ScheduleDraft => ({
+  name: schedule.name,
+  startLocalTime: schedule.start_local_time,
+  recurrenceType: schedule.recurrence_type || 'weekdays',
+  weekdays: schedule.weekdays || [],
+  intervalDays: schedule.interval_days || 4,
+  anchorDate: schedule.anchor_date || new Date().toISOString().slice(0, 10),
+  datesText: (schedule.dates || []).join(', '),
+});
+
+const schedulePayloadFromDraft = (draft: ScheduleDraft, enabled = true) => {
+  const dates = draft.datesText
+    .split(/[\n,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return {
+    name: draft.name.trim() || 'Schedule',
+    start_local_time: draft.startLocalTime,
+    weekdays: draft.recurrenceType === 'weekdays' ? draft.weekdays : [],
+    recurrence_type: draft.recurrenceType,
+    interval_days: draft.recurrenceType === 'cyclic' ? Math.max(1, Number(draft.intervalDays || 1)) : null,
+    anchor_date: draft.recurrenceType === 'cyclic' ? draft.anchorDate : null,
+    dates: draft.recurrenceType === 'custom_dates' ? dates : [],
+    enabled,
+  };
+};
+
 const programKey = (row: DeviceProgram) => `${row.deviceId}:${row.program.program_id}`;
 
 const scheduleSummaryLabel = (schedule: IrrigationScheduleSummary): string => {
@@ -86,6 +113,7 @@ export function IrrigationProgramsPage() {
   const [newProgramName, setNewProgramName] = useState('');
   const [programZoneDrafts, setProgramZoneDrafts] = useState<Record<string, ProgramZoneDraft>>({});
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, ScheduleDraft>>({});
+  const [scheduleEditDrafts, setScheduleEditDrafts] = useState<Record<string, ScheduleDraft>>({});
   const [activeRuns, setActiveRuns] = useState<Record<string, IrrigationRunSummary>>({});
 
   const reloadPrograms = useCallback(async (siteId: string) => {
@@ -284,25 +312,60 @@ export function IrrigationProgramsPage() {
   const createSchedule = async (row: DeviceProgram) => {
     const key = programKey(row);
     const draft = scheduleDrafts[key] || defaultScheduleDraft();
-    const dates = draft.datesText
-      .split(/[\n,]+/)
-      .map((value) => value.trim())
-      .filter(Boolean);
     setBusyKey(`schedule:${key}`);
     setActionFeedback('');
     try {
-      await mobileApi.createIrrigationProgramSchedule(row.deviceId, row.program.program_id, {
-        name: draft.name.trim() || 'Schedule',
-        start_local_time: draft.startLocalTime,
-        weekdays: draft.recurrenceType === 'weekdays' ? draft.weekdays : [],
-        recurrence_type: draft.recurrenceType,
-        interval_days: draft.recurrenceType === 'cyclic' ? Math.max(1, Number(draft.intervalDays || 1)) : null,
-        anchor_date: draft.recurrenceType === 'cyclic' ? draft.anchorDate : null,
-        dates: draft.recurrenceType === 'custom_dates' ? dates : [],
-        enabled: true,
-      });
+      await mobileApi.createIrrigationProgramSchedule(row.deviceId, row.program.program_id, schedulePayloadFromDraft(draft, true));
       await reloadPrograms(selectedSite);
       setActionFeedback(`Schedule added to ${row.program.name}.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const updateScheduleEditDraft = (scheduleId: string, patch: Partial<ScheduleDraft>) => {
+    setScheduleEditDrafts((prev) => ({
+      ...prev,
+      [scheduleId]: {
+        ...(prev[scheduleId] || defaultScheduleDraft()),
+        ...patch,
+      },
+    }));
+  };
+
+  const toggleEditDraftWeekday = (scheduleId: string, weekday: number) => {
+    const draft = scheduleEditDrafts[scheduleId] || defaultScheduleDraft();
+    updateScheduleEditDraft(scheduleId, {
+      weekdays: draft.weekdays.includes(weekday)
+        ? draft.weekdays.filter((value) => value !== weekday)
+        : [...draft.weekdays, weekday].sort((left, right) => left - right),
+    });
+  };
+
+  const saveSchedule = async (row: DeviceProgram, schedule: IrrigationScheduleSummary, enabled = schedule.enabled) => {
+    const draft = scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule);
+    setBusyKey(`schedule-save:${schedule.schedule_id}`);
+    setActionFeedback('');
+    try {
+      await mobileApi.updateIrrigationProgramSchedule(row.deviceId, row.program.program_id, schedule.schedule_id, schedulePayloadFromDraft(draft, enabled));
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`Saved schedule ${draft.name.trim() || schedule.name}.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const deleteSchedule = async (row: DeviceProgram, schedule: IrrigationScheduleSummary) => {
+    setBusyKey(`schedule-delete:${schedule.schedule_id}`);
+    setActionFeedback('');
+    try {
+      await mobileApi.deleteIrrigationProgramSchedule(row.deviceId, row.program.program_id, schedule.schedule_id);
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`Deleted schedule ${schedule.name}.`);
     } catch (error) {
       setActionFeedback(String(error));
     } finally {
@@ -333,6 +396,15 @@ export function IrrigationProgramsPage() {
       for (const row of programRows) {
         const key = programKey(row);
         next[key] = next[key] || defaultScheduleDraft();
+      }
+      return next;
+    });
+    setScheduleEditDrafts((prev) => {
+      const next = { ...prev };
+      for (const row of programRows) {
+        for (const schedule of row.schedules) {
+          next[schedule.schedule_id] = next[schedule.schedule_id] || scheduleToDraft(schedule);
+        }
       }
       return next;
     });
@@ -641,9 +713,115 @@ export function IrrigationProgramsPage() {
                   />
                 ) : null}
                 {row.schedules.length ? (
-                  <div className="mt-3 space-y-1">
+                  <div className="mt-3 space-y-2">
                     {row.schedules.map((schedule) => (
-                      <p key={schedule.schedule_id} className="text-xs text-muted">{schedule.name}: {scheduleSummaryLabel(schedule)}</p>
+                      <div key={schedule.schedule_id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-muted">Existing schedule</p>
+                            <p className="text-sm font-semibold mt-1">{scheduleSummaryLabel(schedule)}</p>
+                          </div>
+                          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                            <span>{schedule.enabled ? 'Enabled' : 'Not Enabled'}</span>
+                            <input
+                              type="checkbox"
+                              checked={schedule.enabled}
+                              disabled={busyKey === `schedule-save:${schedule.schedule_id}`}
+                              onChange={(event) => { void saveSchedule(row, schedule, event.target.checked); }}
+                            />
+                          </label>
+                        </div>
+                        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                          <input
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                            value={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).name}
+                            onChange={(event) => updateScheduleEditDraft(schedule.schedule_id, { name: event.target.value })}
+                          />
+                          <input
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                            type="time"
+                            value={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).startLocalTime}
+                            onChange={(event) => updateScheduleEditDraft(schedule.schedule_id, { startLocalTime: event.target.value })}
+                          />
+                          <select
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                            value={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).recurrenceType}
+                            onChange={(event) => updateScheduleEditDraft(schedule.schedule_id, { recurrenceType: event.target.value })}
+                          >
+                            <option value="weekdays">Weekdays</option>
+                            <option value="odd_days">Odd days</option>
+                            <option value="even_days">Even days</option>
+                            <option value="cyclic">Cyclic</option>
+                            <option value="custom_dates">Custom dates</option>
+                          </select>
+                          <div className="flex gap-2">
+                            <IonButton
+                              size="small"
+                              fill="outline"
+                              disabled={busyKey === `schedule-save:${schedule.schedule_id}`}
+                              onClick={() => { void saveSchedule(row, schedule); }}
+                            >
+                              {busyKey === `schedule-save:${schedule.schedule_id}` ? 'Saving...' : 'Save'}
+                            </IonButton>
+                            <IonButton
+                              size="small"
+                              color="danger"
+                              fill="outline"
+                              disabled={busyKey === `schedule-delete:${schedule.schedule_id}`}
+                              onClick={() => { void deleteSchedule(row, schedule); }}
+                            >
+                              {busyKey === `schedule-delete:${schedule.schedule_id}` ? 'Deleting...' : 'Delete'}
+                            </IonButton>
+                          </div>
+                        </div>
+                        {(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).recurrenceType === 'weekdays' ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {weekdayOptions.map((weekday) => (
+                              <label key={weekday.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).weekdays.includes(weekday.value)}
+                                  onChange={() => toggleEditDraftWeekday(schedule.schedule_id, weekday.value)}
+                                />
+                                {weekday.label}
+                              </label>
+                            ))}
+                          </div>
+                        ) : null}
+                        {(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).recurrenceType === 'cyclic' ? (
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            <label className="text-xs text-muted">
+                              Every N days
+                              <input
+                                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                type="number"
+                                min="1"
+                                max="366"
+                                value={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).intervalDays}
+                                onChange={(event) => updateScheduleEditDraft(schedule.schedule_id, { intervalDays: Math.max(1, Number(event.target.value || 1)) })}
+                              />
+                            </label>
+                            <label className="text-xs text-muted">
+                              Start date
+                              <input
+                                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                type="date"
+                                value={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).anchorDate}
+                                onChange={(event) => updateScheduleEditDraft(schedule.schedule_id, { anchorDate: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                        ) : null}
+                        {(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).recurrenceType === 'custom_dates' ? (
+                          <textarea
+                            className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                            rows={2}
+                            placeholder="YYYY-MM-DD, YYYY-MM-DD"
+                            value={(scheduleEditDrafts[schedule.schedule_id] || scheduleToDraft(schedule)).datesText}
+                            onChange={(event) => updateScheduleEditDraft(schedule.schedule_id, { datesText: event.target.value })}
+                          />
+                        ) : null}
+                      </div>
                     ))}
                   </div>
                 ) : null}

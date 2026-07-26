@@ -499,6 +499,33 @@ export const mobileApi = {
       payload,
     ),
 
+  updateIrrigationProgramSchedule: (
+    deviceId: string,
+    programId: string,
+    scheduleId: string,
+    payload: {
+      name: string;
+      start_local_time: string;
+      weekdays: number[];
+      recurrence_type?: string;
+      interval_days?: number | null;
+      anchor_date?: string | null;
+      dates?: string[];
+      enabled?: boolean;
+    },
+  ): Promise<{ device_id: string; program_id: string; schedule: IrrigationScheduleSummary }> =>
+    apiClient.put(
+      `/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules/${encodeURIComponent(scheduleId)}`,
+      payload,
+    ),
+
+  deleteIrrigationProgramSchedule: (
+    deviceId: string,
+    programId: string,
+    scheduleId: string,
+  ): Promise<{ deleted: boolean }> =>
+    apiClient.delete(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules/${encodeURIComponent(scheduleId)}`),
+
   startIrrigationProgramRun: (
     deviceId: string,
     programId: string,
