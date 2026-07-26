@@ -219,6 +219,8 @@ export function IrrigationSetupPage() {
     }, TEST_RUN_SECONDS * 1000);
   }, [clearTestRun]);
 
+  const activeTestZoneRef = Object.keys(testRunZoneRefs)[0] || '';
+
   const toggleZoneTest = async (zone: IrrigationZone) => {
     const localRef = zone.local_ref || zone.zone_id;
     if (!selectedDeviceId || !localRef) {
@@ -226,6 +228,10 @@ export function IrrigationSetupPage() {
       return;
     }
     const isRunning = Boolean(testRunZoneRefs[localRef]);
+    if (!isRunning && activeTestZoneRef && activeTestZoneRef !== localRef) {
+      setFeedback(`Stop the running test for ${activeTestZoneRef} before starting another zone.`);
+      return;
+    }
     setBusyAction(`test:${zone.zone_id}`);
     setFeedback('');
     try {
@@ -300,6 +306,7 @@ export function IrrigationSetupPage() {
                 const isSaving = busyAction === `zone:${zone.zone_id}`;
                 const isTesting = busyAction === `test:${zone.zone_id}`;
                 const isTestRunning = Boolean(testRunZoneRefs[localRef]);
+                const isAnotherTestRunning = Boolean(activeTestZoneRef && activeTestZoneRef !== localRef);
                 return (
                   <article key={zone.zone_id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -330,10 +337,10 @@ export function IrrigationSetupPage() {
                         size="small"
                         expand="block"
                         color={isTestRunning ? 'danger' : 'medium'}
-                        disabled={!selectedDeviceId || isSaving || isTesting || (!draft.enabled && !isTestRunning)}
+                        disabled={!selectedDeviceId || isSaving || isTesting || isAnotherTestRunning || (!draft.enabled && !isTestRunning)}
                         onClick={() => { void toggleZoneTest(zone); }}
                       >
-                        {isTesting ? 'Sending...' : isTestRunning ? 'Stop test' : 'Test 1 min'}
+                        {isTesting ? 'Sending...' : isTestRunning ? 'Stop test' : isAnotherTestRunning ? 'Test running' : 'Test 1 min'}
                       </IonButton>
                     </div>
                   </article>
