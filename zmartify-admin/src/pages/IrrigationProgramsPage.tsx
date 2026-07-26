@@ -2,16 +2,69 @@ import { IonButton, IonContent, IonPage } from '@ionic/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileSiteSummary, IrrigationProgramSummary, IrrigationScheduleSummary, subscribeRealtimeTopics } from '../api/mobile';
+import {
+  mobileApi,
+  MobileEvent,
+  MobileSiteSummary,
+  IrrigationProgramSummary,
+  IrrigationProgramZoneSummary,
+  IrrigationScheduleSummary,
+  IrrigationZone,
+  subscribeRealtimeTopics,
+} from '../api/mobile';
 
 type DeviceProgram = {
   deviceId: string;
   displayName: string;
   program: IrrigationProgramSummary;
+  availableZones: IrrigationZone[];
+  programZones: IrrigationProgramZoneSummary[];
   schedules: IrrigationScheduleSummary[];
 };
 
+type ProgramZoneDraft = Record<string, { enabled: boolean; durationSeconds: number }>;
+
+type ScheduleDraft = {
+  name: string;
+  startLocalTime: string;
+  recurrenceType: string;
+  weekdays: number[];
+  intervalDays: number;
+  anchorDate: string;
+  datesText: string;
+};
+
 const weekdayLabel = (weekday: number): string => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekday] || String(weekday);
+const weekdayOptions = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
+
+const defaultScheduleDraft = (): ScheduleDraft => ({
+  name: 'Morning schedule',
+  startLocalTime: '06:00',
+  recurrenceType: 'weekdays',
+  weekdays: [1, 2, 3, 4, 5],
+  intervalDays: 4,
+  anchorDate: new Date().toISOString().slice(0, 10),
+  datesText: '',
+});
+
+const programKey = (row: DeviceProgram) => `${row.deviceId}:${row.program.program_id}`;
+
+const scheduleSummaryLabel = (schedule: IrrigationScheduleSummary): string => {
+  const recurrenceType = schedule.recurrence_type || 'weekdays';
+  if (recurrenceType === 'odd_days') return `${schedule.start_local_time} • Odd days`;
+  if (recurrenceType === 'even_days') return `${schedule.start_local_time} • Even days`;
+  if (recurrenceType === 'cyclic') return `${schedule.start_local_time} • Every ${schedule.interval_days || 1} days from ${schedule.anchor_date || 'today'}`;
+  if (recurrenceType === 'custom_dates') return `${schedule.start_local_time} • ${(schedule.dates || []).join(', ') || 'Selected dates'}`;
+  return `${schedule.start_local_time} • ${schedule.weekdays.map(weekdayLabel).join(' ')}`;
+};
 
 const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string; integration_mode?: string }): boolean => {
   const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
@@ -30,6 +83,8 @@ export function IrrigationProgramsPage() {
   const [actionFeedback, setActionFeedback] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [newProgramName, setNewProgramName] = useState('');
+  const [programZoneDrafts, setProgramZoneDrafts] = useState<Record<string, ProgramZoneDraft>>({});
+  const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, ScheduleDraft>>({});
 
   const reloadPrograms = useCallback(async (siteId: string) => {
     const [site, overview] = await Promise.all([
@@ -48,14 +103,23 @@ export function IrrigationProgramsPage() {
     setDeviceIds(irrigationDevices.map((device) => device.device_id));
     const nextRows = await Promise.all(
       irrigationDevices.map(async (device) => {
-        const programsResponse = await mobileApi.listIrrigationPrograms(device.device_id);
+        const [programsResponse, zonesResponse] = await Promise.all([
+          mobileApi.listIrrigationPrograms(device.device_id),
+          mobileApi.listIrrigationZones(device.device_id),
+        ]);
+        const availableZones = zonesResponse.zones || [];
         return Promise.all(
           (programsResponse.programs || []).map(async (program) => {
-            const schedulesResponse = await mobileApi.listIrrigationProgramSchedules(device.device_id, program.program_id);
+            const [schedulesResponse, programZonesResponse] = await Promise.all([
+              mobileApi.listIrrigationProgramSchedules(device.device_id, program.program_id),
+              mobileApi.listIrrigationProgramZones(device.device_id, program.program_id),
+            ]);
             return {
               deviceId: device.device_id,
               displayName: device.display_name,
               program,
+              availableZones,
+              programZones: programZonesResponse.zones || [],
               schedules: schedulesResponse.schedules || [],
             } satisfies DeviceProgram;
           })
@@ -100,15 +164,88 @@ export function IrrigationProgramsPage() {
     }
   };
 
-  const addDefaultSchedule = async (row: DeviceProgram) => {
-    const key = `schedule:${row.deviceId}:${row.program.program_id}`;
-    setBusyKey(key);
+  const updateProgramZoneDraft = (row: DeviceProgram, zone: IrrigationZone, patch: Partial<{ enabled: boolean; durationSeconds: number }>) => {
+    const key = programKey(row);
+    setProgramZoneDrafts((prev) => {
+      const existing = prev[key]?.[zone.zone_id] || { enabled: false, durationSeconds: 600 };
+      return {
+        ...prev,
+        [key]: {
+          ...(prev[key] || {}),
+          [zone.zone_id]: {
+            ...existing,
+            ...patch,
+          },
+        },
+      };
+    });
+  };
+
+  const saveProgramZones = async (row: DeviceProgram) => {
+    const key = programKey(row);
+    const draft = programZoneDrafts[key] || {};
+    setBusyKey(`zones:${key}`);
+    setActionFeedback('');
+    try {
+      await mobileApi.replaceIrrigationProgramZones(row.deviceId, row.program.program_id, {
+        zones: row.availableZones
+          .map((zone, index) => ({ zone, index, draft: draft[zone.zone_id] }))
+          .filter((item) => item.draft?.enabled)
+          .map((item) => ({
+            zone_id: item.zone.zone_id,
+            duration_seconds: Math.max(1, Number(item.draft?.durationSeconds || 600)),
+            sort_order: item.index,
+            enabled: true,
+          })),
+      });
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`Saved zone runtimes for ${row.program.name}.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const updateScheduleDraft = (row: DeviceProgram, patch: Partial<ScheduleDraft>) => {
+    const key = programKey(row);
+    setScheduleDrafts((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || defaultScheduleDraft()),
+        ...patch,
+      },
+    }));
+  };
+
+  const toggleDraftWeekday = (row: DeviceProgram, weekday: number) => {
+    const key = programKey(row);
+    const draft = scheduleDrafts[key] || defaultScheduleDraft();
+    updateScheduleDraft(row, {
+      weekdays: draft.weekdays.includes(weekday)
+        ? draft.weekdays.filter((value) => value !== weekday)
+        : [...draft.weekdays, weekday].sort((left, right) => left - right),
+    });
+  };
+
+  const createSchedule = async (row: DeviceProgram) => {
+    const key = programKey(row);
+    const draft = scheduleDrafts[key] || defaultScheduleDraft();
+    const dates = draft.datesText
+      .split(/[\n,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    setBusyKey(`schedule:${key}`);
     setActionFeedback('');
     try {
       await mobileApi.createIrrigationProgramSchedule(row.deviceId, row.program.program_id, {
-        name: 'Morning window',
-        start_local_time: '06:00',
-        weekdays: [1, 2, 3, 4, 5],
+        name: draft.name.trim() || 'Schedule',
+        start_local_time: draft.startLocalTime,
+        weekdays: draft.recurrenceType === 'weekdays' ? draft.weekdays : [],
+        recurrence_type: draft.recurrenceType,
+        interval_days: draft.recurrenceType === 'cyclic' ? Math.max(1, Number(draft.intervalDays || 1)) : null,
+        anchor_date: draft.recurrenceType === 'cyclic' ? draft.anchorDate : null,
+        dates: draft.recurrenceType === 'custom_dates' ? dates : [],
         enabled: true,
       });
       await reloadPrograms(selectedSite);
@@ -119,6 +256,34 @@ export function IrrigationProgramsPage() {
       setBusyKey('');
     }
   };
+
+  useEffect(() => {
+    setProgramZoneDrafts((prev) => {
+      const next = { ...prev };
+      for (const row of programRows) {
+        const key = programKey(row);
+        const selectedByZoneId = new Map(row.programZones.map((zone) => [zone.zone_id, zone]));
+        next[key] = row.availableZones.reduce<ProgramZoneDraft>((draft, zone) => {
+          const existing = next[key]?.[zone.zone_id];
+          const selected = selectedByZoneId.get(zone.zone_id);
+          draft[zone.zone_id] = existing || {
+            enabled: Boolean(selected),
+            durationSeconds: selected?.duration_seconds || 600,
+          };
+          return draft;
+        }, {});
+      }
+      return next;
+    });
+    setScheduleDrafts((prev) => {
+      const next = { ...prev };
+      for (const row of programRows) {
+        const key = programKey(row);
+        next[key] = next[key] || defaultScheduleDraft();
+      }
+      return next;
+    });
+  }, [programRows]);
 
   const createProgram = async () => {
     const name = newProgramName.trim();
@@ -212,9 +377,12 @@ export function IrrigationProgramsPage() {
           </section>
 
           {programRows.map((row) => {
+            const key = programKey(row);
             const scheduleSummary = row.schedules.length
-              ? row.schedules.map((schedule) => `${schedule.start_local_time} • ${schedule.weekdays.map(weekdayLabel).join(' ')}`).join(' | ')
+              ? row.schedules.map(scheduleSummaryLabel).join(' | ')
               : 'No schedules defined';
+            const zoneDraft = programZoneDrafts[key] || {};
+            const scheduleDraft = scheduleDrafts[key] || defaultScheduleDraft();
             const latestForDevice = events.find((event) => event.device_id === row.deviceId);
             const estimateLiters = Math.max(60, Math.round(row.program.seasonal_adjustment * Math.max(1, row.schedules.length) * 120));
             return (
@@ -258,6 +426,143 @@ export function IrrigationProgramsPage() {
                 </p>
               </div>
 
+              <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted">Program zones</p>
+                    <p className="text-sm font-semibold mt-1">Select zones and standard runtimes</p>
+                  </div>
+                  <IonButton
+                    size="small"
+                    fill="outline"
+                    disabled={busyKey === `zones:${key}`}
+                    onClick={() => { void saveProgramZones(row); }}
+                  >
+                    {busyKey === `zones:${key}` ? 'Saving...' : 'Save zones'}
+                  </IonButton>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {row.availableZones.map((zone) => {
+                    const draft = zoneDraft[zone.zone_id] || { enabled: false, durationSeconds: 600 };
+                    return (
+                      <div key={zone.zone_id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                        <label className="flex items-center justify-between gap-3 text-sm font-semibold">
+                          <span>{zone.name || zone.local_ref}</span>
+                          <input
+                            type="checkbox"
+                            checked={draft.enabled}
+                            onChange={(event) => updateProgramZoneDraft(row, zone, { enabled: event.target.checked })}
+                          />
+                        </label>
+                        <label className="mt-2 block text-xs text-muted">
+                          Runtime minutes
+                          <input
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-sm"
+                            type="number"
+                            min="1"
+                            max="1440"
+                            value={Math.max(1, Math.round(draft.durationSeconds / 60))}
+                            disabled={!draft.enabled}
+                            onChange={(event) => updateProgramZoneDraft(row, zone, { durationSeconds: Math.max(1, Number(event.target.value || 1)) * 60 })}
+                          />
+                        </label>
+                      </div>
+                    );
+                  })}
+                  {!row.availableZones.length ? <p className="text-sm text-muted">No zones configured for this controller.</p> : null}
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
+                <p className="text-xs uppercase tracking-wide text-muted">Schedule</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  <input
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    placeholder="Schedule name"
+                    value={scheduleDraft.name}
+                    onChange={(event) => updateScheduleDraft(row, { name: event.target.value })}
+                  />
+                  <input
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    type="time"
+                    value={scheduleDraft.startLocalTime}
+                    onChange={(event) => updateScheduleDraft(row, { startLocalTime: event.target.value })}
+                  />
+                  <select
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                    value={scheduleDraft.recurrenceType}
+                    onChange={(event) => updateScheduleDraft(row, { recurrenceType: event.target.value })}
+                  >
+                    <option value="weekdays">Weekdays</option>
+                    <option value="odd_days">Odd days</option>
+                    <option value="even_days">Even days</option>
+                    <option value="cyclic">Cyclic</option>
+                    <option value="custom_dates">Custom dates</option>
+                  </select>
+                  <IonButton
+                    size="small"
+                    disabled={busyKey === `schedule:${key}`}
+                    onClick={() => { void createSchedule(row); }}
+                  >
+                    {busyKey === `schedule:${key}` ? 'Adding...' : 'Add schedule'}
+                  </IonButton>
+                </div>
+                {scheduleDraft.recurrenceType === 'weekdays' ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {weekdayOptions.map((weekday) => (
+                      <label key={weekday.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={scheduleDraft.weekdays.includes(weekday.value)}
+                          onChange={() => toggleDraftWeekday(row, weekday.value)}
+                        />
+                        {weekday.label}
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                {scheduleDraft.recurrenceType === 'cyclic' ? (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <label className="text-xs text-muted">
+                      Every N days
+                      <input
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        type="number"
+                        min="1"
+                        max="366"
+                        value={scheduleDraft.intervalDays}
+                        onChange={(event) => updateScheduleDraft(row, { intervalDays: Math.max(1, Number(event.target.value || 1)) })}
+                      />
+                    </label>
+                    <label className="text-xs text-muted">
+                      Start date
+                      <input
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        type="date"
+                        value={scheduleDraft.anchorDate}
+                        onChange={(event) => updateScheduleDraft(row, { anchorDate: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                {scheduleDraft.recurrenceType === 'custom_dates' ? (
+                  <textarea
+                    className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    rows={2}
+                    placeholder="YYYY-MM-DD, YYYY-MM-DD"
+                    value={scheduleDraft.datesText}
+                    onChange={(event) => updateScheduleDraft(row, { datesText: event.target.value })}
+                  />
+                ) : null}
+                {row.schedules.length ? (
+                  <div className="mt-3 space-y-1">
+                    {row.schedules.map((schedule) => (
+                      <p key={schedule.schedule_id} className="text-xs text-muted">{schedule.name}: {scheduleSummaryLabel(schedule)}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="flex flex-wrap gap-2 mt-3">
                 <IonButton
                   size="small"
@@ -273,14 +578,6 @@ export function IrrigationProgramsPage() {
                   onClick={() => { void toggleProgramEnabled(row); }}
                 >
                   {row.program.enabled ? 'Pause' : 'Enable'}
-                </IonButton>
-                <IonButton
-                  size="small"
-                  fill="outline"
-                  disabled={busyKey === `schedule:${row.deviceId}:${row.program.program_id}`}
-                  onClick={() => { void addDefaultSchedule(row); }}
-                >
-                  Add schedule
                 </IonButton>
               </div>
             </section>

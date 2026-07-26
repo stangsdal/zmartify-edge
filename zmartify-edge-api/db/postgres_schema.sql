@@ -329,10 +329,29 @@ CREATE TABLE IF NOT EXISTS irrigation_schedule_rules (
     name TEXT NOT NULL,
     start_local_time TEXT NOT NULL,
     weekdays_json TEXT NOT NULL DEFAULT '[]',
+    recurrence_type TEXT NOT NULL DEFAULT 'weekdays',
+    interval_days INTEGER,
+    anchor_date TEXT,
+    dates_json TEXT NOT NULL DEFAULT '[]',
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(program_id) REFERENCES irrigation_programs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS irrigation_program_zones (
+    id BIGSERIAL PRIMARY KEY,
+    uuid TEXT NOT NULL UNIQUE,
+    program_id INTEGER NOT NULL,
+    zone_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER NOT NULL DEFAULT 600,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(program_id) REFERENCES irrigation_programs(id) ON DELETE CASCADE,
+    FOREIGN KEY(zone_id) REFERENCES irrigation_zones(id) ON DELETE CASCADE,
+    UNIQUE(program_id, zone_id)
 );
 
 CREATE TABLE IF NOT EXISTS irrigation_runs (

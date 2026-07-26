@@ -204,6 +204,30 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert get_program.status_code == 200
     assert get_program.json()["program"]["program_id"] == program_id
 
+    replace_program_zones = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/zones",
+        headers=headers,
+        json={
+            "zones": [
+                {
+                    "zone_id": zone["zone_id"],
+                    "duration_seconds": 420,
+                    "sort_order": 0,
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    assert replace_program_zones.status_code == 200
+    assert replace_program_zones.json()["zones"][0]["duration_seconds"] == 420
+
+    program_zones = client.get(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/zones",
+        headers=headers,
+    )
+    assert program_zones.status_code == 200
+    assert program_zones.json()["zones"][0]["local_ref"] == "zone-a"
+
     update_program = client.put(
         f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}",
         headers=headers,
@@ -232,11 +256,16 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
             "name": "Weekday AM",
             "start_local_time": "06:30",
             "weekdays": [1, 2, 3, 4, 5],
+            "recurrence_type": "cyclic",
+            "interval_days": 4,
+            "anchor_date": "2026-07-26",
             "enabled": True,
         },
     )
     assert create_schedule.status_code == 200
     assert create_schedule.json()["schedule"]["name"] == "Weekday AM"
+    assert create_schedule.json()["schedule"]["recurrence_type"] == "cyclic"
+    assert create_schedule.json()["schedule"]["interval_days"] == 4
 
     run_start = client.post(
         f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run",
@@ -246,6 +275,7 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert run_start.status_code == 200
     run_id = run_start.json()["run"]["run_id"]
     assert isinstance(run_start.json()["run"].get("steps"), list)
+    assert run_start.json()["run"]["steps"][0]["duration_seconds"] == 420
 
     overview_running = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_running.status_code == 200

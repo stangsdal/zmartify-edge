@@ -16,9 +16,11 @@ from app.irrigation_domain import (
     get_site_irrigation_overview,
     list_irrigation_runs,
     list_irrigation_outputs,
+    list_program_zones,
     list_program_schedules,
     list_irrigation_programs,
     list_irrigation_zones,
+    replace_program_zones,
     set_irrigation_rain_delay,
     update_irrigation_program,
     upsert_irrigation_hydraulics_state,
@@ -55,7 +57,23 @@ class IrrigationScheduleCreateIn(BaseModel):
     name: str = Field(min_length=1)
     start_local_time: str = Field(min_length=3)
     weekdays: list[int] = Field(default_factory=list)
+    recurrence_type: str = Field(default="weekdays", min_length=1)
+    interval_days: int | None = Field(default=None, ge=1, le=366)
+    anchor_date: str | None = None
+    dates: list[str] = Field(default_factory=list)
     enabled: bool = True
+
+
+class IrrigationProgramZoneIn(BaseModel):
+    zone_id: str | None = None
+    local_ref: str | None = None
+    duration_seconds: int = Field(default=600, ge=1, le=86400)
+    sort_order: int = Field(default=0, ge=0)
+    enabled: bool = True
+
+
+class IrrigationProgramZonesReplaceIn(BaseModel):
+    zones: list[IrrigationProgramZoneIn] = Field(default_factory=list)
 
 
 class IrrigationRunIn(BaseModel):
@@ -237,6 +255,29 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    @router.get("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/zones")
+    def v2_list_irrigation_program_zones(device_id: str, program_id: str, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        try:
+            zones = list_program_zones(device_id, program_id)
+            return {"device_id": device_id, "program_id": program_id, "zones": zones}
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.put("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/zones")
+    def v2_replace_irrigation_program_zones(
+        device_id: str,
+        program_id: str,
+        payload: IrrigationProgramZonesReplaceIn,
+        request: Request,
+    ) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        try:
+            zones = replace_program_zones(device_id, program_id, [zone.model_dump() for zone in payload.zones])
+            return {"device_id": device_id, "program_id": program_id, "zones": zones}
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
     @router.get("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules")
     def v2_list_irrigation_program_schedules(device_id: str, program_id: str, request: Request) -> dict:
         require_roles(request, {"owner", "admin", "installer", "viewer"})
@@ -261,6 +302,10 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
                 name=payload.name,
                 start_local_time=payload.start_local_time,
                 weekdays=payload.weekdays,
+                recurrence_type=payload.recurrence_type,
+                interval_days=payload.interval_days,
+                anchor_date=payload.anchor_date,
+                dates=payload.dates,
                 enabled=payload.enabled,
             )
             return {"device_id": device_id, "program_id": program_id, "schedule": schedule}

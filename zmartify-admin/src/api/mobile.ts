@@ -333,9 +333,26 @@ export interface IrrigationScheduleSummary {
   name: string;
   start_local_time: string;
   weekdays: number[];
+  recurrence_type?: string;
+  interval_days?: number | null;
+  anchor_date?: string | null;
+  dates?: string[];
   enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface IrrigationProgramZoneSummary {
+  program_zone_id: string;
+  zone_id: string;
+  local_ref: string;
+  zone_name: string;
+  zone_enabled: boolean;
+  sort_order: number;
+  duration_seconds: number;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export const mobileApi = {
@@ -411,6 +428,19 @@ export const mobileApi = {
   ): Promise<{ device_id: string; program_id: string; schedules: IrrigationScheduleSummary[] }> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules`),
 
+  listIrrigationProgramZones: (
+    deviceId: string,
+    programId: string,
+  ): Promise<{ device_id: string; program_id: string; zones: IrrigationProgramZoneSummary[] }> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/zones`),
+
+  replaceIrrigationProgramZones: (
+    deviceId: string,
+    programId: string,
+    payload: { zones: Array<{ zone_id?: string; local_ref?: string; duration_seconds: number; sort_order: number; enabled: boolean }> },
+  ): Promise<{ device_id: string; program_id: string; zones: IrrigationProgramZoneSummary[] }> =>
+    apiClient.put(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/zones`, payload),
+
   createIrrigationProgram: (
     deviceId: string,
     payload: { name: string; enabled?: boolean; seasonal_adjustment?: number; weather_mode?: string },
@@ -427,7 +457,16 @@ export const mobileApi = {
   createIrrigationProgramSchedule: (
     deviceId: string,
     programId: string,
-    payload: { name: string; start_local_time: string; weekdays: number[]; enabled?: boolean },
+    payload: {
+      name: string;
+      start_local_time: string;
+      weekdays: number[];
+      recurrence_type?: string;
+      interval_days?: number | null;
+      anchor_date?: string | null;
+      dates?: string[];
+      enabled?: boolean;
+    },
   ): Promise<{ device_id: string; program_id: string; schedule: IrrigationScheduleSummary }> =>
     apiClient.post(
       `/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}/schedules`,

@@ -270,13 +270,94 @@ def delete_irrigation_program(device_external_id: str, program_id: str) -> None:
         conn.commit()
 
 
+def _parse_str_list_json(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
+def list_program_zones(device_external_id: str, program_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        program = _resolve_program(conn, device["id"], program_id)
+        rows = conn.execute(
+            """
+            SELECT pz.uuid, pz.sort_order, pz.duration_seconds, pz.enabled, pz.created_at, pz.updated_at,
+                   z.uuid AS zone_uuid, z.local_ref, z.name, z.enabled AS zone_enabled
+            FROM irrigation_program_zones pz
+            JOIN irrigation_zones z ON z.id = pz.zone_id
+            WHERE pz.program_id = ?
+            ORDER BY pz.sort_order, pz.id
+            """,
+            (program["id"],),
+        ).fetchall()
+
+    return [
+        {
+            "program_zone_id": row["uuid"],
+            "zone_id": row["zone_uuid"],
+            "local_ref": row["local_ref"],
+            "zone_name": row["name"],
+            "zone_enabled": bool(row["zone_enabled"]),
+            "sort_order": int(row["sort_order"]),
+            "duration_seconds": int(row["duration_seconds"]),
+            "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def replace_program_zones(device_external_id: str, program_id: str, zones: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        program = _resolve_program(conn, device["id"], program_id)
+        zone_rows = conn.execute(
+            "SELECT id, uuid, local_ref FROM irrigation_zones WHERE device_id = ?",
+            (device["id"],),
+        ).fetchall()
+        zones_by_ref: dict[str, int] = {}
+        for row in zone_rows:
+            zones_by_ref[str(row["uuid"])] = int(row["id"])
+            zones_by_ref[str(row["local_ref"])] = int(row["id"])
+
+        conn.execute("DELETE FROM irrigation_program_zones WHERE program_id = ?", (program["id"],))
+        for index, item in enumerate(zones):
+            zone_ref = str(item.get("zone_id") or item.get("local_ref") or "").strip()
+            zone_pk_id = zones_by_ref.get(zone_ref)
+            if zone_pk_id is None:
+                raise RegistryNotFoundError("irrigation zone not found")
+            duration_seconds = max(1, int(item.get("duration_seconds") or 600))
+            sort_order = int(item.get("sort_order") if item.get("sort_order") is not None else index)
+            enabled = bool(item.get("enabled", True))
+            conn.execute(
+                """
+                INSERT INTO irrigation_program_zones(uuid, program_id, zone_id, sort_order, duration_seconds, enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid.uuid4()), program["id"], zone_pk_id, sort_order, duration_seconds, 1 if enabled else 0, _now_iso()),
+            )
+        conn.execute("UPDATE irrigation_programs SET revision = revision + 1, updated_at = ? WHERE id = ?", (_now_iso(), program["id"]))
+        conn.commit()
+
+    return list_program_zones(device_external_id, program_id)
+
+
 def list_program_schedules(device_external_id: str, program_id: str) -> list[dict[str, Any]]:
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         program = _resolve_program(conn, device["id"], program_id)
         rows = conn.execute(
             """
-            SELECT uuid, name, start_local_time, weekdays_json, enabled, created_at, updated_at
+            SELECT uuid, name, start_local_time, weekdays_json, recurrence_type, interval_days, anchor_date, dates_json,
+                   enabled, created_at, updated_at
             FROM irrigation_schedule_rules
             WHERE program_id = ?
             ORDER BY id
@@ -296,6 +377,10 @@ def list_program_schedules(device_external_id: str, program_id: str) -> list[dic
                 "name": row["name"],
                 "start_local_time": row["start_local_time"],
                 "weekdays": weekdays if isinstance(weekdays, list) else [],
+                "recurrence_type": row["recurrence_type"] or "weekdays",
+                "interval_days": row["interval_days"],
+                "anchor_date": row["anchor_date"],
+                "dates": _parse_str_list_json(row["dates_json"]),
                 "enabled": bool(row["enabled"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -311,9 +396,14 @@ def create_program_schedule(
     name: str,
     start_local_time: str,
     weekdays: list[int],
+    recurrence_type: str = "weekdays",
+    interval_days: int | None = None,
+    anchor_date: str | None = None,
+    dates: list[str] | None = None,
     enabled: bool = True,
 ) -> dict[str, Any]:
     weekdays_json = json.dumps([int(day) for day in weekdays], separators=(",", ":"))
+    dates_json = json.dumps([str(date) for date in (dates or [])], separators=(",", ":"))
     schedule_uuid = str(uuid.uuid4())
 
     with get_connection() as conn:
@@ -321,10 +411,24 @@ def create_program_schedule(
         program = _resolve_program(conn, device["id"], program_id)
         conn.execute(
             """
-            INSERT INTO irrigation_schedule_rules(uuid, program_id, name, start_local_time, weekdays_json, enabled)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO irrigation_schedule_rules(
+                uuid, program_id, name, start_local_time, weekdays_json, recurrence_type,
+                interval_days, anchor_date, dates_json, enabled
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (schedule_uuid, program["id"], name, start_local_time, weekdays_json, 1 if enabled else 0),
+            (
+                schedule_uuid,
+                program["id"],
+                name,
+                start_local_time,
+                weekdays_json,
+                recurrence_type,
+                interval_days,
+                anchor_date,
+                dates_json,
+                1 if enabled else 0,
+            ),
         )
         conn.commit()
 
@@ -353,20 +457,31 @@ def create_program_run(device_external_id: str, program_id: str, *, trigger_type
 
         zone_rows = conn.execute(
             """
-            SELECT id, name
-            FROM irrigation_zones
-            WHERE device_id = ? AND enabled = 1
-            ORDER BY id
+            SELECT pz.duration_seconds, z.id, z.name
+            FROM irrigation_program_zones pz
+            JOIN irrigation_zones z ON z.id = pz.zone_id
+            WHERE pz.program_id = ? AND pz.enabled = 1 AND z.enabled = 1
+            ORDER BY pz.sort_order, pz.id
             """,
-            (device["id"],),
+            (program["id"],),
         ).fetchall()
+        if not zone_rows:
+            zone_rows = conn.execute(
+                """
+                SELECT 600 AS duration_seconds, id, name
+                FROM irrigation_zones
+                WHERE device_id = ? AND enabled = 1
+                ORDER BY id
+                """,
+                (device["id"],),
+            ).fetchall()
         for zone_row in zone_rows:
             conn.execute(
                 """
                 INSERT INTO irrigation_run_steps(uuid, run_id, zone_id, zone_name, duration_seconds, status)
                 VALUES (?, ?, ?, ?, ?, 'planned')
                 """,
-                (str(uuid.uuid4()), run_pk_id, int(zone_row["id"]), str(zone_row["name"]), 600),
+                (str(uuid.uuid4()), run_pk_id, int(zone_row["id"]), str(zone_row["name"]), int(zone_row["duration_seconds"])),
             )
         conn.commit()
 
