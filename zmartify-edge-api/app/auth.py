@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import sqlite3
+from pathlib import Path
 import uuid
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-from app.db import get_connection
+from app.db import get_connection, get_db_path
 
 ROLE_OWNER = "owner"
 ROLE_ADMIN = "admin"
@@ -103,7 +104,7 @@ def ensure_bootstrap_owner() -> None:
         if row and row["c"] > 0:
             return
 
-        password = secrets.token_urlsafe(18)
+        password = os.getenv("ZMART_EDGE_BOOTSTRAP_OWNER_PASSWORD", "").strip() or secrets.token_urlsafe(18)
         password_hash = hash_password(password)
         cur = conn.execute(
             """
@@ -124,6 +125,13 @@ def ensure_bootstrap_owner() -> None:
         )
         _audit(conn, cur.lastrowid, "bootstrap_owner_user", "user", str(cur.lastrowid), {"username": "admin"})
         conn.commit()
+
+        if not os.getenv("ZMART_EDGE_BOOTSTRAP_OWNER_PASSWORD", "").strip():
+            default_password_path = get_db_path().parent / "bootstrap-owner-password.txt"
+            password_path = Path(os.getenv("ZMART_EDGE_BOOTSTRAP_PASSWORD_FILE", str(default_password_path)))
+            password_path.parent.mkdir(parents=True, exist_ok=True)
+            password_path.write_text(f"admin:{password}\n", encoding="utf-8")
+            password_path.chmod(0o600)
 
 def _login_limit_window_seconds() -> int:
     return int(os.getenv("ZMART_EDGE_LOGIN_WINDOW_SECONDS", "300"))

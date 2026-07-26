@@ -17,7 +17,7 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: OpenAPI snapshot artifact captured at `docs/api-snapshots/edge-api-openapi.json` (137 paths).
 - Completed: MQTT topic map artifact captured at `docs/api-snapshots/mqtt-topic-map.json` (legacy/v2/dual command + outcome topics, ingest HTTP paths, realtime ws topics).
 
-2. Phase 1 - PostgreSQL and Timescale foundation: `in progress`
+2. Phase 1 - PostgreSQL and Timescale foundation: `completed`
 - Completed: compose service scaffold for postgres-timescale and `DATABASE_URL` environment wiring.
 - Completed: backend dependency and config scaffolding (`psycopg`, `SQLAlchemy`, `Alembic`, db metadata in `/health`).
 - Completed: Alembic baseline scaffold and first baseline revision.
@@ -25,7 +25,9 @@ This tracker follows the phased migration process described in [docs/zmartify-ed
 - Completed: transitional dual-write bridge from registry writes into `core_*_v2` when tables exist.
 - Completed: full Postgres schema bootstrap (`zmartify-edge-api/db/postgres_schema.sql`, 37 tables + 40 indexes) machine-translated from the runtime schema and applied cleanly to the production TimescaleDB container.
 - Completed: readiness/health payloads now distinguish configured database backend from current runtime backend, making the remaining sqlite-to-Postgres cutover explicit during Phase 1.
-- Open: port runtime data access from sqlite3 API to the PostgreSQL backend (largest remaining work item).
+- Completed: runtime `get_connection()` now follows `DATABASE_URL` for PostgreSQL using a sqlite-compatible DB-API shim (`?` parameters, `INSERT OR IGNORE`, dict rows, `lastrowid`, context commit/rollback), while explicit test paths can still use sqlite.
+- Completed: clean Postgres bootstrap uses `db/postgres_schema.sql`, seeds roles, creates schema migration marker, and supports deterministic or file-backed bootstrap owner password creation.
+- Completed: clean-system Postgres smoke passed against disposable `zmartify_phase1_smoke` database on the edge host: initialize schema, bootstrap owner, login, create domain/site/device, assign device to site, and list devices all succeeded with `runtime='postgres'`.
 
 3. Phase 2 - Core platform extraction: `partially started`
 - Existing role/auth/domain/site/device endpoints exist.
@@ -176,10 +178,9 @@ Current redesign stream branch: `docs/edge-v2-architecture-redesign`.
 
 Paused 2026-07-12 with all repos clean and pushed. Resume points, in priority order:
 
-1. Phase 1: port runtime data access from the sqlite3 API to PostgreSQL (schema bootstrap already applied to the production TimescaleDB; largest remaining work item).
-2. Phase 2: continue extracting remaining v1 endpoint groups from `main.py` into focused routers/services.
-3. Phase 3/4/5/6: close remaining contract conformance, irrigation outcome coverage, command feedback, and UX parity gaps now that physical irrigation hardware is online.
-4. Phase 9: remaining hardening checklist (enforce-mode defaults, secret review, rate limiting, retention policy, load/accessibility/PWA checks, upgrade/rollback runbook).
-5. Phase 10: skipped per current request.
+1. Phase 2: continue extracting remaining v1 endpoint groups from `main.py` into focused routers/services.
+2. Phase 3/4/5/6: close remaining contract conformance, irrigation outcome coverage, command feedback, and UX parity gaps now that physical irrigation hardware is online.
+3. Phase 9: remaining hardening checklist (Postgres backup sidecar replacement for sqlite backup, enforce-mode defaults, secret review, retention policy, load/accessibility/PWA checks, upgrade/rollback runbook).
+4. Phase 10: skipped per current request.
 
 Status snapshot after irrigation UX increment: Phases 0 and 7 `completed`; production runs v2-only topic style with enforce-mode contracts (HVAC firmware v0.3.0 live); irrigation v2 loop is code-complete on both sides and waits only on operational controller hardware. App-shell irrigation setup/control now covers zone/output configuration, manual zone start/stop, stop-all, rain-delay, programs, hydraulics/power, weather, alerts, and realtime feedback surfaces.
