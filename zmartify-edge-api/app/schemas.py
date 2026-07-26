@@ -151,6 +151,31 @@ class DeviceOnboardingStatusOut(BaseModel):
     last_error: str | None
 
 
+class DeviceControllerSettingsIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    mqtt_broker_uri: str | None = Field(default=None, min_length=1, max_length=127)
+    mqtt_port: int | None = Field(default=None, ge=0, le=65535)
+    mqtt_username: str | None = Field(default=None, max_length=47)
+    mqtt_password: str | None = Field(default=None, max_length=47)
+    mqtt_tls_enabled: bool | None = None
+    ntp_server: str | None = Field(default=None, min_length=1, max_length=63)
+    timezone: str | None = Field(default=None, min_length=1, max_length=63)
+
+
+class DeviceControllerSettingsOut(BaseModel):
+    device_id: str
+    local_url: str
+    mqtt_broker_uri: str | None = None
+    mqtt_port: int | None = None
+    mqtt_username: str | None = None
+    mqtt_password_configured: bool | None = None
+    mqtt_tls_enabled: bool | None = None
+    ntp_server: str | None = None
+    timezone: str | None = None
+    reboot_required: bool = False
+
+
 class DeviceOtaOut(BaseModel):
     device_id: str
     local_url: str

@@ -9,10 +9,11 @@ import {
   IonItem,
   IonLabel,
   IonSpinner,
+  IonToggle,
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { deviceApi } from '../api/devices';
-import { Device } from '../types/api';
+import { Device, DeviceControllerSettings } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
 import { ZoneCard } from '../components/ZoneCard';
 import { AppHeader } from '../components/AppHeader';
@@ -146,6 +147,135 @@ function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
+  const [settings, setSettings] = useState<DeviceControllerSettings | null>(null);
+  const [timezone, setTimezone] = useState('');
+  const [ntpServer, setNtpServer] = useState('');
+  const [mqttBrokerUri, setMqttBrokerUri] = useState('');
+  const [mqttPort, setMqttPort] = useState('');
+  const [mqttUsername, setMqttUsername] = useState('');
+  const [mqttPassword, setMqttPassword] = useState('');
+  const [mqttTlsEnabled, setMqttTlsEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const applySettings = (next: DeviceControllerSettings) => {
+    setSettings(next);
+    setTimezone(next.timezone || '');
+    setNtpServer(next.ntp_server || '');
+    setMqttBrokerUri(next.mqtt_broker_uri || '');
+    setMqttPort(next.mqtt_port == null ? '' : String(next.mqtt_port));
+    setMqttUsername(next.mqtt_username || '');
+    setMqttPassword('');
+    setMqttTlsEnabled(!!next.mqtt_tls_enabled);
+  };
+
+  const loadSettings = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      setMessage('');
+      applySettings(await deviceApi.getControllerSettings(deviceId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSettings();
+  }, [deviceId]);
+
+  const saveSettings = async () => {
+    const parsedPort = mqttPort.trim() ? Number(mqttPort) : undefined;
+    if (parsedPort != null && (!Number.isInteger(parsedPort) || parsedPort < 0 || parsedPort > 65535)) {
+      setError('MQTT port must be between 0 and 65535.');
+      return;
+    }
+    try {
+      setSaving(true);
+      setError('');
+      setMessage('');
+      const updated = await deviceApi.updateControllerSettings(deviceId, {
+        timezone: timezone.trim(),
+        ntp_server: ntpServer.trim(),
+        mqtt_broker_uri: mqttBrokerUri.trim(),
+        mqtt_port: parsedPort,
+        mqtt_username: mqttUsername.trim(),
+        mqtt_password: mqttPassword,
+        mqtt_tls_enabled: mqttTlsEnabled,
+      });
+      applySettings(updated);
+      setMessage(updated.reboot_required ? 'Settings saved. Reboot the controller for all network changes to take effect.' : 'Settings saved.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="mt-4 flex items-center gap-2 text-sm text-muted">
+        <IonSpinner name="crescent" />
+        <span>Loading controller settings...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-200/80 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div>
+          <p className="font-semibold">Controller settings</p>
+          {settings?.local_url ? <p className="text-xs text-muted">{settings.local_url}</p> : null}
+        </div>
+        <IonButton size="small" fill="outline" onClick={() => { void loadSettings(); }} disabled={saving}>
+          Refresh
+        </IonButton>
+      </div>
+      {error ? <p className="text-sm text-rose-600 mb-2">{error}</p> : null}
+      {message ? <p className="text-sm text-emerald-700 mb-2">{message}</p> : null}
+      <div className="grid gap-2 md:grid-cols-2">
+        <IonItem>
+          <IonLabel position="stacked">Timezone</IonLabel>
+          <IonInput value={timezone} onIonChange={(e) => setTimezone(e.detail.value || '')} placeholder="CET-1CEST,M3.5.0,M10.5.0/3" />
+        </IonItem>
+        <IonItem>
+          <IonLabel position="stacked">NTP server</IonLabel>
+          <IonInput value={ntpServer} onIonChange={(e) => setNtpServer(e.detail.value || '')} placeholder="pool.ntp.org" />
+        </IonItem>
+        <IonItem>
+          <IonLabel position="stacked">MQTT URI</IonLabel>
+          <IonInput value={mqttBrokerUri} onIonChange={(e) => setMqttBrokerUri(e.detail.value || '')} placeholder="mqtts://pilot.zmartify.dk:8883" />
+        </IonItem>
+        <IonItem>
+          <IonLabel position="stacked">MQTT port</IonLabel>
+          <IonInput type="number" value={mqttPort} onIonChange={(e) => setMqttPort(e.detail.value || '')} placeholder="8883" />
+        </IonItem>
+        <IonItem>
+          <IonLabel position="stacked">MQTT username</IonLabel>
+          <IonInput value={mqttUsername} onIonChange={(e) => setMqttUsername(e.detail.value || '')} placeholder="device_controller_id" />
+        </IonItem>
+        <IonItem>
+          <IonLabel position="stacked">MQTT password</IonLabel>
+          <IonInput type="password" value={mqttPassword} onIonChange={(e) => setMqttPassword(e.detail.value || '')} placeholder={settings?.mqtt_password_configured ? 'Configured; leave blank to keep' : 'Not configured'} />
+        </IonItem>
+        <IonItem>
+          <IonLabel>MQTT TLS</IonLabel>
+          <IonToggle checked={mqttTlsEnabled} onIonChange={(e) => setMqttTlsEnabled(e.detail.checked)} />
+        </IonItem>
+      </div>
+      <IonButton className="mt-3" size="small" onClick={saveSettings} disabled={saving}>
+        {saving ? 'Saving...' : 'Save settings'}
+      </IonButton>
     </div>
   );
 }
@@ -357,7 +487,10 @@ export function DevicesPage() {
                   {expandedDeviceId === device.device_id ? (
                     <div className="mt-3 rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
                       {isIrrigationDevice(device) ? (
-                        <IrrigationZonesPanel deviceId={device.device_id} />
+                        <>
+                          <IrrigationZonesPanel deviceId={device.device_id} />
+                          <ControllerSettingsPanel deviceId={device.device_id} />
+                        </>
                       ) : (
                         <DeviceZonesPanel deviceId={device.device_id} />
                       )}

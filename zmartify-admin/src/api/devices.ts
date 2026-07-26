@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { Device, DeviceClaimRequest, DeviceDiscovery, DeviceFreshness } from '../types/api';
+import { Device, DeviceClaimRequest, DeviceControllerSettings, DeviceControllerSettingsUpdate, DeviceDiscovery, DeviceFreshness } from '../types/api';
 
 export const deviceApi = {
   list: () => apiClient.get('/devices'),
@@ -33,6 +33,12 @@ export const deviceApi = {
 
   getOnboardingStatus: (deviceId: string) =>
     apiClient.get(`/devices/${deviceId}/onboarding-status`),
+
+  getControllerSettings: (deviceId: string): Promise<DeviceControllerSettings> =>
+    apiClient.get(`/api/v2/devices/${deviceId}/controller-settings`),
+
+  updateControllerSettings: (deviceId: string, payload: DeviceControllerSettingsUpdate): Promise<DeviceControllerSettings> =>
+    apiClient.put(`/api/v2/devices/${deviceId}/controller-settings`, payload),
   
   assignToSite: (deviceId: string, siteId: number): Promise<Device> =>
     apiClient.post(`/devices/${deviceId}/site`, { site_id: siteId }),

@@ -102,6 +102,29 @@ export interface DeviceFreshness {
   }>;
 }
 
+export interface DeviceControllerSettings {
+  device_id: string;
+  local_url: string;
+  mqtt_broker_uri?: string | null;
+  mqtt_port?: number | null;
+  mqtt_username?: string | null;
+  mqtt_password_configured?: boolean | null;
+  mqtt_tls_enabled?: boolean | null;
+  ntp_server?: string | null;
+  timezone?: string | null;
+  reboot_required: boolean;
+}
+
+export interface DeviceControllerSettingsUpdate {
+  mqtt_broker_uri?: string;
+  mqtt_port?: number;
+  mqtt_username?: string;
+  mqtt_password?: string;
+  mqtt_tls_enabled?: boolean;
+  ntp_server?: string;
+  timezone?: string;
+}
+
 export interface HistoryPoint {
   bucket_start: string;
   value: number;

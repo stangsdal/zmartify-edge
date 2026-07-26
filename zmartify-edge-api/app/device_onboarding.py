@@ -84,6 +84,16 @@ def get_remote_device_version(base_url: str) -> dict:
     return _request_json("GET", f"{normalized}/version")
 
 
+def get_remote_network_config(base_url: str) -> dict:
+    normalized = normalize_device_base_url(base_url)
+    return _request_json("GET", f"{normalized}/config/network")
+
+
+def push_remote_network_config(base_url: str, payload: dict) -> dict:
+    normalized = normalize_device_base_url(base_url)
+    return _request_json("POST", f"{normalized}/config/network", payload)
+
+
 def _request_octet_stream_json(method: str, url: str, payload: bytes, timeout_s: int = 120) -> dict:
     headers = {
         "Accept": "application/json",

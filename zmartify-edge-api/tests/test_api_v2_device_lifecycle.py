@@ -135,3 +135,98 @@ def test_api_v2_device_firmware_refresh(monkeypatch, tmp_path: Path):
     )
     assert refresh.status_code == 200
     assert refresh.json()["firmware_version"] == "1.0.1"
+
+
+def test_api_v2_device_controller_settings_proxy(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    domain_id, site_id = _seed_domain_site(client, headers, suffix="settings")
+
+    import app.router_v2_device_lifecycle as lifecycle
+
+    monkeypatch.setattr(
+        lifecycle,
+        "discover_remote_device",
+        lambda _base_url: {
+            "base_url": "http://192.168.10.113",
+            "identity": {
+                "device_id": "zmartify-irrigation-settings01",
+                "mac": "AA:BB:CC:DD:EE:11",
+                "firmware_version": "v5.0.0",
+            },
+            "claim": {},
+            "status": {"state": "discoverable"},
+        },
+    )
+    monkeypatch.setattr(lifecycle, "push_remote_onboarding_config", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        lifecycle,
+        "get_remote_onboarding_status",
+        lambda _base_url: {
+            "state": "claimed",
+            "device_id": "zmartify-irrigation-settings01",
+            "edge_url": "https://pilot.zmartify.dk",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        },
+    )
+
+    claim = client.post(
+        "/api/v2/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "http://192.168.10.113",
+            "claim_token": "claim-token",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Irrigation Settings",
+        },
+    )
+    assert claim.status_code == 201
+
+    monkeypatch.setattr(
+        lifecycle,
+        "get_remote_network_config",
+        lambda _base_url: {
+            "mqtt_broker_uri": "mqtts://pilot.zmartify.dk:8883",
+            "mqtt_port": 8883,
+            "mqtt_username": "device_zmartify-irrigation-settings01",
+            "mqtt_password_configured": True,
+            "mqtt_tls_enabled": True,
+            "ntp_server": "pool.ntp.org",
+            "timezone": "CET-1CEST,M3.5.0,M10.5.0/3",
+        },
+    )
+    captured: dict[str, object] = {}
+
+    def fake_publish_settings_command(device_id: str, command_type: str, target_ref: str | None, payload: dict) -> dict:
+        captured["device_id"] = device_id
+        captured["command_type"] = command_type
+        captured["target_ref"] = target_ref
+        captured["payload"] = payload
+        return {"command_id": "cmd-test", "status": "published"}
+
+    monkeypatch.setattr(lifecycle, "publish_irrigation_command", fake_publish_settings_command)
+
+    settings = client.get("/api/v2/devices/zmartify-irrigation-settings01/controller-settings", headers=headers)
+    assert settings.status_code == 200
+    assert settings.json()["timezone"] == "CET-1CEST,M3.5.0,M10.5.0/3"
+    assert settings.json()["mqtt_password_configured"] is True
+
+    update = client.put(
+        "/api/v2/devices/zmartify-irrigation-settings01/controller-settings",
+        headers=headers,
+        json={
+            "timezone": "UTC0",
+            "ntp_server": "time.cloudflare.com",
+            "mqtt_password": "",
+        },
+    )
+    assert update.status_code == 200
+    assert update.json()["reboot_required"] is True
+    assert captured["device_id"] == "zmartify-irrigation-settings01"
+    assert captured["command_type"] == "irrigation.config.network"
+    assert captured["target_ref"] is None
+    assert captured["payload"] == {"timezone": "UTC0", "ntp_server": "time.cloudflare.com"}

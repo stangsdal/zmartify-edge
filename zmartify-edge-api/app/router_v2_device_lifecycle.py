@@ -9,12 +9,14 @@ from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, ROLE_VIEWER, audit_
 from app.device_onboarding import (
     DeviceOnboardingError,
     discover_remote_device,
+    get_remote_network_config,
     get_remote_device_version,
     get_remote_onboarding_status,
     normalize_device_base_url,
     push_remote_onboarding_config,
 )
 from app.domain_model import DomainModelError, upsert_device_state
+from app.mqtt_commands import MqttCommandError, publish_irrigation_command
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -32,6 +34,8 @@ from app.registry import (
 from app.schemas import (
     DeviceClaimIn,
     DeviceClaimOut,
+    DeviceControllerSettingsIn,
+    DeviceControllerSettingsOut,
     DeviceDiscoverIn,
     DeviceDiscoverOut,
     DeviceOnboardingStatusOut,
@@ -81,6 +85,47 @@ def _build_device_push_payload(device_id: str, claim_token: str | None) -> dict:
     if claim_token:
         payload["claim_token"] = claim_token
     return payload
+
+
+def _device_local_url(device_id: str) -> str:
+    device = get_device_onboarding_context(device_id)
+    local_url = device.get("local_url")
+    if not local_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
+    return str(local_url)
+
+
+def _controller_settings_payload(device_id: str, local_url: str, settings: dict, reboot_required: bool = False) -> dict:
+    return {
+        "device_id": device_id,
+        "local_url": local_url,
+        "mqtt_broker_uri": settings.get("mqtt_broker_uri") or settings.get("mqtt_uri"),
+        "mqtt_port": settings.get("mqtt_port"),
+        "mqtt_username": settings.get("mqtt_username"),
+        "mqtt_password_configured": settings.get("mqtt_password_configured"),
+        "mqtt_tls_enabled": settings.get("mqtt_tls_enabled"),
+        "ntp_server": settings.get("ntp_server"),
+        "timezone": settings.get("timezone"),
+        "reboot_required": reboot_required or bool(settings.get("reboot_required")),
+    }
+
+
+def _fallback_controller_settings(device_id: str, local_url: str) -> dict:
+    credentials = get_device_mqtt_credentials(device_id)
+    mqtt_uri = _edge_public_mqtt_uri()
+    return _controller_settings_payload(
+        device_id,
+        local_url,
+        {
+            "mqtt_broker_uri": mqtt_uri,
+            "mqtt_port": 8883 if mqtt_uri.startswith("mqtts://") else 1883,
+            "mqtt_username": credentials.get("username"),
+            "mqtt_password_configured": bool(credentials.get("password")),
+            "mqtt_tls_enabled": mqtt_uri.startswith("mqtts://"),
+            "ntp_server": "pool.ntp.org",
+            "timezone": "CET-1CEST,M3.5.0/2,M10.5.0/3",
+        },
+    )
 
 
 def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
@@ -187,10 +232,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
     def v2_device_onboarding_status(device_id: str, request: Request) -> dict:
         require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         try:
-            device = get_device_onboarding_context(device_id)
-            local_url = device.get("local_url")
-            if not local_url:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
+            local_url = _device_local_url(device_id)
             status_payload = get_remote_onboarding_status(local_url)
             upsert_device_state(
                 device_id,
@@ -205,6 +247,44 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
         except DomainModelError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         except DeviceOnboardingError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @router.get("/devices/{device_id}/controller-settings", response_model=DeviceControllerSettingsOut)
+    def v2_get_device_controller_settings(device_id: str, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        try:
+            local_url = _device_local_url(device_id)
+            try:
+                settings = get_remote_network_config(local_url)
+            except DeviceOnboardingError:
+                return _fallback_controller_settings(device_id, local_url)
+            return _controller_settings_payload(device_id, local_url, settings)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except RegistryOperationError as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    @router.put("/devices/{device_id}/controller-settings", response_model=DeviceControllerSettingsOut)
+    def v2_update_device_controller_settings(device_id: str, payload: DeviceControllerSettingsIn, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        try:
+            local_url = _device_local_url(device_id)
+            update_payload = payload.model_dump(exclude_none=True)
+            if update_payload.get("mqtt_password") == "":
+                update_payload.pop("mqtt_password")
+            publish_irrigation_command(device_id, "irrigation.config.network", None, update_payload)
+            audit_action(
+                actor_user_id=request.state.auth_user.user_id,
+                action="update_controller_settings",
+                resource_type="device",
+                resource_id=device_id,
+                metadata={"updated_fields": sorted(update_payload.keys())},
+            )
+            fallback = _fallback_controller_settings(device_id, local_url)
+            return _controller_settings_payload(device_id, local_url, {**fallback, **update_payload}, reboot_required=True)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except (MqttCommandError, RegistryOperationError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     @router.post("/devices/{device_id}/firmware/refresh")
