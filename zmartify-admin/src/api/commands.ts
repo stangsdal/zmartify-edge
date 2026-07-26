@@ -11,6 +11,12 @@ const normalizeError = (error: unknown): string => {
   return String(error);
 };
 
+const normalizeIrrigationZoneTargetRef = (zoneRef: string): string => {
+  const trimmed = String(zoneRef || '').trim();
+  const match = trimmed.match(/^zone[-_:]?(\d+)$/i);
+  return match ? `zone:${match[1]}` : trimmed;
+};
+
 export const commandsApi = {
   async sendIrrigationCommand(
     deviceId: string,
@@ -38,11 +44,11 @@ export const commandsApi = {
   },
 
   async startIrrigationZone(deviceId: string, zoneRef: string, durationSeconds: number): Promise<DeviceCommandResult> {
-    return this.sendIrrigationCommand(deviceId, 'irrigation.zone.start', zoneRef, { duration_seconds: durationSeconds });
+    return this.sendIrrigationCommand(deviceId, 'irrigation.zone.start', normalizeIrrigationZoneTargetRef(zoneRef), { duration_seconds: durationSeconds });
   },
 
   async stopIrrigationZone(deviceId: string, zoneRef: string): Promise<DeviceCommandResult> {
-    return this.sendIrrigationCommand(deviceId, 'irrigation.zone.stop', zoneRef);
+    return this.sendIrrigationCommand(deviceId, 'irrigation.zone.stop', normalizeIrrigationZoneTargetRef(zoneRef));
   },
 
   async stopIrrigation(deviceId: string): Promise<DeviceCommandResult> {
