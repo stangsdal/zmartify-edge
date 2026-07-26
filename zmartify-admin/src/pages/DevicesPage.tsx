@@ -16,6 +16,15 @@ import { Device } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
 import { ZoneCard } from '../components/ZoneCard';
 import { AppHeader } from '../components/AppHeader';
+import { IrrigationZone, mobileApi } from '../api/mobile';
+
+const isIrrigationDevice = (device: Device): boolean => {
+  const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes('irrigation');
+};
 
 function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
   const { zoneState, loading, error, updateZoneSetpoint, refetch } = useDeviceZones(deviceId);
@@ -64,6 +73,79 @@ function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
       {zoneState.zones.map((zone) => (
         <ZoneCard key={zone.zone_id} zone={zone} onSetpointChange={updateZoneSetpoint} />
       ))}
+    </div>
+  );
+}
+
+function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
+  const history = useHistory();
+  const [zones, setZones] = useState<IrrigationZone[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const fetchZones = async () => {
+    try {
+      setLoading(true);
+      const response = await mobileApi.listIrrigationZones(deviceId);
+      setZones(response.zones || []);
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchZones();
+  }, [deviceId]);
+
+  if (loading) {
+    return (
+      <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <IonSpinner name="crescent" />
+        <span>Loading irrigation zones...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return <p className="text-sm text-rose-600">{error}</p>;
+  }
+
+  return (
+    <div style={{ marginTop: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+        <strong>Irrigation zones ({zones.length})</strong>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <IonButton size="small" fill="outline" onClick={() => { void fetchZones(); }}>
+            Refresh
+          </IonButton>
+          <IonButton size="small" onClick={() => history.push('/app/control/irrigation/setup')}>
+            Setup
+          </IonButton>
+        </div>
+      </div>
+
+      {!zones.length ? (
+        <p className="text-sm text-muted mt-2">
+          No irrigation zones are configured yet. Use setup to bind controller zone refs to watering areas.
+        </p>
+      ) : null}
+
+      <div className="space-y-2 mt-2">
+        {zones.map((zone) => (
+          <button
+            key={zone.zone_id}
+            type="button"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left bg-white"
+            onClick={() => history.push(`/app/control/irrigation/zones/${encodeURIComponent(zone.zone_id)}?deviceId=${encodeURIComponent(deviceId)}`)}
+          >
+            <p className="font-semibold">{zone.name || zone.local_ref}</p>
+            <p className="text-xs text-muted">{zone.local_ref} · {zone.enabled ? 'Enabled' : 'Disabled'}</p>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -274,7 +356,11 @@ export function DevicesPage() {
                   </div>
                   {expandedDeviceId === device.device_id ? (
                     <div className="mt-3 rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
-                      <DeviceZonesPanel deviceId={device.device_id} />
+                      {isIrrigationDevice(device) ? (
+                        <IrrigationZonesPanel deviceId={device.device_id} />
+                      ) : (
+                        <DeviceZonesPanel deviceId={device.device_id} />
+                      )}
                     </div>
                   ) : null}
                 </article>

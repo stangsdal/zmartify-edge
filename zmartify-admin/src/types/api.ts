@@ -19,6 +19,8 @@ export interface Device {
   firmware_version?: string;
   site_id?: number;
   local_url?: string;
+  device_type?: string;
+  integration_mode?: string;
   online?: boolean;
   mqtt_connected?: boolean;
   freshness_age_ms?: number | null;
