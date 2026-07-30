@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from app.setpoint_outcome_listener import SetpointOutcomeMqttListener
 
 
@@ -87,6 +89,28 @@ def test_on_message_routes_irrigation_outcome_and_reported_state():
     assert outcomes[0][1]["event_type"] == "run.started"
     assert states and states[0][0] == "zmartify-irrigation-01"
     assert states[0][1]["hydraulics"]["flow_lpm"] == 12.0
+
+
+def test_on_message_logs_v2_reported_state_ingest(caplog):
+    listener = SetpointOutcomeMqttListener(
+        list_devices_fn=lambda: [],
+        get_device_mqtt_credentials_fn=lambda _device_id: {},
+        ingest_setpoint_command_outcome_fn=lambda *args, **kwargs: None,
+        mqtt_client_module=None,
+        ingest_reported_state_fn=lambda device_id, data: None,
+    )
+
+    with caplog.at_level(logging.INFO):
+        listener._on_message(
+            None,
+            None,
+            _Msg(
+                "zmartify/v2/devices/zmartify-irrigation-01/state/reported",
+                b'{"schema_version":"2.0","source_timestamp":"2026-07-12T20:30:00Z","hydraulics":{"flow_lpm":12.0}}',
+            ),
+        )
+
+    assert "Ingested MQTT v2 reported_state for zmartify-irrigation-01" in caplog.text
 
 
 def test_on_message_ingests_last_setpoint_command():

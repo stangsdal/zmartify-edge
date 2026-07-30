@@ -15,6 +15,7 @@ from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_comman
 from app.domain_model import log_event
 from app.irrigation_domain import (
     complete_irrigation_run,
+    ensure_irrigation_run_started,
     set_irrigation_rain_delay,
     upsert_irrigation_hydraulics_state,
     upsert_irrigation_output_state,
@@ -291,10 +292,23 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     outcome_payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
 
     run_id = str(outcome.get("run_id") or "").strip()
+    if normalized_event_type == "run.started" and run_id:
+        try:
+            ensure_irrigation_run_started(
+                device_id,
+                run_id,
+                started_at=_safe_source_timestamp(outcome),
+            )
+            side_effects.append("run.started")
+        except RegistryNotFoundError:
+            pass
+
     if category == "run" and run_id:
         terminal_status = None
-        if normalized_event_type.endswith(".completed") or result == "completed":
+        if normalized_event_type.endswith(".completed"):
             terminal_status = "completed"
+        elif result == "rejected" or normalized_event_type.endswith(".rejected"):
+            terminal_status = "failed"
         elif is_failure or normalized_event_type.endswith((".failed", ".aborted")):
             terminal_status = "failed"
         if terminal_status is not None:

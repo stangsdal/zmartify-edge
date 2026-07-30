@@ -27,6 +27,8 @@ _LASTROWID_TABLES = {
     "domains",
     "event_log",
     "irrigation_outputs",
+    "irrigation_runs",
+    "irrigation_run_steps",
     "irrigation_program_runs",
     "irrigation_program_schedules",
     "irrigation_programs",
@@ -131,11 +133,24 @@ class PostgresConnection:
             if table_name in _LASTROWID_TABLES:
                 try:
                     with self._conn.cursor() as id_cursor:
+                        id_cursor.execute("SAVEPOINT copilot_lastval")
                         id_cursor.execute("SELECT lastval() AS id")
                         row = id_cursor.fetchone()
                         wrapped.lastrowid = int(row["id"]) if row and row.get("id") is not None else None
                 except psycopg.Error:
+                    try:
+                        with self._conn.cursor() as rollback_cursor:
+                            rollback_cursor.execute("ROLLBACK TO SAVEPOINT copilot_lastval")
+                            rollback_cursor.execute("RELEASE SAVEPOINT copilot_lastval")
+                    except psycopg.Error:
+                        pass
                     wrapped.lastrowid = None
+                else:
+                    try:
+                        with self._conn.cursor() as release_cursor:
+                            release_cursor.execute("RELEASE SAVEPOINT copilot_lastval")
+                    except psycopg.Error:
+                        pass
             return wrapped
         except psycopg.IntegrityError as exc:
             raise sqlite3.IntegrityError(str(exc)) from exc

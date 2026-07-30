@@ -172,9 +172,16 @@ def _build_v2_command_payload(*, command_type: str, target_ref: str | None, para
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
-def publish_irrigation_command(device_id: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+def publish_irrigation_command(
+    device_id: str,
+    command_type: str,
+    target_ref: str | None,
+    parameters: dict | None = None,
+    *,
+    command_id: str | None = None,
+) -> dict:
     raw_parameters = parameters or {}
-    command_id = f"cmd-{uuid.uuid4().hex[:16]}"
+    command_id = str(command_id or f"cmd-{uuid.uuid4().hex[:16]}").strip()
     firmware_parameters: dict[str, object] = {}
 
     if command_type == "irrigation.zone.start":
@@ -183,6 +190,15 @@ def publish_irrigation_command(device_id: str, command_type: str, target_ref: st
             raise MqttCommandError("irrigation zone command requires a zone target")
         firmware_parameters["zone_id"] = zone_id
         firmware_parameters["duration_seconds"] = int(raw_parameters.get("duration_seconds") or 300)
+    elif command_type == "irrigation.program.start":
+        program_id = raw_parameters.get("program_id")
+        try:
+            program_number = int(program_id)
+        except (TypeError, ValueError) as exc:
+            raise MqttCommandError("irrigation program command requires a numeric program_id") from exc
+        if program_number <= 0:
+            raise MqttCommandError("irrigation program command requires a numeric program_id")
+        firmware_parameters["program_id"] = program_number
     elif command_type == "irrigation.zone.stop":
         zone_id = _zone_id_from_ref(target_ref, raw_parameters)
         if zone_id is None:
@@ -195,15 +211,14 @@ def publish_irrigation_command(device_id: str, command_type: str, target_ref: st
     else:
         firmware_parameters = dict(raw_parameters)
 
+    topic = command_topic_for_irrigation(device_id, command_type)
     payload = {
         "command_id": command_id,
         "source_timestamp": _now_zulu(),
         "parameters": firmware_parameters,
     }
-
-    topic = command_topic_for_irrigation(device_id, command_type)
     _publish_to_topic(device_id, topic, json.dumps(payload, separators=(",", ":"), sort_keys=True), retain=False)
-    return {"command_id": payload["command_id"], "status": "published", "topic": topic}
+    return {"command_id": command_id, "status": "published", "topic": topic}
 
 
 def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c: float) -> None:

@@ -750,6 +750,66 @@ def list_irrigation_runs(device_external_id: str, *, limit: int = 50) -> list[di
     return runs
 
 
+def ensure_irrigation_run_started(
+    device_external_id: str,
+    run_id: str,
+    *,
+    trigger_type: str = "manual",
+    started_at: str | None = None,
+) -> dict[str, Any]:
+    now = _now_iso()
+    effective_started_at = started_at or now
+    site_pk_id: int | None = None
+
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
+        row = conn.execute(
+            """
+            SELECT id
+            FROM irrigation_runs
+            WHERE device_id = ? AND uuid = ?
+            """,
+            (device["id"], run_id),
+        ).fetchone()
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO irrigation_runs(uuid, device_id, program_id, trigger_type, status, started_at, updated_at)
+                VALUES (?, ?, NULL, ?, 'running', ?, ?)
+                """,
+                (run_id, device["id"], trigger_type, effective_started_at, now),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE irrigation_runs
+                SET status = 'running',
+                    started_at = COALESCE(started_at, ?),
+                    finished_at = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (effective_started_at, now, int(row["id"])),
+            )
+        conn.commit()
+
+    runs = list_irrigation_runs(device_external_id, limit=100)
+    for run in runs:
+        if run["run_id"] == run_id:
+            _emit_irrigation_run_event(
+                {
+                    "event_type": "irrigation.run.updated",
+                    "action": "started",
+                    "device_id": device_external_id,
+                    "site_id": site_pk_id,
+                    "run": run,
+                }
+            )
+            return run
+    raise RegistryNotFoundError("irrigation run not found")
+
+
 def complete_irrigation_run(device_external_id: str, run_id: str, *, status: str = "completed") -> dict[str, Any]:
     site_pk_id: int | None = None
     with get_connection() as conn:

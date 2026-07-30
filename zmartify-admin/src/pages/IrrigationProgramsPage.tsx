@@ -116,6 +116,18 @@ export function IrrigationProgramsPage() {
   const [scheduleEditDrafts, setScheduleEditDrafts] = useState<Record<string, ScheduleDraft>>({});
   const [activeRuns, setActiveRuns] = useState<Record<string, IrrigationRunSummary>>({});
 
+  const reconcileActiveRun = useCallback((deviceId: string, run?: IrrigationRunSummary | null) => {
+    setActiveRuns((prev) => {
+      const next = { ...prev };
+      if (run && run.status === 'running') {
+        next[deviceId] = run;
+      } else {
+        delete next[deviceId];
+      }
+      return next;
+    });
+  }, []);
+
   const reloadPrograms = useCallback(async (siteId: string) => {
     const overview = await mobileApi.getIrrigationOverview(siteId).catch(() => null);
     const overviewDevices = (overview?.devices || []).map((device) => ({
@@ -172,11 +184,14 @@ export function IrrigationProgramsPage() {
     setActionFeedback('');
     try {
       const result = await mobileApi.startIrrigationProgramRun(row.deviceId, row.program.program_id);
-      setActiveRuns((prev) => ({ ...prev, [row.deviceId]: result.run }));
+      reconcileActiveRun(row.deviceId, result.run);
       const currentStep = result.run.steps.find((step) => step.status === 'running');
       setActionFeedback(`Run started for ${row.program.name}${currentStep ? ` on ${currentStep.zone_name || currentStep.local_ref}` : ''}.`);
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
+      window.setTimeout(() => {
+        reloadPrograms(selectedSite).catch(console.error);
+      }, 1500);
     } catch (error) {
       setActionFeedback(String(error));
       setBusyKey('');
@@ -189,11 +204,7 @@ export function IrrigationProgramsPage() {
     setActionFeedback('Stopping program...');
     try {
       await mobileApi.stopIrrigationProgramRun(row.deviceId, run.run_id);
-      setActiveRuns((prev) => {
-        const next = { ...prev };
-        delete next[row.deviceId];
-        return next;
-      });
+      reconcileActiveRun(row.deviceId, null);
       setActionFeedback(`Stopped ${row.program.name}.`);
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
@@ -210,12 +221,7 @@ export function IrrigationProgramsPage() {
     try {
       const result = await mobileApi.skipIrrigationProgramRunStep(row.deviceId, run.run_id);
       const nextStep = result.run.steps.find((step) => step.status === 'running');
-      setActiveRuns((prev) => {
-        if (result.run.status === 'running') return { ...prev, [row.deviceId]: result.run };
-        const next = { ...prev };
-        delete next[row.deviceId];
-        return next;
-      });
+      reconcileActiveRun(row.deviceId, result.run);
       setActionFeedback(nextStep ? `Skipped to ${nextStep.zone_name || nextStep.local_ref}.` : `${row.program.name} completed.`);
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
@@ -521,6 +527,7 @@ export function IrrigationProgramsPage() {
             const activeProgram = activeRun?.program_id === row.program.program_id;
             const currentStep = activeProgram ? activeRun.steps.find((step) => step.status === 'running') : undefined;
             const nextStep = activeProgram ? activeRun.steps.find((step) => step.status === 'planned') : undefined;
+            const controllerLocalProgramRun = activeProgram && activeRun?.trigger_type === 'manual_controller';
             const hasOtherActiveProgram = Boolean(activeRun && !activeProgram);
             const runBusy = busyKey === `run:${row.deviceId}:${row.program.program_id}`;
             const stopBusy = activeRun ? busyKey === `stop:${row.deviceId}:${activeRun.run_id}` : false;
@@ -573,6 +580,8 @@ export function IrrigationProgramsPage() {
                     ? 'Starting program...'
                     : activeProgram && currentStep
                       ? `Running ${currentStep.zone_name || currentStep.local_ref || 'zone'}`
+                      : controllerLocalProgramRun
+                        ? 'Program running on controller'
                       : hasOtherActiveProgram
                         ? 'Another program is running on this controller'
                         : 'Idle'}
@@ -580,6 +589,10 @@ export function IrrigationProgramsPage() {
                 {activeProgram && currentStep ? (
                   <p className="text-xs text-muted mt-1">
                     Current runtime {Math.round(currentStep.duration_seconds / 60)} min{nextStep ? ` • Next ${nextStep.zone_name || nextStep.local_ref}` : ' • Last zone'}
+                  </p>
+                ) : controllerLocalProgramRun ? (
+                  <p className="text-xs text-muted mt-1">
+                    Zone sequencing is running locally on the controller.
                   </p>
                 ) : null}
               </div>
@@ -845,14 +858,16 @@ export function IrrigationProgramsPage() {
                     >
                       {stopBusy ? 'Stopping...' : 'Stop'}
                     </IonButton>
-                    <IonButton
-                      size="small"
-                      fill="outline"
-                      disabled={stopBusy || skipBusy}
-                      onClick={() => { void skipProgramRunStep(row, activeRun); }}
-                    >
-                      {skipBusy ? 'Skipping...' : 'Skip next'}
-                    </IonButton>
+                    {!controllerLocalProgramRun ? (
+                      <IonButton
+                        size="small"
+                        fill="outline"
+                        disabled={stopBusy || skipBusy}
+                        onClick={() => { void skipProgramRunStep(row, activeRun); }}
+                      >
+                        {skipBusy ? 'Skipping...' : 'Skip next'}
+                      </IonButton>
+                    ) : null}
                   </>
                 ) : null}
               </div>

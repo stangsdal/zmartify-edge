@@ -1797,7 +1797,7 @@ def list_mobile_domains(*, site_ids: set[int] | None = None) -> list[dict[str, A
             LEFT JOIN sites s ON s.domain_id = d.id
             LEFT JOIN devices dev ON dev.site_id = s.id
             {where_clause}
-            GROUP BY d.id
+            GROUP BY d.id, d.uuid, d.slug, d.name
             ORDER BY d.id
             """
             .format(where_clause=where_clause),
@@ -1828,7 +1828,7 @@ def list_mobile_sites(*, site_ids: set[int] | None = None) -> list[dict[str, Any
             JOIN domains d ON d.id = s.domain_id
             LEFT JOIN devices dev ON dev.site_id = s.id
             {where_clause}
-            GROUP BY s.id
+            GROUP BY s.id, s.uuid, s.slug, s.name, s.address, d.uuid, d.slug, d.name
             ORDER BY s.id
             """
             .format(where_clause=where_clause),

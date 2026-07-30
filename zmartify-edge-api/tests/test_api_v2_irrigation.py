@@ -427,3 +427,53 @@ def test_irrigation_v2_404_on_unknown_device(monkeypatch, tmp_path: Path):
 
     response = client.get("/api/v2/devices/missing/irrigation/zones", headers=headers)
     assert response.status_code == 404
+
+
+def test_irrigation_command_rejects_stale_device_state(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    headers = _auth_headers()
+
+    from app import db, router_v2_irrigation
+
+    published_commands: list[dict] = []
+
+    def _fake_publish_irrigation_command(device_id_arg: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+        command = {
+            "command_id": "cmd-test",
+            "device_id": device_id_arg,
+            "command_type": command_type,
+            "target_ref": target_ref,
+            "parameters": parameters or {},
+            "status": "published",
+        }
+        published_commands.append(command)
+        return command
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+
+    with db.get_connection() as conn:
+        device_row = conn.execute("SELECT id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        assert device_row is not None
+        conn.execute(
+            """
+            INSERT INTO device_state(device_id, online, mqtt_connected, last_seen_at, source_timestamp, updated_at)
+            VALUES (?, 1, 1, '2026-07-12T12:00:00Z', '2026-07-12T12:00:00Z', CURRENT_TIMESTAMP)
+            """,
+            (device_row["id"],),
+        )
+        conn.commit()
+
+    response = client.post(
+        f"/api/v2/devices/{device_id}/commands",
+        headers=headers,
+        json={
+            "command_type": "irrigation.zone.start",
+            "target_ref": "zone:1",
+            "parameters": {"duration_seconds": 60},
+        },
+    )
+
+    assert response.status_code == 409
+    assert "stale" in response.json()["detail"]
+    assert published_commands == []

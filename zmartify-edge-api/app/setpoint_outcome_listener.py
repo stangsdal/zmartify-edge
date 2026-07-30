@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -10,6 +12,10 @@ from typing import Any
 from app.contracts import ContractValidationError
 from app.mqtt_v2_ingest import parse_mqtt_v2_setpoint_outcome_payload
 from app.mqtt_v2_topics import outcome_subscription_topics, parse_setpoint_outcome_topic, parse_v2_device_event_topic
+
+
+logger = logging.getLogger("uvicorn.error").getChild("setpoint_outcome_listener")
+logger.setLevel(logging.INFO)
 
 
 class SetpointOutcomeMqttListener:
@@ -30,6 +36,8 @@ class SetpointOutcomeMqttListener:
         self._mqtt = mqtt_client_module
         self._clients: dict[str, Any] = {}
         self._threads: dict[str, threading.Thread] = {}
+        self._credentials: dict[str, tuple[str, str]] = {}
+        self._reconcile_thread: threading.Thread | None = None
         self._running = False
 
     @staticmethod
@@ -111,7 +119,9 @@ class SetpointOutcomeMqttListener:
         device_id = str(userdata or "").strip()
         if not device_id:
             return
-        for topic in outcome_subscription_topics(device_id):
+        topics = list(outcome_subscription_topics(device_id))
+        logger.info("Connected MQTT listener for %s; subscribing to %d topics", device_id, len(topics))
+        for topic in topics:
             client.subscribe(topic, qos=1)
 
     def _on_message(self, _client, _userdata, msg):
@@ -126,17 +136,22 @@ class SetpointOutcomeMqttListener:
             try:
                 data = json.loads(payload_text)
             except json.JSONDecodeError:
+                logger.warning("Ignoring MQTT v2 %s for %s with invalid JSON on %s", kind, device_id, topic)
                 return
             if not isinstance(data, dict):
+                logger.warning("Ignoring MQTT v2 %s for %s with non-object payload on %s", kind, device_id, topic)
                 return
             try:
                 if kind == "irrigation_outcome" and self._ingest_irrigation_outcome is not None:
                     self._ingest_irrigation_outcome(device_id, data)
                 elif kind == "reported_state" and self._ingest_reported_state is not None:
                     self._ingest_reported_state(device_id, data)
+                logger.info("Ingested MQTT v2 %s for %s from %s", kind, device_id, topic)
             except ContractValidationError:
+                logger.warning("Rejected MQTT v2 %s for %s due to contract validation", kind, device_id)
                 return
             except Exception:
+                logger.exception("Failed ingesting MQTT v2 %s for %s from %s", kind, device_id, topic)
                 return
             return
 
@@ -171,40 +186,90 @@ class SetpointOutcomeMqttListener:
             targets.append((device_id, username, password))
         return targets
 
+    @staticmethod
+    def _refresh_interval_seconds() -> float:
+        raw = os.getenv("ZMART_EDGE_SETPOINT_OUTCOME_REFRESH_SECONDS", "10").strip() or "10"
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            return 10.0
+
+    def _disconnect_client(self, device_id: str) -> None:
+        client = self._clients.pop(device_id, None)
+        self._threads.pop(device_id, None)
+        self._credentials.pop(device_id, None)
+        if client is None:
+            return
+        logger.info("Stopping MQTT listener client for %s", device_id)
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+    def _start_client(self, device_id: str, username: str, password: str) -> None:
+        logger.info("Starting MQTT listener client for %s", device_id)
+        client = self._mqtt.Client(client_id=f"edge-setpoint-{device_id}-{uuid.uuid4().hex[:6]}", userdata=device_id)
+        client.username_pw_set(username=username, password=password)
+        client.on_connect = self._on_connect
+        client.on_message = self._on_message
+        client.connect_async(self._mqtt_host(), self._mqtt_port(), keepalive=30)
+        thread = threading.Thread(
+            target=client.loop_forever,
+            kwargs={"retry_first_connection": True},
+            name=f"setpoint-outcome-{device_id}",
+            daemon=True,
+        )
+        thread.start()
+        self._clients[device_id] = client
+        self._threads[device_id] = thread
+        self._credentials[device_id] = (username, password)
+
+    def _reconcile_clients(self) -> None:
+        desired = {device_id: (username, password) for device_id, username, password in self._device_listener_targets()}
+        logger.info("Reconciling MQTT listener targets: %d desired, %d active", len(desired), len(self._clients))
+
+        for device_id in list(self._clients):
+            if device_id not in desired:
+                self._disconnect_client(device_id)
+
+        for device_id, credentials in desired.items():
+            if self._credentials.get(device_id) == credentials and device_id in self._clients:
+                continue
+            self._disconnect_client(device_id)
+            self._start_client(device_id, credentials[0], credentials[1])
+
+    def _reconcile_loop(self) -> None:
+        while self._running:
+            try:
+                self._reconcile_clients()
+            except Exception:
+                pass
+            time.sleep(self._refresh_interval_seconds())
+
     def start(self) -> None:
-        if not self._enabled() or self._mqtt is None or self._running:
+        if not self._enabled() or self._mqtt is None:
+            return
+        if self._running:
+            self._reconcile_clients()
             return
 
-        targets = self._device_listener_targets()
-        for device_id, username, password in targets:
-            client = self._mqtt.Client(client_id=f"edge-setpoint-{device_id}-{uuid.uuid4().hex[:6]}", userdata=device_id)
-            client.username_pw_set(username=username, password=password)
-            client.on_connect = self._on_connect
-            client.on_message = self._on_message
-            client.connect_async(self._mqtt_host(), self._mqtt_port(), keepalive=30)
-            thread = threading.Thread(
-                target=client.loop_forever,
-                kwargs={"retry_first_connection": True},
-                name=f"setpoint-outcome-{device_id}",
-                daemon=True,
-            )
-            thread.start()
-            self._clients[device_id] = client
-            self._threads[device_id] = thread
-
         self._running = True
+        logger.info("Starting setpoint outcome listener")
+        self._reconcile_clients()
+        self._reconcile_thread = threading.Thread(
+            target=self._reconcile_loop,
+            name="setpoint-outcome-reconcile",
+            daemon=True,
+        )
+        self._reconcile_thread.start()
 
     def stop(self) -> None:
         if not self._running:
             return
-        for client in self._clients.values():
-            try:
-                client.disconnect()
-            except Exception:
-                pass
-        self._clients.clear()
-        self._threads.clear()
         self._running = False
+        for device_id in list(self._clients):
+            self._disconnect_client(device_id)
+        self._reconcile_thread = None
 
 
 def create_setpoint_outcome_listener() -> SetpointOutcomeMqttListener:

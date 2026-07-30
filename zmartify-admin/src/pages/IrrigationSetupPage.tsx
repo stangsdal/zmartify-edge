@@ -47,6 +47,7 @@ export function IrrigationSetupPage() {
   const [outputs, setOutputs] = useState<IrrigationOutput[]>([]);
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, { name: string; enabled: boolean }>>({});
   const [testRunZoneRefs, setTestRunZoneRefs] = useState<Record<string, boolean>>({});
+  const [pendingTestZoneRefs, setPendingTestZoneRefs] = useState<Record<string, boolean>>({});
   const [busyAction, setBusyAction] = useState('');
   const [feedback, setFeedback] = useState('');
   const testRunTimers = useRef<Record<string, number>>({});
@@ -113,6 +114,7 @@ export function IrrigationSetupPage() {
       setZones([]);
       setOutputs([]);
       setTestRunZoneRefs({});
+      setPendingTestZoneRefs({});
       return;
     }
     reloadDeviceSetup(selectedDeviceId).catch(console.error);
@@ -222,15 +224,29 @@ export function IrrigationSetupPage() {
     });
   }, []);
 
+  const clearPendingTestRun = useCallback((zoneRef: string) => {
+    setPendingTestZoneRefs((prev) => {
+      const next = { ...prev };
+      delete next[zoneRef];
+      return next;
+    });
+  }, []);
+
+  const markPendingTestRun = useCallback((zoneRef: string) => {
+    setPendingTestZoneRefs((prev) => ({ ...prev, [zoneRef]: true }));
+  }, []);
+
   const markTestRunning = useCallback((zoneRef: string) => {
     clearTestRun(zoneRef);
+    clearPendingTestRun(zoneRef);
     setTestRunZoneRefs((prev) => ({ ...prev, [zoneRef]: true }));
     testRunTimers.current[zoneRef] = window.setTimeout(() => {
       clearTestRun(zoneRef);
     }, TEST_RUN_SECONDS * 1000);
-  }, [clearTestRun]);
+  }, [clearPendingTestRun, clearTestRun]);
 
   const activeTestZoneRef = Object.keys(testRunZoneRefs)[0] || '';
+  const activePendingTestZoneRef = Object.keys(pendingTestZoneRefs)[0] || '';
 
   useEffect(() => {
     if (!selectedDeviceId) return;
@@ -250,16 +266,18 @@ export function IrrigationSetupPage() {
         markTestRunning(zoneRef);
         setFeedback(`Controller started test run for ${zoneRef}.`);
       } else if (zoneRef && (outcomeType === 'run.stopped' || outcomeType === 'run.completed')) {
+        clearPendingTestRun(zoneRef);
         clearTestRun(zoneRef);
         setFeedback(`Controller stopped test run for ${zoneRef}.`);
       } else if (zoneRef && result === 'rejected') {
+        clearPendingTestRun(zoneRef);
         clearTestRun(zoneRef);
         setFeedback(`Controller rejected ${zoneRef}: ${detail || outcomeType || 'command rejected'}.`);
       }
     });
 
     return unsubscribe;
-  }, [clearTestRun, markTestRunning, selectedDeviceId]);
+  }, [clearPendingTestRun, clearTestRun, markTestRunning, selectedDeviceId]);
 
   const toggleZoneTest = async (zone: IrrigationZone) => {
     const localRef = zone.local_ref || zone.zone_id;
@@ -268,7 +286,8 @@ export function IrrigationSetupPage() {
       return;
     }
     const isRunning = Boolean(testRunZoneRefs[localRef]);
-    if (!isRunning && activeTestZoneRef && activeTestZoneRef !== localRef) {
+    const isPending = Boolean(pendingTestZoneRefs[localRef]);
+    if (!isRunning && !isPending && ((activeTestZoneRef && activeTestZoneRef !== localRef) || (activePendingTestZoneRef && activePendingTestZoneRef !== localRef))) {
       setFeedback(`Stop the running test for ${activeTestZoneRef} before starting another zone.`);
       return;
     }
@@ -280,10 +299,11 @@ export function IrrigationSetupPage() {
         setFeedback(`Stop command sent for ${localRef}. Waiting for controller confirmation.`);
       } else {
         await commandsApi.startIrrigationZone(selectedDeviceId, localRef, TEST_RUN_SECONDS);
-        markTestRunning(localRef);
-        setFeedback(`Started ${TEST_RUN_SECONDS} second test run for ${localRef}.`);
+        markPendingTestRun(localRef);
+        setFeedback(`Start command sent for ${localRef}. Waiting for controller confirmation.`);
       }
     } catch (error) {
+      clearPendingTestRun(localRef);
       setFeedback(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyAction('');
@@ -345,7 +365,9 @@ export function IrrigationSetupPage() {
                 const isSaving = busyAction === `zone:${zone.zone_id}`;
                 const isTesting = busyAction === `test:${zone.zone_id}`;
                 const isTestRunning = Boolean(testRunZoneRefs[localRef]);
-                const isAnotherTestRunning = Boolean(activeTestZoneRef && activeTestZoneRef !== localRef);
+                const isPending = Boolean(pendingTestZoneRefs[localRef]);
+                const activeOtherTestRef = activeTestZoneRef || activePendingTestZoneRef;
+                const isAnotherTestRunning = Boolean(activeOtherTestRef && activeOtherTestRef !== localRef);
                 return (
                   <article key={zone.zone_id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -379,7 +401,7 @@ export function IrrigationSetupPage() {
                         disabled={!selectedDeviceId || isSaving || isTesting || isAnotherTestRunning || (!draft.enabled && !isTestRunning)}
                         onClick={() => { void toggleZoneTest(zone); }}
                       >
-                        {isTesting ? 'Sending...' : isTestRunning ? 'Stop test' : isAnotherTestRunning ? 'Test running' : 'Test 1 min'}
+                        {isTesting ? 'Sending...' : isPending ? 'Waiting...' : isTestRunning ? 'Stop test' : isAnotherTestRunning ? 'Test running' : 'Test 1 min'}
                       </IonButton>
                     </div>
                   </article>

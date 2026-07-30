@@ -72,7 +72,7 @@ def test_publish_zone_name_command_dual_mode_keeps_legacy_and_v2(monkeypatch):
     assert v2_payload["parameters"]["name"] == "Kitchen"
 
 
-def test_publish_irrigation_command_uses_v2_irrigation_topic(monkeypatch):
+def test_publish_irrigation_command_uses_compact_irrigation_payload(monkeypatch):
     calls: list[list[str]] = []
 
     monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
@@ -102,5 +102,8 @@ def test_publish_irrigation_command_uses_v2_irrigation_topic(monkeypatch):
     payload = json.loads(message)
     assert payload["command_id"] == result["command_id"]
     assert payload["source_timestamp"].endswith("Z")
+    assert "schema_version" not in payload
+    assert "command_type" not in payload
+    assert "target_ref" not in payload
     assert payload["parameters"]["zone_id"] == 3
     assert payload["parameters"]["duration_seconds"] == 600
