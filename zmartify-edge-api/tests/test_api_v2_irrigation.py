@@ -499,6 +499,58 @@ def test_irrigation_command_rejects_stale_device_state(monkeypatch, tmp_path: Pa
     assert published_commands == []
 
 
+def test_irrigation_command_accepts_fresh_updated_at_with_stale_source_timestamp(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    headers = _auth_headers()
+
+    from app.domain_model import upsert_device_state
+    from app import router_v2_irrigation
+
+    published_commands: list[dict] = []
+
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
+        command = {
+            "command_id": command_id or "cmd-test",
+            "device_id": device_id_arg,
+            "command_type": command_type,
+            "target_ref": target_ref,
+            "parameters": parameters or {},
+            "status": "published",
+        }
+        published_commands.append(command)
+        return command
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+
+    upsert_device_state(
+        device_id,
+        online=True,
+        mqtt_connected=True,
+        source="test",
+        source_timestamp="2026-07-12T12:00:00Z",
+    )
+
+    response = client.post(
+        f"/api/v2/devices/{device_id}/commands",
+        headers=headers,
+        json={
+            "command_type": "irrigation.zone.start",
+            "target_ref": "zone:1",
+            "parameters": {"duration_seconds": 60},
+        },
+    )
+
+    assert response.status_code == 200
+    assert published_commands[-1]["command_type"] == "irrigation.zone.start"
+
+
 def test_controller_local_skip_publishes_program_skip_command(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     device_id = _seed_device(client)

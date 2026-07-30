@@ -153,11 +153,11 @@ class IrrigationCommandIn(BaseModel):
 
 
 def _command_freshness_limit_ms() -> int:
-    raw = os.getenv("ZMART_EDGE_IRRIGATION_COMMAND_MAX_AGE_SECONDS", "120").strip() or "120"
+    raw = os.getenv("ZMART_EDGE_IRRIGATION_COMMAND_MAX_AGE_SECONDS", "1800").strip() or "1800"
     try:
         seconds = max(1, int(raw))
     except ValueError:
-        seconds = 120
+        seconds = 1800
     return seconds * 1000
 
 
