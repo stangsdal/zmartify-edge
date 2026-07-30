@@ -643,6 +643,7 @@ def test_program_sync_splits_mixed_schedule_day_sets_for_controller(monkeypatch,
         replace_program_zones,
         upsert_irrigation_zone,
     )
+    from app import router_v2_irrigation
     from app.router_v2_irrigation import (
         _build_irrigation_program_sync_payload,
         _controller_program_number,
@@ -694,4 +695,9 @@ def test_program_sync_splits_mixed_schedule_day_sets_for_controller(monkeypatch,
     assert len(payload["programs"]) == 2
     assert payload["programs"][0]["schedules"][0]["weekdays"] == [6, 7]
     assert payload["programs"][1]["schedules"][0]["weekdays"] == [1, 2, 3, 4, 5]
+
+    monkeypatch.setattr(router_v2_irrigation, "_controller_weekday_today", lambda: 4)
+    assert _controller_program_number(device_id, str(program["program_id"])) == 2
+
+    monkeypatch.setattr(router_v2_irrigation, "_controller_weekday_today", lambda: 7)
     assert _controller_program_number(device_id, str(program["program_id"])) == 1

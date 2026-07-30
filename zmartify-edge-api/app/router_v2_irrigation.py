@@ -320,11 +320,32 @@ def _sync_irrigation_programs_to_controller(device_id: str) -> dict:
     return publish_irrigation_command(device_id, command_type=command_type, target_ref=None, parameters=parameters)
 
 
+def _controller_weekday_today() -> int:
+    weekday = datetime.now(UTC).astimezone().weekday()
+    return 7 if weekday == 6 else weekday + 1
+
+
 def _controller_program_number(device_id: str, program_id: str) -> int:
-    for index, (source_program_id, _) in enumerate(_build_irrigation_controller_program_entries(device_id), start=1):
+    matches: list[tuple[int, dict]] = []
+    for index, (source_program_id, payload) in enumerate(_build_irrigation_controller_program_entries(device_id), start=1):
         if source_program_id == program_id:
+            matches.append((index, payload))
+
+    if not matches:
+        raise RegistryNotFoundError("irrigation program not found")
+
+    today = _controller_weekday_today()
+    for index, payload in matches:
+        schedules = payload.get("schedules") or []
+        if any(bool(schedule.get("enabled", True)) and today in {int(day) for day in schedule.get("weekdays") or []} for schedule in schedules):
             return index
-    raise RegistryNotFoundError("irrigation program not found")
+
+    for index, payload in matches:
+        schedules = payload.get("schedules") or []
+        if any(bool(schedule.get("enabled", True)) for schedule in schedules):
+            return index
+
+    return matches[0][0]
 
 
 def _find_irrigation_run(device_id: str, run_id: str, *, limit: int = 100) -> dict:

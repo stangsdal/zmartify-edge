@@ -395,6 +395,15 @@ export interface IrrigationRunSummary {
   steps: IrrigationRunStepSummary[];
 }
 
+export interface IrrigationCommandResponse {
+  command_id: string;
+  device_id: string;
+  command_type: string;
+  target_ref?: string | null;
+  parameters?: Record<string, unknown> | null;
+  status?: string;
+}
+
 export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
@@ -576,4 +585,10 @@ export const mobileApi = {
     start_command?: Record<string, unknown> | null;
   }> =>
     apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/runs/${encodeURIComponent(runId)}/skip`, {}),
+
+  publishIrrigationCommand: (
+    deviceId: string,
+    payload: { command_type: string; target_ref?: string | null; parameters?: Record<string, unknown> },
+  ): Promise<IrrigationCommandResponse> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/commands`, payload),
 };

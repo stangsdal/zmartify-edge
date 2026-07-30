@@ -242,39 +242,60 @@ export function IrrigationProgramsPage() {
     }
   };
 
-  const stopProgramRun = async (row: DeviceProgram, run: IrrigationRunSummary) => {
-    const key = `stop:${row.deviceId}:${run.run_id}`;
+  const stopProgramRun = async (row: DeviceProgram, run?: IrrigationRunSummary | null) => {
+    const key = run ? `stop:${row.deviceId}:${run.run_id}` : `stop-controller:${row.deviceId}:${row.program.program_id}`;
     setBusyKey(key);
     setActionFeedback('Stopping program...');
     try {
-      await mobileApi.stopIrrigationProgramRun(row.deviceId, run.run_id);
-      reconcileActiveRun(row.deviceId, null);
+      if (run) {
+        await mobileApi.stopIrrigationProgramRun(row.deviceId, run.run_id);
+        reconcileActiveRun(row.deviceId, null);
+      } else {
+        await mobileApi.publishIrrigationCommand(row.deviceId, {
+          command_type: 'irrigation.stop_all',
+          parameters: {},
+        });
+      }
       setActionFeedback(`Stopped ${row.program.name}.`);
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
+      window.setTimeout(() => {
+        reloadPrograms(selectedSite).catch(console.error);
+      }, 1500);
     } catch (error) {
       setActionFeedback(String(error));
       setBusyKey('');
     }
   };
 
-  const skipProgramRunStep = async (row: DeviceProgram, run: IrrigationRunSummary) => {
-    const key = `skip:${row.deviceId}:${run.run_id}`;
+  const skipProgramRunStep = async (row: DeviceProgram, run?: IrrigationRunSummary | null) => {
+    const key = run ? `skip:${row.deviceId}:${run.run_id}` : `skip-controller:${row.deviceId}:${row.program.program_id}`;
     setBusyKey(key);
     setActionFeedback('Skipping to the next zone...');
     try {
-      const result = await mobileApi.skipIrrigationProgramRunStep(row.deviceId, run.run_id);
-      const nextStep = result.run.steps.find((step) => step.status === 'running');
-      reconcileActiveRun(row.deviceId, result.run);
-      setActionFeedback(
-        result.run.trigger_type === 'manual_controller'
-          ? 'Skip requested on controller.'
-          : nextStep
-            ? `Skipped to ${nextStep.zone_name || nextStep.local_ref}.`
-            : `${row.program.name} completed.`
-      );
+      if (run) {
+        const result = await mobileApi.skipIrrigationProgramRunStep(row.deviceId, run.run_id);
+        const nextStep = result.run.steps.find((step) => step.status === 'running');
+        reconcileActiveRun(row.deviceId, result.run);
+        setActionFeedback(
+          result.run.trigger_type === 'manual_controller'
+            ? 'Skip requested on controller.'
+            : nextStep
+              ? `Skipped to ${nextStep.zone_name || nextStep.local_ref}.`
+              : `${row.program.name} completed.`
+        );
+      } else {
+        await mobileApi.publishIrrigationCommand(row.deviceId, {
+          command_type: 'irrigation.program.skip',
+          parameters: {},
+        });
+        setActionFeedback('Skip requested on controller.');
+      }
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
+      window.setTimeout(() => {
+        reloadPrograms(selectedSite).catch(console.error);
+      }, 1500);
     } catch (error) {
       setActionFeedback(String(error));
       setBusyKey('');
@@ -647,19 +668,29 @@ export function IrrigationProgramsPage() {
             const controllerLocalProgramRun = activeProgram && activeRun?.trigger_type === 'manual_controller';
             const hasOtherActiveProgram = Boolean(activeRun && !activeProgram);
             const runBusy = busyKey === `run:${row.deviceId}:${row.program.program_id}`;
-            const stopBusy = activeRun ? busyKey === `stop:${row.deviceId}:${activeRun.run_id}` : false;
-            const skipBusy = activeRun ? busyKey === `skip:${row.deviceId}:${activeRun.run_id}` : false;
+            const stopBusy = activeRun
+              ? busyKey === `stop:${row.deviceId}:${activeRun.run_id}`
+              : busyKey === `stop-controller:${row.deviceId}:${row.program.program_id}`;
+            const skipBusy = activeRun
+              ? busyKey === `skip:${row.deviceId}:${activeRun.run_id}`
+              : busyKey === `skip-controller:${row.deviceId}:${row.program.program_id}`;
             const deleteProgramBusy = busyKey === `program-delete:${row.deviceId}:${row.program.program_id}`;
             const runtimeTimestampMs = parseTimestampMs(row.runtime?.source_timestamp) || parseTimestampMs(row.runtime?.updated_at);
             const runtimeAgeSeconds = runtimeTimestampMs == null ? 0 : Math.max(0, Math.floor((nowMs - runtimeTimestampMs) / 1000));
             const runtimeRemainingSeconds = row.runtime?.remaining_seconds == null ? null : Math.max(0, row.runtime.remaining_seconds - runtimeAgeSeconds);
+            const runtimeProgramName = (row.runtime?.active_program_name || '').trim();
+            const runtimeProgramMatches = runtimeProgramName.length > 0 && runtimeProgramName === row.program.name;
+            const runtimeShowsActiveZone = Boolean(row.runtime?.active_zone_id && row.runtime.active_zone_id > 0);
+            const runtimeShowsActiveProgram = runtimeProgramMatches && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0));
             const currentStepStartMs = parseTimestampMs(currentStep?.started_at);
             const liveCurrentStepRemainingSeconds = currentStep == null
               ? null
               : Math.max(0, currentStep.duration_seconds - Math.floor((nowMs - (currentStepStartMs || nowMs)) / 1000));
+            const displayControllerLocalProgramRun = controllerLocalProgramRun || (!activeProgram && runtimeShowsActiveProgram);
+            const hasOtherRuntimeProgram = !activeProgram && Boolean(runtimeProgramName) && !runtimeProgramMatches;
             const estimateLiters = Math.max(60, Math.round(row.program.seasonal_adjustment * Math.max(1, row.schedules.length) * 120));
             return (
-            <section key={`${row.deviceId}:${row.program.program_id}`} className={`rounded-2xl app-surface p-4 shadow-soft border border-slate-100 ${hasOtherActiveProgram ? 'opacity-60' : ''}`}>
+            <section key={`${row.deviceId}:${row.program.program_id}`} className={`rounded-2xl app-surface p-4 shadow-soft border border-slate-100 ${hasOtherActiveProgram || hasOtherRuntimeProgram ? 'opacity-60' : ''}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold">{row.program.name}</h2>
@@ -716,11 +747,11 @@ export function IrrigationProgramsPage() {
                     ? 'Starting program...'
                     : activeProgram && currentStep
                       ? `Running ${currentStep.zone_name || currentStep.local_ref || 'zone'}`
-                      : controllerLocalProgramRun && row.runtime?.active_zone_name
+                      : displayControllerLocalProgramRun && row.runtime?.active_zone_name
                         ? `Running ${row.runtime.active_zone_name}`
-                      : controllerLocalProgramRun
+                      : displayControllerLocalProgramRun
                         ? 'Program running on controller'
-                      : hasOtherActiveProgram
+                      : hasOtherActiveProgram || hasOtherRuntimeProgram
                         ? 'Another program is running on this controller'
                         : 'Idle'}
                 </p>
@@ -728,7 +759,7 @@ export function IrrigationProgramsPage() {
                   <p className="text-xs text-muted mt-1">
                     Remaining {formatRemaining(liveCurrentStepRemainingSeconds ?? currentStep.duration_seconds)}{nextStep ? ` • Next ${nextStep.zone_name || nextStep.local_ref}` : ' • Last zone'}
                   </p>
-                ) : controllerLocalProgramRun ? (
+                ) : displayControllerLocalProgramRun ? (
                   <p className="text-xs text-muted mt-1">
                     {runtimeRemainingSeconds != null
                       ? `Remaining ${formatRemaining(runtimeRemainingSeconds)}${row.runtime?.active_zone_id ? ` • Zone ${row.runtime.active_zone_id}` : ''}`
@@ -1012,12 +1043,12 @@ export function IrrigationProgramsPage() {
               <div className="flex flex-wrap gap-2 mt-3">
                 <IonButton
                   size="small"
-                  disabled={runBusy || Boolean(activeRun) || !row.program.enabled}
+                  disabled={runBusy || Boolean(activeRun) || displayControllerLocalProgramRun || hasOtherRuntimeProgram || !row.program.enabled}
                   onClick={() => { void runProgramNow(row); }}
                 >
                   {runBusy ? 'Starting...' : 'Run now'}
                 </IonButton>
-                {activeProgram ? (
+                {activeProgram || displayControllerLocalProgramRun ? (
                   <>
                     <IonButton
                       size="small"
