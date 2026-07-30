@@ -212,8 +212,37 @@ def _controller_program_zone_ref(local_ref: str) -> str:
     return str(local_ref)
 
 
-def _build_irrigation_program_sync_payload(device_id: str) -> dict:
-    programs_payload: list[dict] = []
+def _normalize_controller_schedule_payload(schedule: dict) -> dict:
+    local_weekdays = sorted({int(day) for day in schedule.get("weekdays") or [] if int(day) in {0, 1, 2, 3, 4, 5, 6}})
+    weekday_set = set(local_weekdays)
+    recurrence_type = str(schedule.get("recurrence_type") or "weekdays")
+    if weekday_set == {0, 1, 2, 3, 4, 5, 6}:
+        recurrence_type = "daily"
+        local_weekdays = [0, 1, 2, 3, 4, 5, 6]
+    elif weekday_set == {1, 2, 3, 4, 5}:
+        recurrence_type = "weekdays"
+        local_weekdays = [1, 2, 3, 4, 5]
+    elif weekday_set == {0, 6}:
+        recurrence_type = "weekends"
+        local_weekdays = [6, 0]
+    elif local_weekdays and recurrence_type == "weekdays":
+        recurrence_type = "weekly"
+    controller_weekdays = [7 if day == 0 else day for day in local_weekdays]
+    return {
+        "schedule_id": str(schedule["schedule_id"]),
+        "name": str(schedule["name"]),
+        "enabled": bool(schedule.get("enabled", True)),
+        "recurrence_type": recurrence_type,
+        "weekdays": controller_weekdays,
+        "start_local_time": str(schedule["start_local_time"]),
+        "interval_days": schedule.get("interval_days"),
+        "anchor_date": schedule.get("anchor_date") or None,
+        "dates": [str(value) for value in schedule.get("dates") or []],
+    }
+
+
+def _build_irrigation_controller_program_entries(device_id: str) -> list[tuple[str, dict]]:
+    controller_programs: list[tuple[str, dict]] = []
     programs = list_irrigation_programs(device_id)
     for program in programs:
         zone_items = list_program_zones(device_id, program["program_id"])
@@ -236,25 +265,22 @@ def _build_irrigation_program_sync_payload(device_id: str) -> dict:
                 }
             )
 
-        schedules_payload = []
-        for schedule in schedule_items:
-            schedules_payload.append(
-                {
-                    "schedule_id": str(schedule["schedule_id"]),
-                    "name": str(schedule["name"]),
-                    "enabled": bool(schedule.get("enabled", True)),
-                    "recurrence_type": str(schedule.get("recurrence_type") or "weekdays"),
-                    "weekdays": [int(day) for day in schedule.get("weekdays") or []],
-                    "start_local_time": str(schedule["start_local_time"]),
-                    "interval_days": schedule.get("interval_days"),
-                    "anchor_date": schedule.get("anchor_date") or None,
-                    "dates": [str(value) for value in schedule.get("dates") or []],
-                }
-            )
+        normalized_schedules = [_normalize_controller_schedule_payload(schedule) for schedule in schedule_items]
+        grouped_enabled_schedules: dict[tuple[int, ...], list[dict]] = {}
+        disabled_schedules: list[dict] = []
+        for schedule_payload in normalized_schedules:
+            if not schedule_payload["enabled"]:
+                disabled_schedules.append(schedule_payload)
+                continue
+            group_key = tuple(int(day) for day in schedule_payload["weekdays"])
+            grouped_enabled_schedules.setdefault(group_key, []).append(schedule_payload)
 
-        programs_payload.append(
-            {
-                "program_id": str(program["program_id"]),
+        controller_schedule_groups = list(grouped_enabled_schedules.values()) or [[]]
+        controller_schedule_groups[0] = [*controller_schedule_groups[0], *disabled_schedules]
+
+        for group_index, schedules_payload in enumerate(controller_schedule_groups, start=1):
+            program_payload = {
+                "program_id": str(program["program_id"]) if len(controller_schedule_groups) == 1 else f"{program['program_id']}:{group_index}",
                 "name": str(program["name"]),
                 "enabled": bool(program.get("enabled", True)),
                 "seasonal_adjust_pct": max(0, min(200, int(round(float(program.get("seasonal_adjustment") or 1.0) * 100.0)))),
@@ -262,7 +288,15 @@ def _build_irrigation_program_sync_payload(device_id: str) -> dict:
                 "zones": zones_payload,
                 "schedules": schedules_payload,
             }
-        )
+            controller_programs.append((str(program["program_id"]), program_payload))
+
+    if len(controller_programs) > 8:
+        raise MqttCommandError("controller supports at most 8 irrigation program schedule groups")
+    return controller_programs
+
+
+def _build_irrigation_program_sync_payload(device_id: str) -> dict:
+    programs_payload = [payload for _, payload in _build_irrigation_controller_program_entries(device_id)]
 
     return {
         "config_revision": int(datetime.now(UTC).timestamp()),
@@ -280,9 +314,8 @@ def _sync_irrigation_programs_to_controller(device_id: str) -> dict:
 
 
 def _controller_program_number(device_id: str, program_id: str) -> int:
-    programs = list_irrigation_programs(device_id)
-    for index, program in enumerate(programs, start=1):
-        if program["program_id"] == program_id:
+    for index, (source_program_id, _) in enumerate(_build_irrigation_controller_program_entries(device_id), start=1):
+        if source_program_id == program_id:
             return index
     raise RegistryNotFoundError("irrigation program not found")
 
@@ -722,10 +755,21 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
         try:
             run_snapshot = _find_irrigation_run(device_id, run_id)
             if run_snapshot.get("trigger_type") == "manual_controller":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="skip is not available for controller-local program runs",
+                command = publish_irrigation_command(
+                    device_id,
+                    command_type="irrigation.program.skip",
+                    target_ref=None,
+                    parameters={},
                 )
+                run = _find_irrigation_run(device_id, run_id, limit=20)
+                return {
+                    "device_id": device_id,
+                    "run": run,
+                    "skipped_step": None,
+                    "next_step": None,
+                    "stop_command": command,
+                    "start_command": None,
+                }
             skipped_step = finish_current_irrigation_run_step(device_id, run_id, status="skipped")
             next_step = start_next_irrigation_run_step(device_id, run_id)
             stop_command = None

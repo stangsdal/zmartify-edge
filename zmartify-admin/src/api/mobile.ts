@@ -236,6 +236,17 @@ export interface IrrigationDeviceOverview {
     source_timestamp?: string | null;
     updated_at?: string | null;
   } | null;
+  runtime?: {
+    active_program_name?: string | null;
+    active_zone_id?: number | null;
+    active_zone_name?: string | null;
+    remaining_seconds?: number | null;
+    next_run_at?: string | null;
+    rain_delay_active?: boolean | null;
+    blocked_reason?: string | null;
+    source_timestamp?: string | null;
+    updated_at?: string | null;
+  } | null;
   rain_delay?: {
     rain_delay_id?: string;
     active_until?: string;
@@ -485,6 +496,12 @@ export const mobileApi = {
     payload: { name: string; enabled: boolean; seasonal_adjustment: number; weather_mode: string },
   ): Promise<{ device_id: string; program: IrrigationProgramSummary }> =>
     apiClient.put(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}`, payload),
+
+  deleteIrrigationProgram: (
+    deviceId: string,
+    programId: string,
+  ): Promise<{ deleted: boolean }> =>
+    apiClient.delete(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/programs/${encodeURIComponent(programId)}`),
 
   createIrrigationProgramSchedule: (
     deviceId: string,

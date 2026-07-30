@@ -199,6 +199,8 @@ def publish_irrigation_command(
         if program_number <= 0:
             raise MqttCommandError("irrigation program command requires a numeric program_id")
         firmware_parameters["program_id"] = program_number
+    elif command_type == "irrigation.program.skip":
+        firmware_parameters = {}
     elif command_type == "irrigation.zone.stop":
         zone_id = _zone_id_from_ref(target_ref, raw_parameters)
         if zone_id is None:

@@ -20,6 +20,7 @@ from app.irrigation_domain import (
     upsert_irrigation_hydraulics_state,
     upsert_irrigation_output_state,
     upsert_irrigation_power_state,
+    upsert_irrigation_runtime_state,
     upsert_irrigation_weather_state,
 )
 from app.registry import RegistryNotFoundError
@@ -103,6 +104,7 @@ def ingest_mqtt_v2_reported_state(
         power = _as_dict(irrigation.get("power"))
 
     weather = _as_dict(irrigation.get("weather"))
+    scheduler = _as_dict(irrigation.get("scheduler"))
 
     outputs_updated = 0
     for index, output in enumerate(_as_list(irrigation.get("outputs"))):
@@ -159,6 +161,21 @@ def ingest_mqtt_v2_reported_state(
         )
         weather_updated = True
 
+    runtime_updated = False
+    if scheduler:
+        upsert_irrigation_runtime_state(
+            device_id,
+            active_program_name=str(scheduler.get("active_program_name")) if scheduler.get("active_program_name") is not None else None,
+            active_zone_id=int(scheduler.get("active_zone_id")) if scheduler.get("active_zone_id") is not None else None,
+            active_zone_name=str(scheduler.get("active_zone_name")) if scheduler.get("active_zone_name") is not None else None,
+            remaining_seconds=int(scheduler.get("remaining_seconds")) if scheduler.get("remaining_seconds") is not None else None,
+            next_run_at=str(scheduler.get("next_run_at")) if scheduler.get("next_run_at") is not None else None,
+            rain_delay_active=bool(scheduler.get("rain_delay_active")) if scheduler.get("rain_delay_active") is not None else None,
+            blocked_reason=str(scheduler.get("blocked_reason")) if scheduler.get("blocked_reason") is not None else None,
+            source_timestamp=str(reported.get("source_timestamp") or _safe_source_timestamp(reported)),
+        )
+        runtime_updated = True
+
     storage = _as_dict(reported.get("storage"))
     sd_card = _as_dict(storage.get("sd_card"))
     storage_updated = False
@@ -199,6 +216,7 @@ def ingest_mqtt_v2_reported_state(
             "hydraulics_updated": hydraulics_updated,
             "power_updated": power_updated,
             "weather_updated": weather_updated,
+            "runtime_updated": runtime_updated,
             "storage_updated": storage_updated,
             "rain_delay_set": rain_delay_set,
         },

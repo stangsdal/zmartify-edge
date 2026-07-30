@@ -260,6 +260,8 @@ for ionic_pwa_dist in ionic_pwa_dist_candidates:
 
 
 def _is_protected_path(path: str) -> bool:
+    if path.startswith("/api/v2/devices/") and "/ota/download" in path:
+        return False
     if path in _PROTECTED_EXACT_PATHS:
         return True
     for prefix in _PROTECTED_PREFIXES:

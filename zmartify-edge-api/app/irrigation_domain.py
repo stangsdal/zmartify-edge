@@ -951,6 +951,15 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
                 """,
                 (device_pk_id,),
             ).fetchone()
+            runtime = conn.execute(
+                """
+                SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
+                       next_run_at, rain_delay_active, blocked_reason, source_timestamp, updated_at
+                FROM irrigation_runtime_state
+                WHERE device_id = ?
+                """,
+                (device_pk_id,),
+            ).fetchone()
             rain_delay = _active_rain_delay_for_device(conn, device_pk_id)
 
             device_summaries.append(
@@ -994,6 +1003,19 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
                         "eto_mm": weather["eto_mm"],
                         "source_timestamp": weather["source_timestamp"],
                         "updated_at": weather["updated_at"],
+                    },
+                    "runtime": None
+                    if runtime is None
+                    else {
+                        "active_program_name": runtime["active_program_name"],
+                        "active_zone_id": runtime["active_zone_id"],
+                        "active_zone_name": runtime["active_zone_name"],
+                        "remaining_seconds": runtime["remaining_seconds"],
+                        "next_run_at": runtime["next_run_at"],
+                        "rain_delay_active": bool(runtime["rain_delay_active"]) if runtime["rain_delay_active"] is not None else None,
+                        "blocked_reason": runtime["blocked_reason"],
+                        "source_timestamp": runtime["source_timestamp"],
+                        "updated_at": runtime["updated_at"],
                     },
                     "rain_delay": rain_delay,
                 }
@@ -1244,6 +1266,72 @@ def upsert_irrigation_weather_state(
             "event_type": "irrigation.status.updated",
             "action": "weather.upserted",
             "state_type": "weather",
+            "device_id": device_external_id,
+            "site_id": site_pk_id,
+            "state": state,
+        }
+    )
+    return state
+
+
+def upsert_irrigation_runtime_state(
+    device_external_id: str,
+    *,
+    active_program_name: str | None = None,
+    active_zone_id: int | None = None,
+    active_zone_name: str | None = None,
+    remaining_seconds: int | None = None,
+    next_run_at: str | None = None,
+    rain_delay_active: bool | None = None,
+    blocked_reason: str | None = None,
+    source_timestamp: str | None = None,
+) -> dict[str, Any]:
+    site_pk_id: int | None = None
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        site_pk_id = int(device["site_id"]) if device.get("site_id") is not None else None
+        _upsert_device_state_row(
+            conn,
+            "irrigation_runtime_state",
+            device["id"],
+            {
+                "active_program_name": active_program_name,
+                "active_zone_id": active_zone_id,
+                "active_zone_name": active_zone_name,
+                "remaining_seconds": remaining_seconds,
+                "next_run_at": next_run_at,
+                "rain_delay_active": None if rain_delay_active is None else int(bool(rain_delay_active)),
+                "blocked_reason": blocked_reason,
+                "source_timestamp": source_timestamp or _now_iso(),
+            },
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
+                   next_run_at, rain_delay_active, blocked_reason, source_timestamp, updated_at
+            FROM irrigation_runtime_state
+            WHERE device_id = ?
+            """,
+            (device["id"],),
+        ).fetchone()
+
+    state = {
+        "active_program_name": row["active_program_name"] if row is not None else None,
+        "active_zone_id": row["active_zone_id"] if row is not None else None,
+        "active_zone_name": row["active_zone_name"] if row is not None else None,
+        "remaining_seconds": row["remaining_seconds"] if row is not None else None,
+        "next_run_at": row["next_run_at"] if row is not None else None,
+        "rain_delay_active": bool(row["rain_delay_active"]) if row is not None and row["rain_delay_active"] is not None else None,
+        "blocked_reason": row["blocked_reason"] if row is not None else None,
+        "source_timestamp": row["source_timestamp"] if row is not None else None,
+        "updated_at": row["updated_at"] if row is not None else None,
+    }
+    _emit_irrigation_status_event(
+        {
+            "event_type": "irrigation.status.updated",
+            "action": "runtime.upserted",
+            "state_type": "runtime",
             "device_id": device_external_id,
             "site_id": site_pk_id,
             "state": state,

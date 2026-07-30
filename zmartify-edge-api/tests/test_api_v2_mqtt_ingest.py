@@ -151,6 +151,47 @@ def test_v2_mqtt_setpoint_outcome_ingest_logs_outcome(monkeypatch, tmp_path: Pat
     assert len(events.json()) >= 1
 
 
+def test_v2_mqtt_reported_state_ingest_updates_irrigation_runtime(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    suffix = "v2mi-runtime"
+    device_id = _seed_device(client, headers, suffix=suffix)
+
+    reported = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/reported-state",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-30T10:00:00Z",
+            "irrigation": {
+                "scheduler": {
+                    "config_revision": 12,
+                    "program_count": 1,
+                    "schedule_count": 1,
+                    "active_program_name": "Morning Cycle",
+                    "active_zone_id": 3,
+                    "active_zone_name": "Front Beds",
+                    "remaining_seconds": 245,
+                    "next_run_at": None,
+                    "rain_delay_active": False,
+                    "blocked_reason": None,
+                }
+            },
+        },
+    )
+
+    assert reported.status_code == 200
+    assert reported.json()["irrigation"]["runtime_updated"] is True
+
+    overview = client.get(f"/api/v2/sites/site-{suffix}/irrigation/overview", headers=headers)
+    assert overview.status_code == 200
+    runtime = overview.json()["devices"][0]["runtime"]
+    assert runtime["active_program_name"] == "Morning Cycle"
+    assert runtime["active_zone_id"] == 3
+    assert runtime["active_zone_name"] == "Front Beds"
+    assert runtime["remaining_seconds"] == 245
+
+
 def test_v2_mqtt_irrigation_outcome_ingest_maps_alarm_to_controller_fault(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}

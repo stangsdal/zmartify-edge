@@ -6,6 +6,7 @@ import {
   mobileApi,
   MobileEvent,
   MobileSiteSummary,
+  IrrigationDeviceOverview,
   IrrigationProgramSummary,
   IrrigationProgramZoneSummary,
   IrrigationRunSummary,
@@ -21,9 +22,25 @@ type DeviceProgram = {
   availableZones: IrrigationZone[];
   programZones: IrrigationProgramZoneSummary[];
   schedules: IrrigationScheduleSummary[];
+  runtime?: IrrigationDeviceOverview['runtime'];
 };
 
 type ProgramZoneDraft = Record<string, { enabled: boolean; durationSeconds: number }>;
+
+const programZoneDraftEquals = (left: ProgramZoneDraft | undefined, right: ProgramZoneDraft | undefined): boolean => {
+  const leftEntries = Object.entries(left || {});
+  const rightEntries = Object.entries(right || {});
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+  return leftEntries.every(([zoneId, zoneDraft]) => {
+    const other = right?.[zoneId];
+    if (!other) {
+      return false;
+    }
+    return other.enabled === zoneDraft.enabled && other.durationSeconds === zoneDraft.durationSeconds;
+  });
+};
 
 type ScheduleDraft = {
   name: string;
@@ -94,7 +111,26 @@ const scheduleSummaryLabel = (schedule: IrrigationScheduleSummary): string => {
   return `${schedule.start_local_time} • ${schedule.weekdays.map(weekdayLabel).join(' ')}`;
 };
 
-const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string; integration_mode?: string }): boolean => {
+const formatRemaining = (seconds: number): string => {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
+  }
+  return `${minutes}:${String(remainder).padStart(2, '0')}`;
+};
+
+const parseTimestampMs = (value?: string | null): number | null => {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string | null; integration_mode?: string | null }): boolean => {
   const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
     .filter(Boolean)
     .join(' ')
@@ -112,9 +148,12 @@ export function IrrigationProgramsPage() {
   const [busyKey, setBusyKey] = useState('');
   const [newProgramName, setNewProgramName] = useState('');
   const [programZoneDrafts, setProgramZoneDrafts] = useState<Record<string, ProgramZoneDraft>>({});
+  const [programZoneServerDrafts, setProgramZoneServerDrafts] = useState<Record<string, ProgramZoneDraft>>({});
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, ScheduleDraft>>({});
   const [scheduleEditDrafts, setScheduleEditDrafts] = useState<Record<string, ScheduleDraft>>({});
+  const [scheduleComposerOpen, setScheduleComposerOpen] = useState<Record<string, boolean>>({});
   const [activeRuns, setActiveRuns] = useState<Record<string, IrrigationRunSummary>>({});
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const reconcileActiveRun = useCallback((deviceId: string, run?: IrrigationRunSummary | null) => {
     setActiveRuns((prev) => {
@@ -130,16 +169,20 @@ export function IrrigationProgramsPage() {
 
   const reloadPrograms = useCallback(async (siteId: string) => {
     const overview = await mobileApi.getIrrigationOverview(siteId).catch(() => null);
-    const overviewDevices = (overview?.devices || []).map((device) => ({
-      device_id: device.device_id,
-      display_name: device.display_name,
-    })).filter(isIrrigationController);
+    const overviewDevices = (overview?.devices || [])
+      .filter(isIrrigationController)
+      .map((device) => ({
+        device_id: device.device_id,
+        display_name: device.display_name,
+        runtime: device.runtime || null,
+      }));
     let irrigationDevices = overviewDevices;
     if (!irrigationDevices.length) {
       const site = await mobileApi.getSite(siteId);
       irrigationDevices = site.devices.filter(isIrrigationController).map((device) => ({
         device_id: device.device_id,
         display_name: device.display_name,
+        runtime: null,
       }));
     }
     setDeviceIds(irrigationDevices.map((device) => device.device_id));
@@ -164,6 +207,7 @@ export function IrrigationProgramsPage() {
               availableZones,
               programZones: programZonesResponse.zones || [],
               schedules: schedulesResponse.schedules || [],
+              runtime: device.runtime || null,
             } satisfies DeviceProgram;
           })
         );
@@ -222,7 +266,13 @@ export function IrrigationProgramsPage() {
       const result = await mobileApi.skipIrrigationProgramRunStep(row.deviceId, run.run_id);
       const nextStep = result.run.steps.find((step) => step.status === 'running');
       reconcileActiveRun(row.deviceId, result.run);
-      setActionFeedback(nextStep ? `Skipped to ${nextStep.zone_name || nextStep.local_ref}.` : `${row.program.name} completed.`);
+      setActionFeedback(
+        result.run.trigger_type === 'manual_controller'
+          ? 'Skip requested on controller.'
+          : nextStep
+            ? `Skipped to ${nextStep.zone_name || nextStep.local_ref}.`
+            : `${row.program.name} completed.`
+      );
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
     } catch (error) {
@@ -251,6 +301,26 @@ export function IrrigationProgramsPage() {
     }
   };
 
+  const deleteProgram = async (row: DeviceProgram) => {
+    const confirmed = window.confirm(`Delete program "${row.program.name}"? This also removes its zones and schedules.`);
+    if (!confirmed) {
+      return;
+    }
+
+    const key = `program-delete:${row.deviceId}:${row.program.program_id}`;
+    setBusyKey(key);
+    setActionFeedback('');
+    try {
+      await mobileApi.deleteIrrigationProgram(row.deviceId, row.program.program_id);
+      await reloadPrograms(selectedSite);
+      setActionFeedback(`Deleted program ${row.program.name}.`);
+    } catch (error) {
+      setActionFeedback(String(error));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   const updateProgramZoneDraft = (row: DeviceProgram, zone: IrrigationZone, patch: Partial<{ enabled: boolean; durationSeconds: number }>) => {
     const key = programKey(row);
     setProgramZoneDrafts((prev) => {
@@ -271,6 +341,19 @@ export function IrrigationProgramsPage() {
   const saveProgramZones = async (row: DeviceProgram) => {
     const key = programKey(row);
     const draft = programZoneDrafts[key] || {};
+    const committedDraft = row.availableZones.reduce<ProgramZoneDraft>((nextDraft, zone) => {
+      const zoneDraft = draft[zone.zone_id];
+      nextDraft[zone.zone_id] = zoneDraft
+        ? {
+            enabled: Boolean(zoneDraft.enabled),
+            durationSeconds: Math.max(1, Number(zoneDraft.durationSeconds || 600)),
+          }
+        : {
+            enabled: false,
+            durationSeconds: 600,
+          };
+      return nextDraft;
+    }, {});
     setBusyKey(`zones:${key}`);
     setActionFeedback('');
     try {
@@ -285,6 +368,14 @@ export function IrrigationProgramsPage() {
             enabled: true,
           })),
       });
+      setProgramZoneDrafts((prev) => ({
+        ...prev,
+        [key]: committedDraft,
+      }));
+      setProgramZoneServerDrafts((prev) => ({
+        ...prev,
+        [key]: committedDraft,
+      }));
       await reloadPrograms(selectedSite);
       setActionFeedback(`Saved zone runtimes for ${row.program.name}.`);
     } catch (error) {
@@ -322,6 +413,14 @@ export function IrrigationProgramsPage() {
     setActionFeedback('');
     try {
       await mobileApi.createIrrigationProgramSchedule(row.deviceId, row.program.program_id, schedulePayloadFromDraft(draft, true));
+      setScheduleDrafts((prev) => ({
+        ...prev,
+        [key]: defaultScheduleDraft(),
+      }));
+      setScheduleComposerOpen((prev) => ({
+        ...prev,
+        [key]: false,
+      }));
       await reloadPrograms(selectedSite);
       setActionFeedback(`Schedule added to ${row.program.name}.`);
     } catch (error) {
@@ -380,23 +479,34 @@ export function IrrigationProgramsPage() {
   };
 
   useEffect(() => {
+    const nextServerDrafts: Record<string, ProgramZoneDraft> = {};
+    for (const row of programRows) {
+      const key = programKey(row);
+      const selectedByZoneId = new Map(row.programZones.map((zone) => [zone.zone_id, zone]));
+      nextServerDrafts[key] = row.availableZones.reduce<ProgramZoneDraft>((draft, zone) => {
+        const selected = selectedByZoneId.get(zone.zone_id);
+        draft[zone.zone_id] = {
+          enabled: Boolean(selected),
+          durationSeconds: selected?.duration_seconds || 600,
+        };
+        return draft;
+      }, {});
+    }
+
     setProgramZoneDrafts((prev) => {
-      const next = { ...prev };
+      const next: Record<string, ProgramZoneDraft> = {};
       for (const row of programRows) {
         const key = programKey(row);
-        const selectedByZoneId = new Map(row.programZones.map((zone) => [zone.zone_id, zone]));
-        next[key] = row.availableZones.reduce<ProgramZoneDraft>((draft, zone) => {
-          const existing = next[key]?.[zone.zone_id];
-          const selected = selectedByZoneId.get(zone.zone_id);
-          draft[zone.zone_id] = existing || {
-            enabled: Boolean(selected),
-            durationSeconds: selected?.duration_seconds || 600,
-          };
-          return draft;
-        }, {});
+        const serverDraft = nextServerDrafts[key];
+        const existingDraft = prev[key];
+        const previousServerDraft = programZoneServerDrafts[key];
+        next[key] = !existingDraft || programZoneDraftEquals(existingDraft, previousServerDraft)
+          ? serverDraft
+          : existingDraft;
       }
       return next;
     });
+    setProgramZoneServerDrafts(nextServerDrafts);
     setScheduleDrafts((prev) => {
       const next = { ...prev };
       for (const row of programRows) {
@@ -414,7 +524,7 @@ export function IrrigationProgramsPage() {
       }
       return next;
     });
-  }, [programRows]);
+  }, [programRows, programZoneServerDrafts]);
 
   const createProgram = async () => {
     const name = newProgramName.trim();
@@ -485,6 +595,13 @@ export function IrrigationProgramsPage() {
     return () => window.clearInterval(intervalId);
   }, [reloadPrograms, selectedSite]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const latestRunEvent = useMemo(() => events.find((event) => event.event_type === 'irrigation.run.updated') || null, [events]);
 
   return (
@@ -532,6 +649,14 @@ export function IrrigationProgramsPage() {
             const runBusy = busyKey === `run:${row.deviceId}:${row.program.program_id}`;
             const stopBusy = activeRun ? busyKey === `stop:${row.deviceId}:${activeRun.run_id}` : false;
             const skipBusy = activeRun ? busyKey === `skip:${row.deviceId}:${activeRun.run_id}` : false;
+            const deleteProgramBusy = busyKey === `program-delete:${row.deviceId}:${row.program.program_id}`;
+            const runtimeTimestampMs = parseTimestampMs(row.runtime?.source_timestamp) || parseTimestampMs(row.runtime?.updated_at);
+            const runtimeAgeSeconds = runtimeTimestampMs == null ? 0 : Math.max(0, Math.floor((nowMs - runtimeTimestampMs) / 1000));
+            const runtimeRemainingSeconds = row.runtime?.remaining_seconds == null ? null : Math.max(0, row.runtime.remaining_seconds - runtimeAgeSeconds);
+            const currentStepStartMs = parseTimestampMs(currentStep?.started_at);
+            const liveCurrentStepRemainingSeconds = currentStep == null
+              ? null
+              : Math.max(0, currentStep.duration_seconds - Math.floor((nowMs - (currentStepStartMs || nowMs)) / 1000));
             const estimateLiters = Math.max(60, Math.round(row.program.seasonal_adjustment * Math.max(1, row.schedules.length) * 120));
             return (
             <section key={`${row.deviceId}:${row.program.program_id}`} className={`rounded-2xl app-surface p-4 shadow-soft border border-slate-100 ${hasOtherActiveProgram ? 'opacity-60' : ''}`}>
@@ -540,14 +665,25 @@ export function IrrigationProgramsPage() {
                   <h2 className="text-lg font-semibold">{row.program.name}</h2>
                   <p className="text-sm text-muted">{row.displayName} • {scheduleSummary}</p>
                 </div>
-                <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                  <span>{row.program.enabled ? 'Enabled' : 'Not Enabled'}</span>
-                  <IonToggle
-                    checked={row.program.enabled}
-                    disabled={busyKey === `toggle:${row.deviceId}:${row.program.program_id}`}
-                    onIonChange={() => { void toggleProgramEnabled(row); }}
-                  />
-                </label>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                    <span>{row.program.enabled ? 'Enabled' : 'Not Enabled'}</span>
+                    <IonToggle
+                      checked={row.program.enabled}
+                      disabled={busyKey === `toggle:${row.deviceId}:${row.program.program_id}`}
+                      onIonChange={() => { void toggleProgramEnabled(row); }}
+                    />
+                  </label>
+                  <IonButton
+                    size="small"
+                    color="danger"
+                    fill="outline"
+                    disabled={deleteProgramBusy || Boolean(activeRun)}
+                    onClick={() => { void deleteProgram(row); }}
+                  >
+                    {deleteProgramBusy ? 'Deleting...' : 'Delete program'}
+                  </IonButton>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mt-4">
@@ -580,6 +716,8 @@ export function IrrigationProgramsPage() {
                     ? 'Starting program...'
                     : activeProgram && currentStep
                       ? `Running ${currentStep.zone_name || currentStep.local_ref || 'zone'}`
+                      : controllerLocalProgramRun && row.runtime?.active_zone_name
+                        ? `Running ${row.runtime.active_zone_name}`
                       : controllerLocalProgramRun
                         ? 'Program running on controller'
                       : hasOtherActiveProgram
@@ -588,11 +726,13 @@ export function IrrigationProgramsPage() {
                 </p>
                 {activeProgram && currentStep ? (
                   <p className="text-xs text-muted mt-1">
-                    Current runtime {Math.round(currentStep.duration_seconds / 60)} min{nextStep ? ` • Next ${nextStep.zone_name || nextStep.local_ref}` : ' • Last zone'}
+                    Remaining {formatRemaining(liveCurrentStepRemainingSeconds ?? currentStep.duration_seconds)}{nextStep ? ` • Next ${nextStep.zone_name || nextStep.local_ref}` : ' • Last zone'}
                   </p>
                 ) : controllerLocalProgramRun ? (
                   <p className="text-xs text-muted mt-1">
-                    Zone sequencing is running locally on the controller.
+                    {runtimeRemainingSeconds != null
+                      ? `Remaining ${formatRemaining(runtimeRemainingSeconds)}${row.runtime?.active_zone_id ? ` • Zone ${row.runtime.active_zone_id}` : ''}`
+                      : 'Zone sequencing is running locally on the controller.'}
                   </p>
                 ) : null}
               </div>
@@ -645,85 +785,112 @@ export function IrrigationProgramsPage() {
               </div>
 
               <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
-                <p className="text-xs uppercase tracking-wide text-muted">Schedule</p>
-                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                  <input
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    placeholder="Schedule name"
-                    value={scheduleDraft.name}
-                    onChange={(event) => updateScheduleDraft(row, { name: event.target.value })}
-                  />
-                  <input
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    type="time"
-                    value={scheduleDraft.startLocalTime}
-                    onChange={(event) => updateScheduleDraft(row, { startLocalTime: event.target.value })}
-                  />
-                  <select
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
-                    value={scheduleDraft.recurrenceType}
-                    onChange={(event) => updateScheduleDraft(row, { recurrenceType: event.target.value })}
-                  >
-                    <option value="weekdays">Weekdays</option>
-                    <option value="odd_days">Odd days</option>
-                    <option value="even_days">Even days</option>
-                    <option value="cyclic">Cyclic</option>
-                    <option value="custom_dates">Custom dates</option>
-                  </select>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted">Schedule</p>
+                    <p className="text-sm font-semibold mt-1">Add schedules first, then manage saved schedules below</p>
+                  </div>
                   <IonButton
                     size="small"
                     disabled={busyKey === `schedule:${key}`}
-                    onClick={() => { void createSchedule(row); }}
+                    onClick={() => setScheduleComposerOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
                   >
-                    {busyKey === `schedule:${key}` ? 'Adding...' : 'Add schedule'}
+                    {scheduleComposerOpen[key] ? 'Close' : 'Add schedule'}
                   </IonButton>
                 </div>
-                {scheduleDraft.recurrenceType === 'weekdays' ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {weekdayOptions.map((weekday) => (
-                      <label key={weekday.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={scheduleDraft.weekdays.includes(weekday.value)}
-                          onChange={() => toggleDraftWeekday(row, weekday.value)}
-                        />
-                        {weekday.label}
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-                {scheduleDraft.recurrenceType === 'cyclic' ? (
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    <label className="text-xs text-muted">
-                      Every N days
+                {scheduleComposerOpen[key] ? (
+                  <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-muted">New schedule</p>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
                       <input
-                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        type="number"
-                        min="1"
-                        max="366"
-                        value={scheduleDraft.intervalDays}
-                        onChange={(event) => updateScheduleDraft(row, { intervalDays: Math.max(1, Number(event.target.value || 1)) })}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                        placeholder="Schedule name"
+                        value={scheduleDraft.name}
+                        onChange={(event) => updateScheduleDraft(row, { name: event.target.value })}
                       />
-                    </label>
-                    <label className="text-xs text-muted">
-                      Start date
                       <input
-                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        type="date"
-                        value={scheduleDraft.anchorDate}
-                        onChange={(event) => updateScheduleDraft(row, { anchorDate: event.target.value })}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                        type="time"
+                        value={scheduleDraft.startLocalTime}
+                        onChange={(event) => updateScheduleDraft(row, { startLocalTime: event.target.value })}
                       />
-                    </label>
+                      <select
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                        value={scheduleDraft.recurrenceType}
+                        onChange={(event) => updateScheduleDraft(row, { recurrenceType: event.target.value })}
+                      >
+                        <option value="weekdays">Weekdays</option>
+                        <option value="odd_days">Odd days</option>
+                        <option value="even_days">Even days</option>
+                        <option value="cyclic">Cyclic</option>
+                        <option value="custom_dates">Custom dates</option>
+                      </select>
+                      <div className="flex gap-2">
+                        <IonButton
+                          size="small"
+                          disabled={busyKey === `schedule:${key}`}
+                          onClick={() => { void createSchedule(row); }}
+                        >
+                          {busyKey === `schedule:${key}` ? 'Adding...' : 'Add'}
+                        </IonButton>
+                        <IonButton
+                          size="small"
+                          fill="outline"
+                          disabled={busyKey === `schedule:${key}`}
+                          onClick={() => setScheduleComposerOpen((prev) => ({ ...prev, [key]: false }))}
+                        >
+                          Cancel
+                        </IonButton>
+                      </div>
+                    </div>
+                    {scheduleDraft.recurrenceType === 'weekdays' ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {weekdayOptions.map((weekday) => (
+                          <label key={weekday.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={scheduleDraft.weekdays.includes(weekday.value)}
+                              onChange={() => toggleDraftWeekday(row, weekday.value)}
+                            />
+                            {weekday.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                    {scheduleDraft.recurrenceType === 'cyclic' ? (
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        <label className="text-xs text-muted">
+                          Every N days
+                          <input
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                            type="number"
+                            min="1"
+                            max="366"
+                            value={scheduleDraft.intervalDays}
+                            onChange={(event) => updateScheduleDraft(row, { intervalDays: Math.max(1, Number(event.target.value || 1)) })}
+                          />
+                        </label>
+                        <label className="text-xs text-muted">
+                          Start date
+                          <input
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                            type="date"
+                            value={scheduleDraft.anchorDate}
+                            onChange={(event) => updateScheduleDraft(row, { anchorDate: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                    {scheduleDraft.recurrenceType === 'custom_dates' ? (
+                      <textarea
+                        className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                        rows={2}
+                        placeholder="YYYY-MM-DD, YYYY-MM-DD"
+                        value={scheduleDraft.datesText}
+                        onChange={(event) => updateScheduleDraft(row, { datesText: event.target.value })}
+                      />
+                    ) : null}
                   </div>
-                ) : null}
-                {scheduleDraft.recurrenceType === 'custom_dates' ? (
-                  <textarea
-                    className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    rows={2}
-                    placeholder="YYYY-MM-DD, YYYY-MM-DD"
-                    value={scheduleDraft.datesText}
-                    onChange={(event) => updateScheduleDraft(row, { datesText: event.target.value })}
-                  />
                 ) : null}
                 {row.schedules.length ? (
                   <div className="mt-3 space-y-2">
@@ -731,7 +898,7 @@ export function IrrigationProgramsPage() {
                       <div key={schedule.schedule_id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <p className="text-xs uppercase tracking-wide text-muted">Existing schedule</p>
+                            <p className="text-xs uppercase tracking-wide text-muted">Saved schedule</p>
                             <p className="text-sm font-semibold mt-1">{scheduleSummaryLabel(schedule)}</p>
                           </div>
                           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
@@ -837,7 +1004,9 @@ export function IrrigationProgramsPage() {
                       </div>
                     ))}
                   </div>
-                ) : null}
+                ) : (
+                  <p className="mt-3 text-sm text-muted">No saved schedules yet.</p>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-2 mt-3">
@@ -858,16 +1027,14 @@ export function IrrigationProgramsPage() {
                     >
                       {stopBusy ? 'Stopping...' : 'Stop'}
                     </IonButton>
-                    {!controllerLocalProgramRun ? (
-                      <IonButton
-                        size="small"
-                        fill="outline"
-                        disabled={stopBusy || skipBusy}
-                        onClick={() => { void skipProgramRunStep(row, activeRun); }}
-                      >
-                        {skipBusy ? 'Skipping...' : 'Skip next'}
-                      </IonButton>
-                    ) : null}
+                    <IonButton
+                      size="small"
+                      fill="outline"
+                      disabled={stopBusy || skipBusy}
+                      onClick={() => { void skipProgramRunStep(row, activeRun); }}
+                    >
+                      {skipBusy ? 'Skipping...' : 'Skip next'}
+                    </IonButton>
                   </>
                 ) : null}
               </div>

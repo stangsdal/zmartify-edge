@@ -477,3 +477,143 @@ def test_irrigation_command_rejects_stale_device_state(monkeypatch, tmp_path: Pa
     assert response.status_code == 409
     assert "stale" in response.json()["detail"]
     assert published_commands == []
+
+
+def test_controller_local_skip_publishes_program_skip_command(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    headers = _auth_headers()
+
+    from app import router_v2_irrigation
+    from app.irrigation_domain import create_irrigation_program, create_program_run
+
+    published_commands: list[dict] = []
+
+    def _fake_publish_irrigation_command(device_id_arg: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+        command = {
+            "command_id": "cmd-skip-test",
+            "device_id": device_id_arg,
+            "command_type": command_type,
+            "target_ref": target_ref,
+            "parameters": parameters or {},
+            "status": "published",
+        }
+        published_commands.append(command)
+        return command
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+
+    program = create_irrigation_program(device_id, name="Skip Me", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    run = create_program_run(device_id, str(program["program_id"]), trigger_type="manual_controller")
+
+    response = client.post(f"/api/v2/devices/{device_id}/irrigation/runs/{run['run_id']}/skip", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["run"]["run_id"] == run["run_id"]
+    assert response.json()["stop_command"]["command_type"] == "irrigation.program.skip"
+    assert published_commands and published_commands[-1]["command_type"] == "irrigation.program.skip"
+
+
+def test_program_sync_normalizes_weekend_schedule_for_controller(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+
+    from app.irrigation_domain import (
+        create_irrigation_program,
+        create_program_schedule,
+        replace_program_zones,
+        upsert_irrigation_zone,
+    )
+    from app.router_v2_irrigation import _build_irrigation_program_sync_payload
+
+    zone = upsert_irrigation_zone(device_id, local_ref="zone-a", name="Front Lawn", enabled=True, metadata={})
+    program = create_irrigation_program(device_id, name="Weekend Cycle", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    replace_program_zones(
+        device_id,
+        str(program["program_id"]),
+        [
+            {
+                "zone_id": zone["zone_id"],
+                "duration_seconds": 600,
+                "sort_order": 0,
+                "enabled": True,
+            }
+        ],
+    )
+    create_program_schedule(
+        device_id,
+        str(program["program_id"]),
+        name="Weekend Morning",
+        start_local_time="06:30",
+        weekdays=[0, 6],
+        recurrence_type="weekdays",
+        interval_days=None,
+        anchor_date=None,
+        dates=[],
+        enabled=True,
+    )
+
+    payload = _build_irrigation_program_sync_payload(device_id)
+    schedule_payload = payload["programs"][0]["schedules"][0]
+    assert schedule_payload["recurrence_type"] == "weekends"
+    assert schedule_payload["weekdays"] == [6, 7]
+
+def test_program_sync_splits_mixed_schedule_day_sets_for_controller(monkeypatch, tmp_path: Path):
+    from app.irrigation_domain import (
+        create_irrigation_program,
+        create_program_schedule,
+        replace_program_zones,
+        upsert_irrigation_zone,
+    )
+    from app.router_v2_irrigation import (
+        _build_irrigation_program_sync_payload,
+        _controller_program_number,
+    )
+
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    zone = upsert_irrigation_zone(device_id, local_ref="zone-a", name="Front Lawn", enabled=True, metadata={})
+    program = create_irrigation_program(device_id, name="Sommer 2026", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    replace_program_zones(
+        device_id,
+        str(program["program_id"]),
+        [
+            {
+                "zone_id": zone["zone_id"],
+                "duration_seconds": 600,
+                "sort_order": 0,
+                "enabled": True,
+            }
+        ],
+    )
+    create_program_schedule(
+        device_id,
+        str(program["program_id"]),
+        name="Weekend Morning",
+        start_local_time="06:30",
+        weekdays=[0, 6],
+        recurrence_type="weekdays",
+        interval_days=None,
+        anchor_date=None,
+        dates=[],
+        enabled=True,
+    )
+    create_program_schedule(
+        device_id,
+        str(program["program_id"]),
+        name="Weekday Morning",
+        start_local_time="09:30",
+        weekdays=[1, 2, 3, 4, 5],
+        recurrence_type="weekdays",
+        interval_days=None,
+        anchor_date=None,
+        dates=[],
+        enabled=True,
+    )
+
+    payload = _build_irrigation_program_sync_payload(device_id)
+
+    assert len(payload["programs"]) == 2
+    assert payload["programs"][0]["schedules"][0]["weekdays"] == [6, 7]
+    assert payload["programs"][1]["schedules"][0]["weekdays"] == [1, 2, 3, 4, 5]
+    assert _controller_program_number(device_id, str(program["program_id"])) == 1

@@ -199,7 +199,7 @@ def create_device_ota_v2_router(require_roles: Callable[[Request, set[str]], Non
             "version": staged.get("version"),
             "sha256": staged.get("sha256"),
             "size_bytes": staged.get("size_bytes"),
-            "download_url": f"{base}/devices/{device_id}/ota/download?sha256={staged.get('sha256')}",
+            "download_url": f"{base}/api/v2/devices/{device_id}/ota/download?sha256={staged.get('sha256')}",
         }
 
     @router.get("/devices/{device_id}/ota/download")
