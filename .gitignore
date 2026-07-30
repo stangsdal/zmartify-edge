@@ -7,3 +7,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local editor and virtualenv artifacts
+.vscode/
+zmartify-edge-api/.venv/
