@@ -179,9 +179,16 @@ def _ensure_irrigation_device_commandable(device_id: str) -> None:
     device = freshness.get("device") or {}
     online = device.get("online")
     mqtt_connected = device.get("mqtt_connected")
-    freshness_age_ms = _age_ms(device.get("source_timestamp"))
-    if freshness_age_ms is None:
-        freshness_age_ms = device.get("freshness_age_ms")
+    timestamp_ages = [
+        age
+        for age in (
+            _age_ms(device.get("source_timestamp")),
+            _age_ms(device.get("updated_at")),
+            device.get("freshness_age_ms"),
+        )
+        if age is not None
+    ]
+    freshness_age_ms = min(int(age) for age in timestamp_ages) if timestamp_ages else None
 
     if online is not True or mqtt_connected is not True:
         raise HTTPException(

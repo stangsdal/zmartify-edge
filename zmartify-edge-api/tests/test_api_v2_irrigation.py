@@ -52,6 +52,12 @@ def _site_ref() -> str:
     return "site-irrig"
 
 
+def _mark_device_commandable(device_id: str) -> None:
+    from app.domain_model import upsert_device_state
+
+    upsert_device_state(device_id, online=True, mqtt_connected=True, source="test")
+
+
 def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     device_id = _seed_device(client)
@@ -60,9 +66,15 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
 
     from app import router_v2_irrigation
 
-    def _fake_publish_irrigation_command(device_id_arg: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
         command = {
-            "command_id": "cmd-test",
+            "command_id": command_id or "cmd-test",
             "device_id": device_id_arg,
             "command_type": command_type,
             "target_ref": target_ref,
@@ -108,6 +120,8 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     overview_after_zone = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/overview", headers=headers)
     assert overview_after_zone.status_code == 200
     assert overview_after_zone.json()["zone_count"] >= 1
+
+    _mark_device_commandable(device_id)
 
     outputs_empty = client.get(f"/api/v2/devices/{device_id}/irrigation/outputs", headers=headers)
     assert outputs_empty.status_code == 200
@@ -438,9 +452,15 @@ def test_irrigation_command_rejects_stale_device_state(monkeypatch, tmp_path: Pa
 
     published_commands: list[dict] = []
 
-    def _fake_publish_irrigation_command(device_id_arg: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
         command = {
-            "command_id": "cmd-test",
+            "command_id": command_id or "cmd-test",
             "device_id": device_id_arg,
             "command_type": command_type,
             "target_ref": target_ref,
@@ -458,7 +478,7 @@ def test_irrigation_command_rejects_stale_device_state(monkeypatch, tmp_path: Pa
         conn.execute(
             """
             INSERT INTO device_state(device_id, online, mqtt_connected, last_seen_at, source_timestamp, updated_at)
-            VALUES (?, 1, 1, '2026-07-12T12:00:00Z', '2026-07-12T12:00:00Z', CURRENT_TIMESTAMP)
+            VALUES (?, 1, 1, '2026-07-12T12:00:00Z', '2026-07-12T12:00:00Z', '2026-07-12T12:00:00Z')
             """,
             (device_row["id"],),
         )
@@ -489,9 +509,15 @@ def test_controller_local_skip_publishes_program_skip_command(monkeypatch, tmp_p
 
     published_commands: list[dict] = []
 
-    def _fake_publish_irrigation_command(device_id_arg: str, command_type: str, target_ref: str | None, parameters: dict | None = None) -> dict:
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
         command = {
-            "command_id": "cmd-skip-test",
+            "command_id": command_id or "cmd-skip-test",
             "device_id": device_id_arg,
             "command_type": command_type,
             "target_ref": target_ref,

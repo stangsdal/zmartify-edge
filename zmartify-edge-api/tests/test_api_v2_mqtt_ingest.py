@@ -55,6 +55,12 @@ def _seed_device(client: TestClient, headers: dict[str, str], suffix: str = "v2m
     return device_id
 
 
+def _mark_device_commandable(device_id: str) -> None:
+    from app.domain_model import upsert_device_state
+
+    upsert_device_state(device_id, online=True, mqtt_connected=True, source="test")
+
+
 def test_v2_mqtt_reported_state_ingest_updates_hvac_and_irrigation(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
@@ -224,6 +230,27 @@ def test_v2_mqtt_irrigation_outcome_classifies_and_completes_run(monkeypatch, tm
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
     device_id = _seed_device(client, headers, suffix="v2mi04")
+    _mark_device_commandable(device_id)
+
+    from app import router_v2_irrigation
+
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
+        return {
+            "command_id": command_id or "cmd-test",
+            "device_id": device_id_arg,
+            "command_type": command_type,
+            "target_ref": target_ref,
+            "parameters": parameters or {},
+            "status": "published",
+        }
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
 
     program = client.post(
         f"/api/v2/devices/{device_id}/irrigation/programs",
