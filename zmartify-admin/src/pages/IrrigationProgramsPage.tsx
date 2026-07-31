@@ -762,7 +762,7 @@ export function IrrigationProgramsPage() {
                 ) : displayControllerLocalProgramRun ? (
                   <p className="text-xs text-muted mt-1">
                     {runtimeRemainingSeconds != null
-                      ? `Remaining ${formatRemaining(runtimeRemainingSeconds)}${row.runtime?.active_zone_id ? ` • Zone ${row.runtime.active_zone_id}` : ''}`
+                      ? `Remaining ${formatRemaining(runtimeRemainingSeconds)}${row.runtime?.active_zone_name ? ` • ${row.runtime.active_zone_name}` : row.runtime?.active_zone_id ? ` • Zone ${row.runtime.active_zone_id}` : ''}`
                       : 'Zone sequencing is running locally on the controller.'}
                   </p>
                 ) : null}

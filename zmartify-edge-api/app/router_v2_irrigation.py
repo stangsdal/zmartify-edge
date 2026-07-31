@@ -12,6 +12,7 @@ from app.irrigation_domain import (
     complete_irrigation_run,
     create_program_run,
     create_program_schedule,
+    delete_irrigation_zone,
     create_irrigation_program,
     delete_irrigation_program,
     delete_program_schedule,
@@ -20,7 +21,9 @@ from app.irrigation_domain import (
     get_irrigation_hydraulics,
     get_irrigation_power,
     get_irrigation_weather,
+    get_controller_zone_capacity,
     get_site_irrigation_overview,
+    has_active_irrigation_run,
     list_irrigation_runs,
     list_irrigation_outputs,
     list_program_zones,
@@ -219,6 +222,21 @@ def _controller_program_zone_ref(local_ref: str) -> str:
     return str(local_ref)
 
 
+def _controller_zone_number(local_ref: str) -> int | None:
+    normalized = _controller_program_zone_ref(local_ref)
+    suffix = normalized.removeprefix("zone:")
+    return int(suffix) if suffix.isdigit() and int(suffix) > 0 else None
+
+
+def _ensure_zone_within_controller_capacity(device_id: str, local_ref: str) -> None:
+    zone_number = _controller_zone_number(local_ref)
+    if zone_number is None:
+        return
+    max_zones = get_controller_zone_capacity(device_id)
+    if max_zones is not None and zone_number > max_zones:
+        raise ValueError(f"controller supports zones 1 through {max_zones}")
+
+
 def _normalize_controller_schedule_payload(schedule: dict) -> dict:
     local_weekdays = sorted({int(day) for day in schedule.get("weekdays") or [] if int(day) in {0, 1, 2, 3, 4, 5, 6}})
     weekday_set = set(local_weekdays)
@@ -320,6 +338,11 @@ def _sync_irrigation_programs_to_controller(device_id: str) -> dict:
     return publish_irrigation_command(device_id, command_type=command_type, target_ref=None, parameters=parameters)
 
 
+def _ensure_irrigation_schedule_editable(device_id: str) -> None:
+    if has_active_irrigation_run(device_id):
+        raise ValueError("cannot change irrigation schedules while the controller is running; stop the run and try again")
+
+
 def _controller_weekday_today() -> int:
     weekday = datetime.now(UTC).astimezone().weekday()
     return 7 if weekday == 6 else weekday + 1
@@ -398,6 +421,7 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
     def v2_upsert_irrigation_zone(device_id: str, payload: IrrigationZoneUpsertIn, request: Request) -> dict:
         require_roles(request, {"owner", "admin", "installer"})
         try:
+            _ensure_zone_within_controller_capacity(device_id, payload.local_ref)
             zone = upsert_irrigation_zone(
                 device_id,
                 local_ref=payload.local_ref,
@@ -406,6 +430,17 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
                 metadata=payload.metadata,
             )
             return {"device_id": device_id, "zone": zone}
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    @router.delete("/api/v2/devices/{device_id}/irrigation/zones/{zone_id}")
+    def v2_delete_irrigation_zone(device_id: str, zone_id: str, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer"})
+        try:
+            delete_irrigation_zone(device_id, zone_id)
+            return {"deleted": True}
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -544,6 +579,7 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
     ) -> dict:
         require_roles(request, {"owner", "admin", "installer"})
         try:
+            _ensure_irrigation_schedule_editable(device_id)
             schedule = create_program_schedule(
                 device_id,
                 program_id,
@@ -562,6 +598,8 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except MqttCommandError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     @router.put("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{schedule_id}")
     def v2_update_irrigation_program_schedule(
@@ -573,6 +611,7 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
     ) -> dict:
         require_roles(request, {"owner", "admin", "installer"})
         try:
+            _ensure_irrigation_schedule_editable(device_id)
             schedule = update_program_schedule(
                 device_id,
                 program_id,
@@ -592,11 +631,14 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except MqttCommandError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     @router.delete("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{schedule_id}")
     def v2_delete_irrigation_program_schedule(device_id: str, program_id: str, schedule_id: str, request: Request) -> dict:
         require_roles(request, {"owner", "admin", "installer"})
         try:
+            _ensure_irrigation_schedule_editable(device_id)
             delete_program_schedule(device_id, program_id, schedule_id)
             _sync_irrigation_programs_to_controller(device_id)
             return {"deleted": True}
@@ -604,6 +646,8 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except MqttCommandError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     @router.get("/api/v2/devices/{device_id}/irrigation/runs")
     def v2_list_irrigation_runs(device_id: str, request: Request, limit: int = 50) -> dict:

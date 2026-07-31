@@ -171,6 +171,60 @@ def upsert_irrigation_zone(
     raise RegistryNotFoundError("irrigation zone not found")
 
 
+def delete_irrigation_zone(device_external_id: str, zone_id: str) -> None:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        zone = conn.execute(
+            "SELECT id, local_ref FROM irrigation_zones WHERE device_id = ? AND uuid = ?",
+            (device["id"], zone_id),
+        ).fetchone()
+        if zone is None:
+            raise RegistryNotFoundError("irrigation zone not found")
+        zone_number = _controller_zone_number(zone["local_ref"])
+        conn.execute("DELETE FROM irrigation_program_zones WHERE zone_id = ?", (zone["id"],))
+        if zone_number is not None:
+            conn.execute(
+                "DELETE FROM irrigation_outputs WHERE device_id = ? AND local_ref = ?",
+                (device["id"], f"output-{zone_number}"),
+            )
+        conn.execute("DELETE FROM irrigation_zones WHERE id = ?", (zone["id"],))
+        conn.commit()
+
+
+def ensure_controller_zones(device_external_id: str, max_zones: int) -> list[dict[str, Any]]:
+    safe_max_zones = max(0, min(int(max_zones), 64))
+    for zone_number in range(1, safe_max_zones + 1):
+        local_ref = f"zone-{zone_number}"
+        if not any(zone["local_ref"] == local_ref for zone in list_irrigation_zones(device_external_id)):
+            upsert_irrigation_zone(
+                device_external_id,
+                local_ref=local_ref,
+                name=f"Zone {zone_number}",
+                enabled=False,
+                metadata={"controller_zone": zone_number},
+            )
+    return list_irrigation_zones(device_external_id)
+
+
+def _controller_zone_number(local_ref: str) -> int | None:
+    normalized = str(local_ref or "").strip().lower()
+    for prefix in ("zone:", "zone-", "zone_", "zone"):
+        if normalized.startswith(prefix):
+            suffix = normalized[len(prefix):]
+            return int(suffix) if suffix.isdigit() and int(suffix) > 0 else None
+    return None
+
+
+def get_controller_zone_capacity(device_external_id: str) -> int | None:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            "SELECT max_zones FROM irrigation_runtime_state WHERE device_id = ?",
+            (device["id"],),
+        ).fetchone()
+    return int(row["max_zones"]) if row is not None and row["max_zones"] is not None else None
+
+
 def list_irrigation_programs(device_external_id: str) -> list[dict[str, Any]]:
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
@@ -750,6 +804,21 @@ def list_irrigation_runs(device_external_id: str, *, limit: int = 50) -> list[di
     return runs
 
 
+def has_active_irrigation_run(device_external_id: str) -> bool:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM irrigation_runs
+            WHERE device_id = ? AND status = 'running'
+            LIMIT 1
+            """,
+            (device["id"],),
+        ).fetchone()
+    return row is not None
+
+
 def ensure_irrigation_run_started(
     device_external_id: str,
     run_id: str,
@@ -954,7 +1023,7 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
             runtime = conn.execute(
                 """
                 SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
-                       next_run_at, rain_delay_active, blocked_reason, source_timestamp, updated_at
+                      next_run_at, rain_delay_active, blocked_reason, max_zones, source_timestamp, updated_at
                 FROM irrigation_runtime_state
                 WHERE device_id = ?
                 """,
@@ -1014,6 +1083,7 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
                         "next_run_at": runtime["next_run_at"],
                         "rain_delay_active": bool(runtime["rain_delay_active"]) if runtime["rain_delay_active"] is not None else None,
                         "blocked_reason": runtime["blocked_reason"],
+                        "max_zones": runtime["max_zones"],
                         "source_timestamp": runtime["source_timestamp"],
                         "updated_at": runtime["updated_at"],
                     },
@@ -1284,6 +1354,7 @@ def upsert_irrigation_runtime_state(
     next_run_at: str | None = None,
     rain_delay_active: bool | None = None,
     blocked_reason: str | None = None,
+    max_zones: int | None = None,
     source_timestamp: str | None = None,
 ) -> dict[str, Any]:
     site_pk_id: int | None = None
@@ -1302,14 +1373,15 @@ def upsert_irrigation_runtime_state(
                 "next_run_at": next_run_at,
                 "rain_delay_active": None if rain_delay_active is None else int(bool(rain_delay_active)),
                 "blocked_reason": blocked_reason,
+                "max_zones": max_zones,
                 "source_timestamp": source_timestamp or _now_iso(),
             },
         )
         conn.commit()
         row = conn.execute(
             """
-            SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
-                   next_run_at, rain_delay_active, blocked_reason, source_timestamp, updated_at
+                 SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
+                     next_run_at, rain_delay_active, blocked_reason, max_zones, source_timestamp, updated_at
             FROM irrigation_runtime_state
             WHERE device_id = ?
             """,
@@ -1324,6 +1396,7 @@ def upsert_irrigation_runtime_state(
         "next_run_at": row["next_run_at"] if row is not None else None,
         "rain_delay_active": bool(row["rain_delay_active"]) if row is not None and row["rain_delay_active"] is not None else None,
         "blocked_reason": row["blocked_reason"] if row is not None else None,
+        "max_zones": row["max_zones"] if row is not None else None,
         "source_timestamp": row["source_timestamp"] if row is not None else None,
         "updated_at": row["updated_at"] if row is not None else None,
     }

@@ -636,6 +636,56 @@ def test_program_sync_normalizes_weekend_schedule_for_controller(monkeypatch, tm
     assert schedule_payload["recurrence_type"] == "weekends"
     assert schedule_payload["weekdays"] == [6, 7]
 
+
+def test_schedule_update_is_rejected_while_controller_run_is_active(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    headers = _auth_headers()
+
+    from app import router_v2_irrigation
+    from app.irrigation_domain import create_irrigation_program, create_program_run, create_program_schedule, list_program_schedules
+
+    published_commands: list[dict] = []
+
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
+        published_commands.append({"command_type": command_type, "parameters": parameters or {}})
+        return {"command_id": command_id or "cmd-test", "status": "published"}
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+    program = create_irrigation_program(device_id, name="Morning Cycle", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    schedule = create_program_schedule(
+        device_id,
+        str(program["program_id"]),
+        name="Morning",
+        start_local_time="06:00",
+        weekdays=[1, 2, 3, 4, 5],
+        enabled=True,
+    )
+    create_program_run(device_id, str(program["program_id"]), trigger_type="scheduled")
+
+    response = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program['program_id']}/schedules/{schedule['schedule_id']}",
+        headers=headers,
+        json={
+            "name": "Rescheduled",
+            "start_local_time": "07:15",
+            "weekdays": [1, 2, 3, 4, 5],
+            "recurrence_type": "weekdays",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "controller is running" in response.json()["detail"]
+    assert list_program_schedules(device_id, str(program["program_id"]))[0]["start_local_time"] == "06:00"
+    assert published_commands == []
+
 def test_program_sync_splits_mixed_schedule_day_sets_for_controller(monkeypatch, tmp_path: Path):
     from app.irrigation_domain import (
         create_irrigation_program,

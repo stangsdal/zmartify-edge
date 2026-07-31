@@ -244,6 +244,7 @@ export interface IrrigationDeviceOverview {
     next_run_at?: string | null;
     rain_delay_active?: boolean | null;
     blocked_reason?: string | null;
+    max_zones?: number | null;
     source_timestamp?: string | null;
     updated_at?: string | null;
   } | null;
@@ -438,6 +439,9 @@ export const mobileApi = {
     payload: IrrigationZoneUpsertPayload,
   ): Promise<{ device_id: string; zone: IrrigationZone }> =>
     apiClient.put(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/zones`, payload),
+
+  deleteIrrigationZone: (deviceId: string, zoneId: string): Promise<{ deleted: boolean }> =>
+    apiClient.delete(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/zones/${encodeURIComponent(zoneId)}`),
 
   listIrrigationOutputs: (deviceId: string): Promise<{ device_id: string; outputs: IrrigationOutput[] }> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/outputs`),

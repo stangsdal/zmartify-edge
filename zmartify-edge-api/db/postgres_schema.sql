@@ -444,6 +444,7 @@ CREATE TABLE IF NOT EXISTS irrigation_runtime_state (
     next_run_at TEXT,
     rain_delay_active INTEGER,
     blocked_reason TEXT,
+    max_zones INTEGER,
     source_timestamp TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE

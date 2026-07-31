@@ -84,9 +84,22 @@ export function IrrigationOverviewPage() {
     loadSiteZones().catch(console.error);
   }, [selectedSite]);
 
+  useEffect(() => {
+    if (!selectedSite) return undefined;
+    const intervalId = window.setInterval(() => {
+      mobileApi.getIrrigationOverview(selectedSite).then(setOverview).catch(console.error);
+    }, 8000);
+    return () => window.clearInterval(intervalId);
+  }, [selectedSite]);
+
   const activeDeviceIds = useMemo(() => new Set((overview?.devices || []).filter((device) => device.outputs.active > 0).map((device) => device.device_id)), [overview]);
   const activeZones = useMemo(() => zones.filter((row) => activeDeviceIds.has(row.deviceId)), [activeDeviceIds, zones]);
   const activeZone = activeZones[0] || null;
+  const activeRuntime = useMemo(
+    () => (overview?.devices || []).find((device) => device.runtime?.active_program_name || device.runtime?.active_zone_id != null) || null,
+    [overview],
+  );
+  const controllerRunning = activeZone != null || activeRuntime != null;
   const commandDeviceId = useMemo(() => activeZone?.deviceId || overview?.devices[0]?.device_id || zones[0]?.deviceId || '', [activeZone, overview, zones]);
 
   const runDeviceAction = async (action: 'stop' | 'rain-delay') => {
@@ -151,9 +164,13 @@ export function IrrigationOverviewPage() {
 
           <section className="rounded-3xl p-6 text-white app-home-hero">
             <p className="text-sm opacity-90">Status</p>
-            <h1 className="text-3xl font-bold mt-1">{activeZone ? 'Running' : 'Idle'}</h1>
+            <h1 className="text-3xl font-bold mt-1">{controllerRunning ? 'Running' : 'Idle'}</h1>
             <p className="mt-2 text-sm opacity-90">
-              {activeZone ? `${activeZone.zone.name || 'Zone'} is active on ${activeZone.displayName}.` : 'No active irrigation run.'}
+              {activeZone
+                ? `${activeZone.zone.name || 'Zone'} is active on ${activeZone.displayName}.`
+                : activeRuntime
+                  ? `${activeRuntime.runtime?.active_program_name || 'A program'} is active${activeRuntime.runtime?.active_zone_name ? ` on ${activeRuntime.runtime.active_zone_name}` : ''}.`
+                  : 'No active irrigation run.'}
             </p>
             <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
               <div>

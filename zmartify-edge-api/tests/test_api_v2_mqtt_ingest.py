@@ -198,6 +198,49 @@ def test_v2_mqtt_reported_state_ingest_updates_irrigation_runtime(monkeypatch, t
     assert runtime["remaining_seconds"] == 245
 
 
+def test_reported_controller_zone_capacity_bootstraps_disabled_zones(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    suffix = "v2mi-capacity"
+    device_id = _seed_device(client, headers, suffix=suffix)
+
+    reported = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/reported-state",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-31T10:00:00Z",
+            "irrigation": {
+                "capabilities": {"max_zones": 15},
+                "scheduler": {"active_zone_id": 0, "remaining_seconds": 0},
+            },
+        },
+    )
+
+    assert reported.status_code == 200
+    zones = client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=headers)
+    assert zones.status_code == 200
+    assert len(zones.json()["zones"]) == 15
+    assert all(zone["enabled"] is False for zone in zones.json()["zones"])
+    assert zones.json()["zones"][0]["local_ref"] == "zone-1"
+
+    out_of_range = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/zones",
+        headers=headers,
+        json={"local_ref": "zone:16", "name": "Zone 16", "enabled": False},
+    )
+    assert out_of_range.status_code == 409
+    assert "supports zones 1 through 15" in out_of_range.json()["detail"]
+
+    deleted_zone_id = zones.json()["zones"][-1]["zone_id"]
+    deleted = client.delete(
+        f"/api/v2/devices/{device_id}/irrigation/zones/{deleted_zone_id}",
+        headers=headers,
+    )
+    assert deleted.status_code == 200
+    assert len(client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=headers).json()["zones"]) == 14
+
+
 def test_v2_mqtt_irrigation_outcome_ingest_maps_alarm_to_controller_fault(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}

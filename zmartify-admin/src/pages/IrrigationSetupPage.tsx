@@ -45,6 +45,7 @@ export function IrrigationSetupPage() {
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [zones, setZones] = useState<IrrigationZone[]>([]);
   const [outputs, setOutputs] = useState<IrrigationOutput[]>([]);
+  const [zoneCapacityByDevice, setZoneCapacityByDevice] = useState<Record<string, number>>({});
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, { name: string; enabled: boolean }>>({});
   const [testRunZoneRefs, setTestRunZoneRefs] = useState<Record<string, boolean>>({});
   const [pendingTestZoneRefs, setPendingTestZoneRefs] = useState<Record<string, boolean>>({});
@@ -103,6 +104,11 @@ export function IrrigationSetupPage() {
         online: device.online,
         mqtt_connected: device.mqtt_connected,
       })).filter(isIrrigationController);
+      setZoneCapacityByDevice(Object.fromEntries(
+        (overview.devices || []).flatMap((device) => typeof device.runtime?.max_zones === 'number'
+          ? [[device.device_id, device.runtime.max_zones] as const]
+          : []),
+      ));
       setDevices(controllerDevices);
       setSelectedDeviceId((prev) => (controllerDevices.some((device) => device.device_id === prev) ? prev : controllerDevices[0]?.device_id || ''));
     };
@@ -170,8 +176,13 @@ export function IrrigationSetupPage() {
       return;
     }
     const usedNumbers = new Set(zones.map((zone) => zoneNumberFromRef(zone.local_ref || zone.zone_id)).filter((value): value is number => value != null));
+    const maxZones = zoneCapacityByDevice[selectedDeviceId];
     let nextNumber = 1;
     while (usedNumbers.has(nextNumber)) nextNumber += 1;
+    if (maxZones != null && nextNumber > maxZones) {
+      setFeedback(`This controller supports ${maxZones} zones.`);
+      return;
+    }
 
     const localRef = zoneRefForNumber(nextNumber);
     const name = defaultZoneName(localRef);
@@ -181,18 +192,35 @@ export function IrrigationSetupPage() {
       await mobileApi.upsertIrrigationZone(selectedDeviceId, {
         local_ref: localRef,
         name,
-        enabled: true,
+        enabled: false,
       });
       await mobileApi.upsertIrrigationOutput(selectedDeviceId, {
         local_ref: fallbackOutputRefForZone(localRef),
         name: valveLabelForZone(localRef),
-        enabled: true,
+        enabled: false,
         active: false,
         fault: null,
         is_master_valve: false,
       });
       await reloadDeviceSetup(selectedDeviceId);
       setFeedback(`Added ${name}.`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const deleteZone = async (zone: IrrigationZone) => {
+    if (!selectedDeviceId) return;
+    const name = zone.name || zone.local_ref || 'this zone';
+    if (!window.confirm(`Delete ${name}? It will also be removed from every program.`)) return;
+    setBusyAction(`delete:${zone.zone_id}`);
+    setFeedback('');
+    try {
+      await mobileApi.deleteIrrigationZone(selectedDeviceId, zone.zone_id);
+      await reloadDeviceSetup(selectedDeviceId);
+      setFeedback(`Deleted ${name}.`);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : String(error));
     } finally {
@@ -311,6 +339,7 @@ export function IrrigationSetupPage() {
   };
 
   const masterValveEnabled = zones.some((zone) => zoneDrafts[zone.zone_id]?.enabled ?? zone.enabled);
+  const maxZones = selectedDeviceId ? zoneCapacityByDevice[selectedDeviceId] : undefined;
 
   return (
     <IonPage>
@@ -350,9 +379,9 @@ export function IrrigationSetupPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold">Irrigation zones</h2>
-                <p className="text-sm text-muted mt-1">Fixed zone identifiers map directly to valve numbers.</p>
+                <p className="text-sm text-muted mt-1">Fixed zone identifiers map directly to valve numbers{maxZones != null ? ` (${maxZones} available)` : ''}.</p>
               </div>
-              <IonButton size="small" disabled={!selectedDeviceId || busyAction === 'add-zone'} onClick={() => { void addZone(); }}>
+              <IonButton size="small" disabled={!selectedDeviceId || busyAction === 'add-zone' || (maxZones != null && zones.length >= maxZones)} onClick={() => { void addZone(); }}>
                 {busyAction === 'add-zone' ? 'Adding...' : 'Add zone'}
               </IonButton>
             </div>
@@ -363,6 +392,7 @@ export function IrrigationSetupPage() {
                 const localRef = zone.local_ref || zone.zone_id;
                 const output = outputs.find((item) => item.local_ref === outputRefForZone(localRef));
                 const isSaving = busyAction === `zone:${zone.zone_id}`;
+                const isDeleting = busyAction === `delete:${zone.zone_id}`;
                 const isTesting = busyAction === `test:${zone.zone_id}`;
                 const isTestRunning = Boolean(testRunZoneRefs[localRef]);
                 const isPending = Boolean(pendingTestZoneRefs[localRef]);
@@ -391,19 +421,22 @@ export function IrrigationSetupPage() {
                       onChange={(event) => updateZoneDraft(zone.zone_id, { name: event.target.value })}
                     />
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <IonButton size="small" expand="block" disabled={!selectedDeviceId || isSaving || isTesting} onClick={() => { void saveZone(zone, draft); }}>
+                      <IonButton size="small" expand="block" disabled={!selectedDeviceId || isSaving || isTesting || isDeleting} onClick={() => { void saveZone(zone, draft); }}>
                         {isSaving ? 'Saving...' : 'Save'}
                       </IonButton>
                       <IonButton
                         size="small"
                         expand="block"
                         color={isTestRunning ? 'danger' : 'medium'}
-                        disabled={!selectedDeviceId || isSaving || isTesting || isAnotherTestRunning || (!draft.enabled && !isTestRunning)}
+                        disabled={!selectedDeviceId || isSaving || isTesting || isDeleting || isAnotherTestRunning || (!draft.enabled && !isTestRunning)}
                         onClick={() => { void toggleZoneTest(zone); }}
                       >
                         {isTesting ? 'Sending...' : isPending ? 'Waiting...' : isTestRunning ? 'Stop test' : isAnotherTestRunning ? 'Test running' : 'Test 1 min'}
                       </IonButton>
                     </div>
+                    <IonButton size="small" expand="block" fill="clear" color="danger" disabled={isSaving || isTesting || isDeleting} onClick={() => { void deleteZone(zone); }}>
+                      {isDeleting ? 'Deleting...' : 'Delete zone'}
+                    </IonButton>
                   </article>
                 );
               })}

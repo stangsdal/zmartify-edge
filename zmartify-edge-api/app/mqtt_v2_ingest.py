@@ -16,6 +16,7 @@ from app.domain_model import log_event
 from app.irrigation_domain import (
     complete_irrigation_run,
     ensure_irrigation_run_started,
+    ensure_controller_zones,
     set_irrigation_rain_delay,
     upsert_irrigation_hydraulics_state,
     upsert_irrigation_output_state,
@@ -105,6 +106,7 @@ def ingest_mqtt_v2_reported_state(
 
     weather = _as_dict(irrigation.get("weather"))
     scheduler = _as_dict(irrigation.get("scheduler"))
+    capabilities = _as_dict(irrigation.get("capabilities"))
 
     outputs_updated = 0
     for index, output in enumerate(_as_list(irrigation.get("outputs"))):
@@ -163,6 +165,9 @@ def ingest_mqtt_v2_reported_state(
 
     runtime_updated = False
     if scheduler:
+        max_zones = capabilities.get("max_zones")
+        if not isinstance(max_zones, int) or max_zones < 1:
+            max_zones = None
         upsert_irrigation_runtime_state(
             device_id,
             active_program_name=str(scheduler.get("active_program_name")) if scheduler.get("active_program_name") is not None else None,
@@ -172,8 +177,11 @@ def ingest_mqtt_v2_reported_state(
             next_run_at=str(scheduler.get("next_run_at")) if scheduler.get("next_run_at") is not None else None,
             rain_delay_active=bool(scheduler.get("rain_delay_active")) if scheduler.get("rain_delay_active") is not None else None,
             blocked_reason=str(scheduler.get("blocked_reason")) if scheduler.get("blocked_reason") is not None else None,
+            max_zones=max_zones,
             source_timestamp=str(reported.get("source_timestamp") or _safe_source_timestamp(reported)),
         )
+        if max_zones is not None:
+            ensure_controller_zones(device_id, max_zones)
         runtime_updated = True
 
     storage = _as_dict(reported.get("storage"))
