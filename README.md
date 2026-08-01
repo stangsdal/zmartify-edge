@@ -216,6 +216,21 @@ Base URL examples:
 - GET /events/recent
 - GET /events/device/{device_id}
 
+### Irrigation Scheduling
+
+Irrigation controllers remain the runtime authority. The edge stores programs
+and schedules, publishes a full configuration snapshot to the controller, and
+shows its reported runtime state.
+
+- A program zone's `sort_order` is its **run group**, starting at `1`.
+- Zones in the same group start together; the current controller limit is two
+	enabled zones per group.
+- The controller completes one group before starting the next group.
+- Site irrigation overview returns `next_run_at` and `next_program_name` from
+	the controller's retained reported state.
+- Controller outcomes include `zone.started` and `zone.stopped`, which appear
+	in the edge event history.
+
 ## Operations
 
 - Compose services:
@@ -237,6 +252,14 @@ docker compose restart zmartify-edge-api
 
 ```bash
 docker compose up -d --build zmartify-edge-api
+```
+
+- Apply database migrations after pulling a release that includes an Alembic
+	revision, then recreate both API services:
+
+```bash
+docker compose run --rm zmartify-edge-api alembic upgrade head
+docker compose up -d --force-recreate zmartify-edge-api zmartify-edge-api-http
 ```
 
 - Run an immediate PostgreSQL backup into the `edge-backups` volume:

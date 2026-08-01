@@ -193,3 +193,8 @@ Helper script:
 - Command: `RUN_LIVE_HVAC=1 LIVE_HVAC_BASE_URL=http://192.168.10.57 LIVE_EDGE_BASE_URL=https://pilot.zmartify.dk LIVE_EDGE_BEARER_TOKEN=<ephemeral> LIVE_EDGE_DEVICE_ID=hvac-gateway-1cdbd47a254c LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 pytest zmartify-edge-api/tests/test_live_hvac_contract.py`
 - Result: 5 passed (previously always 3 passed / 2 skipped) — twin-shape v2 adapter and command-feedback sequence smoke both green against production and firmware v0.2.1.
 - Notes: ephemeral `live-test` admin account used for the bearer token; token disabled and account deactivated immediately after the run (revocation verified with 403).
+
+- Date: 2026-08-01 (irrigation concurrent scheduling and MQTT recovery release)
+- Commands: deployed irrigation firmware `v5.2.7` / commit `500c94d`; recovered the controller's persisted TLS network configuration through the authenticated local network endpoint; deployed edge commit `cfd339e`, ran Alembic revision `20260801_0004`, and recreated both API services.
+- Result: controller health reported `mqtt_connected=true`, the broker logged a new TLS 1.2 authenticated session for `zmartify-irrigation-01`, and production runtime state persisted `next_program_name=Default Program` with the next scheduled run.
+- Notes: controller now supports at most two enabled zones in the same run group. Firmware host tests passed 17/17; irrigation API tests passed 8/8; the admin build passed.
