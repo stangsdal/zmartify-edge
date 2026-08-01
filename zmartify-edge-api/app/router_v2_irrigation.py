@@ -284,7 +284,7 @@ def _build_irrigation_controller_program_entries(device_id: str) -> list[tuple[s
             zones_payload.append(
                 {
                     "zone_ref": _controller_program_zone_ref(str(zone["local_ref"])),
-                    "sort_order": index,
+                    "sort_order": max(1, int(zone.get("sort_order") if zone.get("sort_order") is not None else index)),
                     "duration_seconds": duration_seconds,
                     "enabled": bool(zone.get("enabled", True) and zone.get("zone_enabled", True)),
                 }

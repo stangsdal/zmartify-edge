@@ -242,6 +242,7 @@ export interface IrrigationDeviceOverview {
     active_zone_name?: string | null;
     remaining_seconds?: number | null;
     next_run_at?: string | null;
+    next_program_name?: string | null;
     rain_delay_active?: boolean | null;
     blocked_reason?: string | null;
     max_zones?: number | null;

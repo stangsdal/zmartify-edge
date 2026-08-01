@@ -1023,7 +1023,7 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
             runtime = conn.execute(
                 """
                 SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
-                      next_run_at, rain_delay_active, blocked_reason, max_zones, source_timestamp, updated_at
+                        next_run_at, next_program_name, rain_delay_active, blocked_reason, max_zones, source_timestamp, updated_at
                 FROM irrigation_runtime_state
                 WHERE device_id = ?
                 """,
@@ -1081,6 +1081,7 @@ def get_site_irrigation_overview(site_ref: str) -> dict[str, Any]:
                         "active_zone_name": runtime["active_zone_name"],
                         "remaining_seconds": runtime["remaining_seconds"],
                         "next_run_at": runtime["next_run_at"],
+                        "next_program_name": runtime["next_program_name"],
                         "rain_delay_active": bool(runtime["rain_delay_active"]) if runtime["rain_delay_active"] is not None else None,
                         "blocked_reason": runtime["blocked_reason"],
                         "max_zones": runtime["max_zones"],
@@ -1352,6 +1353,7 @@ def upsert_irrigation_runtime_state(
     active_zone_name: str | None = None,
     remaining_seconds: int | None = None,
     next_run_at: str | None = None,
+    next_program_name: str | None = None,
     rain_delay_active: bool | None = None,
     blocked_reason: str | None = None,
     max_zones: int | None = None,
@@ -1371,6 +1373,7 @@ def upsert_irrigation_runtime_state(
                 "active_zone_name": active_zone_name,
                 "remaining_seconds": remaining_seconds,
                 "next_run_at": next_run_at,
+                "next_program_name": next_program_name,
                 "rain_delay_active": None if rain_delay_active is None else int(bool(rain_delay_active)),
                 "blocked_reason": blocked_reason,
                 "max_zones": max_zones,
@@ -1381,7 +1384,7 @@ def upsert_irrigation_runtime_state(
         row = conn.execute(
             """
                  SELECT active_program_name, active_zone_id, active_zone_name, remaining_seconds,
-                     next_run_at, rain_delay_active, blocked_reason, max_zones, source_timestamp, updated_at
+                     next_run_at, next_program_name, rain_delay_active, blocked_reason, max_zones, source_timestamp, updated_at
             FROM irrigation_runtime_state
             WHERE device_id = ?
             """,
@@ -1394,6 +1397,7 @@ def upsert_irrigation_runtime_state(
         "active_zone_name": row["active_zone_name"] if row is not None else None,
         "remaining_seconds": row["remaining_seconds"] if row is not None else None,
         "next_run_at": row["next_run_at"] if row is not None else None,
+        "next_program_name": row["next_program_name"] if row is not None else None,
         "rain_delay_active": bool(row["rain_delay_active"]) if row is not None and row["rain_delay_active"] is not None else None,
         "blocked_reason": row["blocked_reason"] if row is not None else None,
         "max_zones": row["max_zones"] if row is not None else None,

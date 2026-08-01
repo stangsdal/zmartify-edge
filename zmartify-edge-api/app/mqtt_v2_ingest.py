@@ -175,6 +175,7 @@ def ingest_mqtt_v2_reported_state(
             active_zone_name=str(scheduler.get("active_zone_name")) if scheduler.get("active_zone_name") is not None else None,
             remaining_seconds=int(scheduler.get("remaining_seconds")) if scheduler.get("remaining_seconds") is not None else None,
             next_run_at=str(scheduler.get("next_run_at")) if scheduler.get("next_run_at") is not None else None,
+            next_program_name=str(scheduler.get("next_program_name")) if scheduler.get("next_program_name") is not None else None,
             rain_delay_active=bool(scheduler.get("rain_delay_active")) if scheduler.get("rain_delay_active") is not None else None,
             blocked_reason=str(scheduler.get("blocked_reason")) if scheduler.get("blocked_reason") is not None else None,
             max_zones=max_zones,
@@ -311,6 +312,10 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     is_failure = severity in {"alarm", "critical"} or result in {"failed", "fault", "error"}
 
     mapped_event_type = "irrigation_status_feedback"
+    if normalized_event_type == "zone.started":
+        mapped_event_type = "irrigation_zone_started"
+    elif normalized_event_type == "zone.stopped":
+        mapped_event_type = "irrigation_zone_stopped"
     if is_failure:
         mapped_event_type = "controller_fault"
 

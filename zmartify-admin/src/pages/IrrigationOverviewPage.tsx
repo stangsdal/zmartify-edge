@@ -100,6 +100,10 @@ export function IrrigationOverviewPage() {
     [overview],
   );
   const controllerRunning = activeZone != null || activeRuntime != null;
+  const nextRuntime = useMemo(
+    () => (overview?.devices || []).find((device) => device.runtime?.next_run_at) || null,
+    [overview],
+  );
   const commandDeviceId = useMemo(() => activeZone?.deviceId || overview?.devices[0]?.device_id || zones[0]?.deviceId || '', [activeZone, overview, zones]);
 
   const runDeviceAction = async (action: 'stop' | 'rain-delay') => {
@@ -182,6 +186,11 @@ export function IrrigationOverviewPage() {
                 <p className="text-xl font-semibold">{pressureBar == null ? '--' : `${pressureBar.toFixed(1)} bar`}</p>
               </div>
             </div>
+            {nextRuntime?.runtime?.next_run_at ? (
+              <p className="mt-3 text-sm opacity-90">
+                Next: {nextRuntime.runtime.next_program_name || 'Scheduled program'} at {new Date(nextRuntime.runtime.next_run_at).toLocaleString()}.
+              </p>
+            ) : null}
             <div className="mt-5 flex flex-wrap gap-2">
               <button
                 type="button"

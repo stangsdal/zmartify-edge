@@ -442,6 +442,7 @@ CREATE TABLE IF NOT EXISTS irrigation_runtime_state (
     active_zone_name TEXT,
     remaining_seconds INTEGER,
     next_run_at TEXT,
+    next_program_name TEXT,
     rain_delay_active INTEGER,
     blocked_reason TEXT,
     max_zones INTEGER,

@@ -1,0 +1,1 @@
+ALTER TABLE irrigation_runtime_state ADD COLUMN next_program_name TEXT;

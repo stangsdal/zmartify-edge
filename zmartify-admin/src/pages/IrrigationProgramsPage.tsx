@@ -25,7 +25,7 @@ type DeviceProgram = {
   runtime?: IrrigationDeviceOverview['runtime'];
 };
 
-type ProgramZoneDraft = Record<string, { enabled: boolean; durationSeconds: number }>;
+type ProgramZoneDraft = Record<string, { enabled: boolean; durationSeconds: number; runGroup: number }>;
 
 const programZoneDraftEquals = (left: ProgramZoneDraft | undefined, right: ProgramZoneDraft | undefined): boolean => {
   const leftEntries = Object.entries(left || {});
@@ -38,7 +38,9 @@ const programZoneDraftEquals = (left: ProgramZoneDraft | undefined, right: Progr
     if (!other) {
       return false;
     }
-    return other.enabled === zoneDraft.enabled && other.durationSeconds === zoneDraft.durationSeconds;
+    return other.enabled === zoneDraft.enabled
+      && other.durationSeconds === zoneDraft.durationSeconds
+      && other.runGroup === zoneDraft.runGroup;
   });
 };
 
@@ -342,10 +344,10 @@ export function IrrigationProgramsPage() {
     }
   };
 
-  const updateProgramZoneDraft = (row: DeviceProgram, zone: IrrigationZone, patch: Partial<{ enabled: boolean; durationSeconds: number }>) => {
+  const updateProgramZoneDraft = (row: DeviceProgram, zone: IrrigationZone, patch: Partial<{ enabled: boolean; durationSeconds: number; runGroup: number }>) => {
     const key = programKey(row);
     setProgramZoneDrafts((prev) => {
-      const existing = prev[key]?.[zone.zone_id] || { enabled: false, durationSeconds: 600 };
+      const existing = prev[key]?.[zone.zone_id] || { enabled: false, durationSeconds: 600, runGroup: 1 };
       return {
         ...prev,
         [key]: {
@@ -368,24 +370,35 @@ export function IrrigationProgramsPage() {
         ? {
             enabled: Boolean(zoneDraft.enabled),
             durationSeconds: Math.max(1, Number(zoneDraft.durationSeconds || 600)),
+            runGroup: Math.max(1, Math.min(15, Number(zoneDraft.runGroup || 1))),
           }
         : {
             enabled: false,
             durationSeconds: 600,
+            runGroup: 1,
           };
       return nextDraft;
     }, {});
     setBusyKey(`zones:${key}`);
     setActionFeedback('');
     try {
+      const groupCounts = Object.values(committedDraft)
+        .filter((zone) => zone.enabled)
+        .reduce<Record<number, number>>((counts, zone) => {
+          counts[zone.runGroup] = (counts[zone.runGroup] || 0) + 1;
+          return counts;
+        }, {});
+      if (Object.values(groupCounts).some((count) => count > 2)) {
+        throw new Error('A run group can contain at most two enabled zones.');
+      }
       await mobileApi.replaceIrrigationProgramZones(row.deviceId, row.program.program_id, {
         zones: row.availableZones
-          .map((zone, index) => ({ zone, index, draft: draft[zone.zone_id] }))
+          .map((zone) => ({ zone, draft: draft[zone.zone_id] }))
           .filter((item) => item.draft?.enabled)
           .map((item) => ({
             zone_id: item.zone.zone_id,
             duration_seconds: Math.max(1, Number(item.draft?.durationSeconds || 600)),
-            sort_order: item.index,
+            sort_order: Math.max(1, Math.min(15, Number(item.draft?.runGroup || 1))),
             enabled: true,
           })),
       });
@@ -509,6 +522,7 @@ export function IrrigationProgramsPage() {
         draft[zone.zone_id] = {
           enabled: Boolean(selected),
           durationSeconds: selected?.duration_seconds || 600,
+          runGroup: Math.max(1, Number(selected?.sort_order || zone.zone_id || 1)),
         };
         return draft;
       }, {});
@@ -785,7 +799,7 @@ export function IrrigationProgramsPage() {
                 </div>
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                   {row.availableZones.map((zone) => {
-                    const draft = zoneDraft[zone.zone_id] || { enabled: false, durationSeconds: 600 };
+                    const draft = zoneDraft[zone.zone_id] || { enabled: false, durationSeconds: 600, runGroup: 1 };
                     return (
                       <div key={zone.zone_id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
                         <label className="flex items-center justify-between gap-3 text-sm font-semibold">
@@ -806,6 +820,20 @@ export function IrrigationProgramsPage() {
                             value={Math.max(1, Math.round(draft.durationSeconds / 60))}
                             disabled={!draft.enabled}
                             onChange={(event) => updateProgramZoneDraft(row, zone, { durationSeconds: Math.max(1, Number(event.target.value || 1)) * 60 })}
+                          />
+                        </label>
+                        <label className="mt-2 block text-xs text-muted">
+                          Run group
+                          <input
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-sm"
+                            type="number"
+                            min="1"
+                            max="15"
+                            value={draft.runGroup}
+                            disabled={!draft.enabled}
+                            onChange={(event) => updateProgramZoneDraft(row, zone, {
+                              runGroup: Math.max(1, Math.min(15, Number(event.target.value || 1))),
+                            })}
                           />
                         </label>
                       </div>
