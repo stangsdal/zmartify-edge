@@ -76,13 +76,20 @@ export function IrrigationManualPage() {
       const topics = site.devices.map((device) => `device:${device.device_id}:irrigation`);
       cleanup = subscribeRealtimeTopics(topics, (event) => {
         const receivedAt = new Date().toISOString();
+        const envelope = (event.payload || {}) as Record<string, unknown>;
+        const mappedType = typeof envelope.event_type === 'string' ? envelope.event_type : event.event_type;
+        const wrapped = envelope.payload;
+        const outcome = (wrapped && typeof wrapped === 'object' ? wrapped : envelope) as Record<string, unknown>;
+
         setTraceRows((prev) => {
           const next: MobileEvent = {
-            event_id: `rt-manual-${receivedAt}-${event.event_type}`,
-            event_type: event.event_type,
+            event_id: `rt-manual-${receivedAt}-${mappedType}`,
+            event_type: mappedType,
             created_at: receivedAt,
-            device_id: typeof event.payload?.device_id === 'string' ? event.payload.device_id : undefined,
-            payload: event.payload,
+            device_id: typeof outcome.device_id === 'string'
+              ? outcome.device_id
+              : (typeof envelope.device_id === 'string' ? envelope.device_id : undefined),
+            payload: outcome,
           };
           return [next, ...prev].slice(0, 25);
         });
@@ -102,10 +109,11 @@ export function IrrigationManualPage() {
     if (!selectedZone) return traceRows.slice(0, 8);
     return traceRows
       .filter((row) => {
-        const payload = row.payload || {};
+        const payload = (row.payload || {}) as Record<string, unknown>;
         const sameDevice = !row.device_id || row.device_id === selectedZone.deviceId;
         const sameCommand = !lastCommandId || payload.command_id === lastCommandId;
-        return sameDevice && (sameCommand || row.event_type.includes('irrigation'));
+        const irrigationSignal = row.event_type.includes('irrigation') || row.event_type === 'controller_fault';
+        return sameDevice && (sameCommand || irrigationSignal);
       })
       .slice(0, 8);
   }, [lastCommandId, selectedZone, traceRows]);

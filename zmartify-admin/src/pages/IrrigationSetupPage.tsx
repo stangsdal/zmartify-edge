@@ -49,7 +49,7 @@ export function IrrigationSetupPage() {
   const [zoneCapacityByDevice, setZoneCapacityByDevice] = useState<Record<string, number>>({});
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, { name: string; enabled: boolean }>>({});
   const [testRunZoneRefs, setTestRunZoneRefs] = useState<Record<string, boolean>>({});
-  const [pendingTestZoneRefs, setPendingTestZoneRefs] = useState<Record<string, boolean>>({});
+  const [pendingTestZoneRefs, setPendingTestZoneRefs] = useState<Record<string, number>>({});
   const [busyAction, setBusyAction] = useState('');
   const [feedback, setFeedback] = useState('');
   const testRunTimers = useRef<Record<string, number>>({});
@@ -262,7 +262,7 @@ export function IrrigationSetupPage() {
   }, []);
 
   const markPendingTestRun = useCallback((zoneRef: string) => {
-    setPendingTestZoneRefs((prev) => ({ ...prev, [zoneRef]: true }));
+    setPendingTestZoneRefs((prev) => ({ ...prev, [zoneRef]: Date.now() }));
   }, []);
 
   const markTestRunning = useCallback((zoneRef: string) => {
@@ -282,23 +282,31 @@ export function IrrigationSetupPage() {
 
     const unsubscribe = subscribeRealtimeTopics(['events'], (event) => {
       if (event.event_type !== 'event.created') return;
-      const payload = event.payload || {};
-      if (payload.event_type !== 'irrigation_status_feedback') return;
-      const outcome = (payload.payload || {}) as Record<string, unknown>;
+      const payload = (event.payload || {}) as Record<string, unknown>;
+      const mappedType = String(payload.event_type || '');
+      if (!mappedType.startsWith('irrigation_') && mappedType !== 'controller_fault') return;
+
+      const wrapped = payload.payload;
+      const outcome = (wrapped && typeof wrapped === 'object' ? wrapped : payload) as Record<string, unknown>;
       if (outcome.device_id !== selectedDeviceId) return;
 
-      const zoneRef = zoneRefFromId(payload.zone_id);
+      const zoneRef = zoneRefFromId(outcome.zone_id ?? payload.zone_id);
       const outcomeType = String(outcome.event_type || '');
       const result = String(outcome.result || '');
       const detail = typeof outcome.detail === 'string' ? outcome.detail : '';
-      if (zoneRef && outcomeType === 'run.started') {
+
+      const started = outcomeType === 'run.started' || outcomeType === 'zone.started' || mappedType === 'irrigation_zone_started';
+      const stopped = outcomeType === 'run.stopped' || outcomeType === 'run.completed' || outcomeType === 'zone.stopped' || mappedType === 'irrigation_zone_stopped';
+      const rejected = result === 'rejected' || outcomeType.endsWith('.rejected') || mappedType === 'controller_fault';
+
+      if (zoneRef && started) {
         markTestRunning(zoneRef);
         setFeedback(`Controller started test run for ${zoneRef}.`);
-      } else if (zoneRef && (outcomeType === 'run.stopped' || outcomeType === 'run.completed')) {
+      } else if (zoneRef && stopped) {
         clearPendingTestRun(zoneRef);
         clearTestRun(zoneRef);
         setFeedback(`Controller stopped test run for ${zoneRef}.`);
-      } else if (zoneRef && result === 'rejected') {
+      } else if (zoneRef && rejected) {
         clearPendingTestRun(zoneRef);
         clearTestRun(zoneRef);
         const reason = detail || outcomeType || 'command rejected';
@@ -309,6 +317,48 @@ export function IrrigationSetupPage() {
     return unsubscribe;
   }, [clearPendingTestRun, clearTestRun, markTestRunning, selectedDeviceId]);
 
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    const pendingEntries = Object.entries(pendingTestZoneRefs);
+    if (!pendingEntries.length) return;
+
+    let cancelled = false;
+    const checkPending = async () => {
+      try {
+        const response = await mobileApi.listIrrigationOutputs(selectedDeviceId);
+        if (cancelled) return;
+        const outputsNow = response.outputs || [];
+        setOutputs(outputsNow);
+
+        const now = Date.now();
+        for (const [zoneRef, requestedAt] of pendingEntries) {
+          const outputRef = outputRefForZone(zoneRef);
+          const output = outputsNow.find((item) => item.local_ref === outputRef);
+          if (output?.active) {
+            markTestRunning(zoneRef);
+            setFeedback(`Controller started test run for ${zoneRef}.`);
+            continue;
+          }
+          if (now - requestedAt > 15000) {
+            setFeedback(`No confirmation yet for ${zoneRef}. Check controller connectivity and try again.`);
+          }
+        }
+      } catch {
+        // Keep current UI state if fallback polling fails.
+      }
+    };
+
+    const timerId = window.setInterval(() => {
+      void checkPending();
+    }, 3000);
+    void checkPending();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timerId);
+    };
+  }, [markTestRunning, outputRefForZone, pendingTestZoneRefs, selectedDeviceId]);
+
   const toggleZoneTest = async (zone: IrrigationZone) => {
     const localRef = zone.local_ref || zone.zone_id;
     if (!selectedDeviceId || !localRef) {
@@ -316,7 +366,7 @@ export function IrrigationSetupPage() {
       return;
     }
     const isRunning = Boolean(testRunZoneRefs[localRef]);
-    const isPending = Boolean(pendingTestZoneRefs[localRef]);
+    const isPending = pendingTestZoneRefs[localRef] != null;
     if (!isRunning && !isPending && ((activeTestZoneRef && activeTestZoneRef !== localRef) || (activePendingTestZoneRef && activePendingTestZoneRef !== localRef))) {
       setFeedback(`Stop the running test for ${activeTestZoneRef} before starting another zone.`);
       return;
@@ -397,7 +447,7 @@ export function IrrigationSetupPage() {
                 const isDeleting = busyAction === `delete:${zone.zone_id}`;
                 const isTesting = busyAction === `test:${zone.zone_id}`;
                 const isTestRunning = Boolean(testRunZoneRefs[localRef]);
-                const isPending = Boolean(pendingTestZoneRefs[localRef]);
+                const isPending = pendingTestZoneRefs[localRef] != null;
                 const activeOtherTestRef = activeTestZoneRef || activePendingTestZoneRef;
                 const isAnotherTestRunning = Boolean(activeOtherTestRef && activeOtherTestRef !== localRef);
                 return (
