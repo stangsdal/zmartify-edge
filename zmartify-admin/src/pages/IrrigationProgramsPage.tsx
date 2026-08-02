@@ -14,6 +14,7 @@ import {
   IrrigationZone,
   subscribeRealtimeTopics,
 } from '../api/mobile';
+import { toIrrigationFeedback } from '../utils/irrigationErrors';
 
 type DeviceProgram = {
   deviceId: string;
@@ -132,6 +133,8 @@ const parseTimestampMs = (value?: string | null): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const RUNTIME_SIGNAL_MAX_AGE_SECONDS = 180;
+
 const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string | null; integration_mode?: string | null }): boolean => {
   const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
     .filter(Boolean)
@@ -239,7 +242,7 @@ export function IrrigationProgramsPage() {
         reloadPrograms(selectedSite).catch(console.error);
       }, 1500);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
       setBusyKey('');
     }
   };
@@ -265,7 +268,7 @@ export function IrrigationProgramsPage() {
         reloadPrograms(selectedSite).catch(console.error);
       }, 1500);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
       setBusyKey('');
     }
   };
@@ -299,7 +302,7 @@ export function IrrigationProgramsPage() {
         reloadPrograms(selectedSite).catch(console.error);
       }, 1500);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
       setBusyKey('');
     }
   };
@@ -318,7 +321,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`${row.program.name} is now ${row.program.enabled ? 'paused' : 'enabled'}.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -338,7 +341,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`Deleted program ${row.program.name}.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -413,7 +416,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`Saved zone runtimes for ${row.program.name}.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -458,7 +461,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`Schedule added to ${row.program.name}.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -492,7 +495,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`Saved schedule ${draft.name.trim() || schedule.name}.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -506,7 +509,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`Deleted schedule ${schedule.name}.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -575,7 +578,7 @@ export function IrrigationProgramsPage() {
       await reloadPrograms(selectedSite);
       setActionFeedback(`Program "${name}" created.`);
     } catch (error) {
-      setActionFeedback(String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyKey('');
     }
@@ -690,18 +693,27 @@ export function IrrigationProgramsPage() {
               : busyKey === `skip-controller:${row.deviceId}:${row.program.program_id}`;
             const deleteProgramBusy = busyKey === `program-delete:${row.deviceId}:${row.program.program_id}`;
             const runtimeTimestampMs = parseTimestampMs(row.runtime?.source_timestamp) || parseTimestampMs(row.runtime?.updated_at);
-            const runtimeAgeSeconds = runtimeTimestampMs == null ? 0 : Math.max(0, Math.floor((nowMs - runtimeTimestampMs) / 1000));
-            const runtimeRemainingSeconds = row.runtime?.remaining_seconds == null ? null : Math.max(0, row.runtime.remaining_seconds - runtimeAgeSeconds);
+            const runtimeAgeSeconds = runtimeTimestampMs == null ? null : Math.max(0, Math.floor((nowMs - runtimeTimestampMs) / 1000));
+            const runtimeRemainingSeconds = row.runtime?.remaining_seconds == null
+              ? null
+              : Math.max(0, row.runtime.remaining_seconds - (runtimeAgeSeconds ?? 0));
             const runtimeProgramName = (row.runtime?.active_program_name || '').trim();
             const runtimeProgramMatches = runtimeProgramName.length > 0 && runtimeProgramName === row.program.name;
             const runtimeShowsActiveZone = Boolean(row.runtime?.active_zone_id && row.runtime.active_zone_id > 0);
-            const runtimeShowsActiveProgram = runtimeProgramMatches && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0));
+            const runtimeSignalIsFresh = runtimeAgeSeconds != null && runtimeAgeSeconds <= RUNTIME_SIGNAL_MAX_AGE_SECONDS;
+            const runtimeShowsActiveProgram = runtimeSignalIsFresh
+              && runtimeProgramMatches
+              && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0));
             const currentStepStartMs = parseTimestampMs(currentStep?.started_at);
             const liveCurrentStepRemainingSeconds = currentStep == null
               ? null
               : Math.max(0, currentStep.duration_seconds - Math.floor((nowMs - (currentStepStartMs || nowMs)) / 1000));
             const displayControllerLocalProgramRun = controllerLocalProgramRun || (!activeProgram && runtimeShowsActiveProgram);
-            const hasOtherRuntimeProgram = !activeProgram && Boolean(runtimeProgramName) && !runtimeProgramMatches;
+            const hasOtherRuntimeProgram = runtimeSignalIsFresh
+              && !activeProgram
+              && Boolean(runtimeProgramName)
+              && !runtimeProgramMatches
+              && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0));
             const estimateLiters = Math.max(60, Math.round(row.program.seasonal_adjustment * Math.max(1, row.schedules.length) * 120));
             return (
             <section key={`${row.deviceId}:${row.program.program_id}`} className={`rounded-2xl app-surface p-4 shadow-soft border border-slate-100 ${hasOtherActiveProgram || hasOtherRuntimeProgram ? 'opacity-60' : ''}`}>

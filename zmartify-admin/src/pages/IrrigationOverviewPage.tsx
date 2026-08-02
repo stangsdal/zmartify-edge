@@ -5,6 +5,7 @@ import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationSiteOverview, IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
 import { commandsApi } from '../api/commands';
+import { toIrrigationFeedback } from '../utils/irrigationErrors';
 
 interface DeviceZoneRow {
   deviceId: string;
@@ -121,7 +122,7 @@ export function IrrigationOverviewPage() {
       const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
       setActionFeedback(`${action === 'stop' ? 'Stop all' : 'Rain delay'} command ${status}. Command id: ${commandId}`);
     } catch (error) {
-      setActionFeedback(error instanceof Error ? error.message : String(error));
+      setActionFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyAction('');
     }

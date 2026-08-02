@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -547,7 +548,7 @@ def test_irrigation_command_accepts_fresh_updated_at_with_stale_source_timestamp
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert published_commands[-1]["command_type"] == "irrigation.zone.start"
 
 
@@ -586,7 +587,7 @@ def test_controller_local_skip_publishes_program_skip_command(monkeypatch, tmp_p
 
     response = client.post(f"/api/v2/devices/{device_id}/irrigation/runs/{run['run_id']}/skip", headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["run"]["run_id"] == run["run_id"]
     assert response.json()["stop_command"]["command_type"] == "irrigation.program.skip"
     assert published_commands and published_commands[-1]["command_type"] == "irrigation.program.skip"
@@ -659,6 +660,7 @@ def test_schedule_update_is_rejected_while_controller_run_is_active(monkeypatch,
 
     monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
     program = create_irrigation_program(device_id, name="Morning Cycle", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    _mark_device_commandable(device_id)
     schedule = create_program_schedule(
         device_id,
         str(program["program_id"]),
@@ -685,6 +687,67 @@ def test_schedule_update_is_rejected_while_controller_run_is_active(monkeypatch,
     assert "controller is running" in response.json()["detail"]
     assert list_program_schedules(device_id, str(program["program_id"]))[0]["start_local_time"] == "06:00"
     assert published_commands == []
+
+
+def test_schedule_update_succeeds_when_runtime_reports_idle_and_run_row_is_stale(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    headers = _auth_headers()
+
+    from app import router_v2_irrigation
+    from app.irrigation_domain import (
+        create_irrigation_program,
+        create_program_run,
+        create_program_schedule,
+        list_program_schedules,
+        upsert_irrigation_runtime_state,
+    )
+
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
+        return {"command_id": command_id or "cmd-test", "status": "published"}
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+    program = create_irrigation_program(device_id, name="Morning Cycle", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    _mark_device_commandable(device_id)
+    schedule = create_program_schedule(
+        device_id,
+        str(program["program_id"]),
+        name="Morning",
+        start_local_time="06:00",
+        weekdays=[1, 2, 3, 4, 5],
+        enabled=True,
+    )
+    create_program_run(device_id, str(program["program_id"]), trigger_type="scheduled")
+
+    upsert_irrigation_runtime_state(
+        device_id,
+        active_program_name=None,
+        active_zone_id=None,
+        active_zone_name=None,
+        remaining_seconds=0,
+        source_timestamp=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    )
+
+    response = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program['program_id']}/schedules/{schedule['schedule_id']}",
+        headers=headers,
+        json={
+            "name": "Rescheduled",
+            "start_local_time": "07:15",
+            "weekdays": [1, 2, 3, 4, 5],
+            "recurrence_type": "weekdays",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert list_program_schedules(device_id, str(program["program_id"]))[0]["start_local_time"] == "07:15"
 
 def test_program_sync_splits_mixed_schedule_day_sets_for_controller(monkeypatch, tmp_path: Path):
     from app.irrigation_domain import (

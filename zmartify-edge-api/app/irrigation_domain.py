@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 import json
 import uuid
 from typing import Any
@@ -42,6 +43,101 @@ def _emit_irrigation_status_event(payload: dict[str, Any]) -> None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_timestamp(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    normalized = str(raw).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _runtime_idle_freshness_window_seconds() -> int:
+    raw = os.getenv("ZMART_EDGE_IRRIGATION_RUNTIME_IDLE_MAX_AGE_SECONDS", "300").strip() or "300"
+    try:
+        return max(30, int(raw))
+    except ValueError:
+        return 300
+
+
+def _runtime_state_reports_idle(conn: Any, device_pk_id: int) -> bool:
+    row = conn.execute(
+        """
+        SELECT active_zone_id, remaining_seconds, source_timestamp, updated_at
+        FROM irrigation_runtime_state
+        WHERE device_id = ?
+        """,
+        (device_pk_id,),
+    ).fetchone()
+    if row is None:
+        return False
+
+    timestamp = _parse_timestamp(row["source_timestamp"]) or _parse_timestamp(row["updated_at"])
+    if timestamp is None:
+        return False
+    age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    if age_seconds > _runtime_idle_freshness_window_seconds():
+        return False
+
+    active_zone_id = row["active_zone_id"]
+    remaining_seconds = row["remaining_seconds"]
+    has_active_zone = isinstance(active_zone_id, int) and active_zone_id > 0
+    has_remaining_time = isinstance(remaining_seconds, int) and remaining_seconds > 0
+    return not has_active_zone and not has_remaining_time
+
+
+def _clear_ghost_running_runs(conn: Any, device_pk_id: int) -> int:
+    if not _runtime_state_reports_idle(conn, device_pk_id):
+        return 0
+
+    running_rows = conn.execute(
+        """
+        SELECT id
+        FROM irrigation_runs
+        WHERE device_id = ? AND status = 'running'
+        """,
+        (device_pk_id,),
+    ).fetchall()
+    if not running_rows:
+        return 0
+
+    now = _now_iso()
+    for row in running_rows:
+        run_pk_id = int(row["id"])
+        conn.execute(
+            """
+            UPDATE irrigation_run_steps
+            SET status = CASE
+                WHEN status = 'running' THEN 'stopped'
+                WHEN status = 'planned' THEN 'skipped'
+                ELSE status
+            END,
+            finished_at = CASE
+                WHEN status IN ('running', 'planned') THEN COALESCE(finished_at, ?)
+                ELSE finished_at
+            END
+            WHERE run_id = ?
+            """,
+            (now, run_pk_id),
+        )
+        conn.execute(
+            """
+            UPDATE irrigation_runs
+            SET status = 'failed',
+                finished_at = COALESCE(finished_at, ?),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (now, now, run_pk_id),
+        )
+    conn.commit()
+    return len(running_rows)
 
 
 def _resolve_device(conn: Any, device_external_id: str) -> dict[str, Any]:
@@ -566,6 +662,7 @@ def create_program_run(device_external_id: str, program_id: str, *, trigger_type
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         program = _resolve_program(conn, device["id"], program_id)
+        _clear_ghost_running_runs(conn, int(device["id"]))
         active_row = conn.execute(
             """
             SELECT uuid
@@ -807,6 +904,7 @@ def list_irrigation_runs(device_external_id: str, *, limit: int = 50) -> list[di
 def has_active_irrigation_run(device_external_id: str) -> bool:
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        _clear_ghost_running_runs(conn, int(device["id"]))
         row = conn.execute(
             """
             SELECT 1

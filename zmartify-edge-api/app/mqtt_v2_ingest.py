@@ -323,6 +323,8 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     outcome_payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
 
     run_id = str(outcome.get("run_id") or "").strip()
+    if not run_id and category == "run" and command_id:
+        run_id = command_id
     if normalized_event_type == "run.started" and run_id:
         try:
             ensure_irrigation_run_started(

@@ -4,6 +4,7 @@ import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 import { commandsApi } from '../api/commands';
+import { toIrrigationFeedback } from '../utils/irrigationErrors';
 
 const durations = [5, 10, 15, 20, 30, 45];
 
@@ -124,7 +125,7 @@ export function IrrigationManualPage() {
       setLastCommandId(commandId === 'n/a' ? '' : commandId);
       setFeedback(`Manual run command submitted (${status}). Command id: ${commandId}`);
     } catch (error) {
-      setFeedback(String(error));
+      setFeedback(toIrrigationFeedback(error));
     } finally {
       setIsSubmitting(false);
     }

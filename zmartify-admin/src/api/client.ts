@@ -83,8 +83,21 @@ export class ApiClient {
     }
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`${response.status}: ${error}`);
+      const errorText = await response.text();
+      let detail = errorText;
+      try {
+        const parsed = JSON.parse(errorText) as { detail?: unknown; message?: unknown };
+        if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+          detail = parsed.detail;
+        } else if (typeof parsed.message === 'string' && parsed.message.trim()) {
+          detail = parsed.message;
+        }
+      } catch {
+        // Preserve raw text when response isn't JSON.
+      }
+
+      const normalizedDetail = (detail || '').trim() || response.statusText || 'Request failed';
+      throw new Error(`${response.status}: ${normalizedDetail}`);
     }
 
     if (response.status === 204) {

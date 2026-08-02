@@ -4,6 +4,7 @@ import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 import { commandsApi } from '../api/commands';
+import { toIrrigationFeedback } from '../utils/irrigationErrors';
 
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
 const TEST_RUN_SECONDS = 60;
@@ -164,7 +165,7 @@ export function IrrigationSetupPage() {
       await reloadDeviceSetup(selectedDeviceId);
       setFeedback(`Saved zone ${name}.`);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : String(error));
+      setFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyAction('');
     }
@@ -205,7 +206,7 @@ export function IrrigationSetupPage() {
       await reloadDeviceSetup(selectedDeviceId);
       setFeedback(`Added ${name}.`);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : String(error));
+      setFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyAction('');
     }
@@ -222,7 +223,7 @@ export function IrrigationSetupPage() {
       await reloadDeviceSetup(selectedDeviceId);
       setFeedback(`Deleted ${name}.`);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : String(error));
+      setFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyAction('');
     }
@@ -300,7 +301,8 @@ export function IrrigationSetupPage() {
       } else if (zoneRef && result === 'rejected') {
         clearPendingTestRun(zoneRef);
         clearTestRun(zoneRef);
-        setFeedback(`Controller rejected ${zoneRef}: ${detail || outcomeType || 'command rejected'}.`);
+        const reason = detail || outcomeType || 'command rejected';
+        setFeedback(`Controller rejected ${zoneRef}: ${toIrrigationFeedback(reason)}.`);
       }
     });
 
@@ -332,7 +334,7 @@ export function IrrigationSetupPage() {
       }
     } catch (error) {
       clearPendingTestRun(localRef);
-      setFeedback(error instanceof Error ? error.message : String(error));
+      setFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyAction('');
     }

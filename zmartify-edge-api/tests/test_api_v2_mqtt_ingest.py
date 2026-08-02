@@ -334,6 +334,70 @@ def test_v2_mqtt_irrigation_outcome_classifies_and_completes_run(monkeypatch, tm
     assert matched and matched[0]["status"] == "completed"
 
 
+def test_v2_mqtt_irrigation_outcome_completes_run_by_command_id_when_run_id_missing(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi10")
+    _mark_device_commandable(device_id)
+
+    from app import router_v2_irrigation
+
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
+        return {
+            "command_id": command_id or "cmd-test",
+            "device_id": device_id_arg,
+            "command_type": command_type,
+            "target_ref": target_ref,
+            "parameters": parameters or {},
+            "status": "published",
+        }
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+
+    program = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/programs",
+        headers=headers,
+        json={"name": "Command ID completion", "enabled": True},
+    )
+    assert program.status_code == 200
+    program_id = program.json()["program"]["program_id"]
+
+    run_start = client.post(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run",
+        headers=headers,
+        json={"trigger_type": "manual"},
+    )
+    assert run_start.status_code == 200
+    run_id = run_start.json()["run"]["run_id"]
+
+    ingest_outcome = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/irrigation/outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-12T15:20:00Z",
+            "event_type": "run.completed",
+            "severity": "info",
+            "result": "completed",
+            "command_id": run_id,
+            "program_id": program_id,
+        },
+    )
+    assert ingest_outcome.status_code == 200
+    assert "run.completed" in ingest_outcome.json()["side_effects"]
+
+    runs = client.get(f"/api/v2/devices/{device_id}/irrigation/runs", headers=headers)
+    assert runs.status_code == 200
+    matched = [run for run in runs.json()["runs"] if run["run_id"] == run_id]
+    assert matched and matched[0]["status"] == "completed"
+
+
 def test_v2_mqtt_irrigation_run_started_creates_active_manual_run(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
