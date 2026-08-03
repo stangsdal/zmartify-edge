@@ -24,6 +24,8 @@ type DeviceProgram = {
   programZones: IrrigationProgramZoneSummary[];
   schedules: IrrigationScheduleSummary[];
   runtime?: IrrigationDeviceOverview['runtime'];
+  outputsActive?: number;
+  activeZoneNames?: string[];
 };
 
 type ProgramZoneDraft = Record<string, { enabled: boolean; durationSeconds: number; runGroup: number }>;
@@ -134,6 +136,7 @@ const parseTimestampMs = (value?: string | null): number | null => {
 };
 
 const RUNTIME_SIGNAL_MAX_AGE_SECONDS = 180;
+const MANUAL_RUN_PENDING_TIMEOUT_MS = 180000;
 
 const isIrrigationController = (device: { device_id: string; display_name: string; device_type?: string | null; integration_mode?: string | null }): boolean => {
   const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
@@ -153,11 +156,14 @@ export function IrrigationProgramsPage() {
   const [busyKey, setBusyKey] = useState('');
   const [newProgramName, setNewProgramName] = useState('');
   const [programZoneDrafts, setProgramZoneDrafts] = useState<Record<string, ProgramZoneDraft>>({});
+  const [groupZoneSelections, setGroupZoneSelections] = useState<Record<string, string>>({});
+  const [groupRuntimeDrafts, setGroupRuntimeDrafts] = useState<Record<string, string>>({});
   const [programZoneServerDrafts, setProgramZoneServerDrafts] = useState<Record<string, ProgramZoneDraft>>({});
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, ScheduleDraft>>({});
   const [scheduleEditDrafts, setScheduleEditDrafts] = useState<Record<string, ScheduleDraft>>({});
   const [scheduleComposerOpen, setScheduleComposerOpen] = useState<Record<string, boolean>>({});
   const [activeRuns, setActiveRuns] = useState<Record<string, IrrigationRunSummary>>({});
+  const [pendingManualRuns, setPendingManualRuns] = useState<Record<string, { programId: string; requestedAtMs: number }>>({});
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const reconcileActiveRun = useCallback((deviceId: string, run?: IrrigationRunSummary | null) => {
@@ -165,6 +171,14 @@ export function IrrigationProgramsPage() {
       const next = { ...prev };
       if (run && run.status === 'running') {
         next[deviceId] = run;
+        setPendingManualRuns((pendingPrev) => {
+          if (!pendingPrev[deviceId]) {
+            return pendingPrev;
+          }
+          const pendingNext = { ...pendingPrev };
+          delete pendingNext[deviceId];
+          return pendingNext;
+        });
       } else {
         delete next[deviceId];
       }
@@ -180,6 +194,7 @@ export function IrrigationProgramsPage() {
         device_id: device.device_id,
         display_name: device.display_name,
         runtime: device.runtime || null,
+        outputs_active: typeof device.outputs?.active === 'number' ? device.outputs.active : 0,
       }));
     let irrigationDevices = overviewDevices;
     if (!irrigationDevices.length) {
@@ -188,17 +203,28 @@ export function IrrigationProgramsPage() {
         device_id: device.device_id,
         display_name: device.display_name,
         runtime: null,
+        outputs_active: 0,
       }));
     }
     setDeviceIds(irrigationDevices.map((device) => device.device_id));
     const deviceProgramGroups = await Promise.all(
       irrigationDevices.map(async (device) => {
-        const [programsResponse, zonesResponse, runsResponse] = await Promise.all([
+        const [programsResponse, zonesResponse, runsResponse, outputResponse] = await Promise.all([
           mobileApi.listIrrigationPrograms(device.device_id),
           mobileApi.listIrrigationZones(device.device_id),
           mobileApi.listIrrigationRuns(device.device_id, 20),
+          mobileApi.listIrrigationOutputs(device.device_id),
         ]);
         const availableZones = zonesResponse.zones || [];
+        const activeOutputZoneNumbers = new Set(
+          outputResponse.outputs
+            .filter((output) => output.active && !output.is_master_valve)
+            .map((output) => Number((output.local_ref || output.output_id).match(/(\d+)$/)?.[1]))
+            .filter((zoneNumber) => Number.isInteger(zoneNumber) && zoneNumber > 0),
+        );
+        const activeZoneNames = availableZones
+          .filter((zone) => activeOutputZoneNumbers.has(Number((zone.local_ref || zone.zone_id).match(/(\d+)$/)?.[1])))
+          .map((zone) => zone.name || zone.local_ref);
         const rows = await Promise.all(
           (programsResponse.programs || []).map(async (program) => {
             const [schedulesResponse, programZonesResponse] = await Promise.all([
@@ -213,6 +239,8 @@ export function IrrigationProgramsPage() {
               programZones: programZonesResponse.zones || [],
               schedules: schedulesResponse.schedules || [],
               runtime: device.runtime || null,
+              outputsActive: device.outputs_active || 0,
+              activeZoneNames,
             } satisfies DeviceProgram;
           })
         );
@@ -225,6 +253,29 @@ export function IrrigationProgramsPage() {
     );
     setProgramRows(deviceProgramGroups.flatMap((group) => group.rows));
     setActiveRuns(Object.fromEntries(deviceProgramGroups.filter((group) => group.activeRun).map((group) => [group.deviceId, group.activeRun as IrrigationRunSummary])));
+    setPendingManualRuns((prev) => {
+      const next = { ...prev };
+      for (const group of deviceProgramGroups) {
+        if (group.activeRun) {
+          delete next[group.deviceId];
+          continue;
+        }
+        const hasLikelyRuntimeActivity = group.rows.some((row) => {
+          const runtime = row.runtime;
+          const runtimeTs = parseTimestampMs(runtime?.source_timestamp) || parseTimestampMs(runtime?.updated_at);
+          const runtimeAgeSeconds = runtimeTs == null ? null : Math.max(0, Math.floor((Date.now() - runtimeTs) / 1000));
+          const runtimeSignalIsFresh = runtimeAgeSeconds != null && runtimeAgeSeconds <= RUNTIME_SIGNAL_MAX_AGE_SECONDS;
+          return (runtimeSignalIsFresh && (
+            Boolean(runtime?.active_zone_id && runtime.active_zone_id > 0) ||
+            Boolean((runtime?.remaining_seconds || 0) > 0)
+          )) || (row.outputsActive || 0) > 0;
+        });
+        if (hasLikelyRuntimeActivity) {
+          delete next[group.deviceId];
+        }
+      }
+      return next;
+    });
   }, []);
 
   const runProgramNow = async (row: DeviceProgram) => {
@@ -232,9 +283,26 @@ export function IrrigationProgramsPage() {
     setBusyKey(key);
     setActionFeedback('');
     try {
+      setPendingManualRuns((prev) => ({
+        ...prev,
+        [row.deviceId]: {
+          programId: row.program.program_id,
+          requestedAtMs: Date.now(),
+        },
+      }));
       const result = await mobileApi.startIrrigationProgramRun(row.deviceId, row.program.program_id);
       reconcileActiveRun(row.deviceId, result.run);
       const currentStep = result.run.steps.find((step) => step.status === 'running');
+      if (result.run.status === 'running') {
+        setPendingManualRuns((prev) => {
+          if (!prev[row.deviceId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[row.deviceId];
+          return next;
+        });
+      }
       setActionFeedback(`Run started for ${row.program.name}${currentStep ? ` on ${currentStep.zone_name || currentStep.local_ref}` : ''}.`);
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
@@ -242,6 +310,14 @@ export function IrrigationProgramsPage() {
         reloadPrograms(selectedSite).catch(console.error);
       }, 1500);
     } catch (error) {
+      setPendingManualRuns((prev) => {
+        if (!prev[row.deviceId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[row.deviceId];
+        return next;
+      });
       setActionFeedback(toIrrigationFeedback(error));
       setBusyKey('');
     }
@@ -261,6 +337,14 @@ export function IrrigationProgramsPage() {
           parameters: {},
         });
       }
+      setPendingManualRuns((prev) => {
+        if (!prev[row.deviceId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[row.deviceId];
+        return next;
+      });
       setActionFeedback(`Stopped ${row.program.name}.`);
       setBusyKey('');
       reloadPrograms(selectedSite).catch(console.error);
@@ -364,22 +448,57 @@ export function IrrigationProgramsPage() {
     });
   };
 
+  const addWateringGroup = (row: DeviceProgram) => {
+    const key = programKey(row);
+    const draft = programZoneDrafts[key] || {};
+    const nextZone = row.availableZones.find((zone) => !draft[zone.zone_id]?.enabled);
+    if (!nextZone) {
+      setActionFeedback('All configured zones are already assigned to a watering group.');
+      return;
+    }
+    const highestGroup = Math.max(0, ...Object.values(draft).filter((item) => item.enabled).map((item) => item.runGroup));
+    if (highestGroup >= 15) {
+      setActionFeedback('A program can contain up to 15 watering groups.');
+      return;
+    }
+    const nextGroup = highestGroup + 1;
+    updateProgramZoneDraft(row, nextZone, { enabled: true, durationSeconds: 600, runGroup: nextGroup });
+  };
+
+  const removeWateringGroup = (row: DeviceProgram, runGroup: number) => {
+    for (const zone of row.availableZones) {
+      const draft = programZoneDrafts[programKey(row)]?.[zone.zone_id];
+      if (draft?.enabled && draft.runGroup === runGroup) {
+        updateProgramZoneDraft(row, zone, { enabled: false });
+      }
+    }
+  };
+
+  const updateWateringGroupDuration = (row: DeviceProgram, runGroup: number, durationSeconds: number) => {
+    const key = programKey(row);
+    setProgramZoneDrafts((prev) => {
+      const currentDraft = prev[key] || {};
+      const nextDraft = Object.fromEntries(Object.entries(currentDraft).map(([zoneId, zoneDraft]) => [
+        zoneId,
+        zoneDraft.enabled && zoneDraft.runGroup === runGroup
+          ? { ...zoneDraft, durationSeconds }
+          : zoneDraft,
+      ]));
+      return { ...prev, [key]: nextDraft };
+    });
+  };
+
   const saveProgramZones = async (row: DeviceProgram) => {
     const key = programKey(row);
     const draft = programZoneDrafts[key] || {};
+    const groupDurations: Record<number, number> = {};
     const committedDraft = row.availableZones.reduce<ProgramZoneDraft>((nextDraft, zone) => {
       const zoneDraft = draft[zone.zone_id];
-      nextDraft[zone.zone_id] = zoneDraft
-        ? {
-            enabled: Boolean(zoneDraft.enabled),
-            durationSeconds: Math.max(1, Number(zoneDraft.durationSeconds || 600)),
-            runGroup: Math.max(1, Math.min(15, Number(zoneDraft.runGroup || 1))),
-          }
-        : {
-            enabled: false,
-            durationSeconds: 600,
-            runGroup: 1,
-          };
+      const enabled = Boolean(zoneDraft?.enabled);
+      const runGroup = Math.max(1, Math.min(15, Number(zoneDraft?.runGroup || 1)));
+      const durationSeconds = Math.max(1, Number(zoneDraft?.durationSeconds || 600));
+      const groupDuration = enabled ? (groupDurations[runGroup] ||= durationSeconds) : durationSeconds;
+      nextDraft[zone.zone_id] = { enabled, durationSeconds: groupDuration, runGroup };
       return nextDraft;
     }, {});
     setBusyKey(`zones:${key}`);
@@ -391,12 +510,12 @@ export function IrrigationProgramsPage() {
           counts[zone.runGroup] = (counts[zone.runGroup] || 0) + 1;
           return counts;
         }, {});
-      if (Object.values(groupCounts).some((count) => count > 2)) {
-        throw new Error('A run group can contain at most two enabled zones.');
+      if (Object.values(groupCounts).some((count) => count > 3)) {
+        throw new Error('A watering group can contain at most three zones.');
       }
       await mobileApi.replaceIrrigationProgramZones(row.deviceId, row.program.program_id, {
         zones: row.availableZones
-          .map((zone) => ({ zone, draft: draft[zone.zone_id] }))
+          .map((zone) => ({ zone, draft: committedDraft[zone.zone_id] }))
           .filter((item) => item.draft?.enabled)
           .map((item) => ({
             zone_id: item.zone.zone_id,
@@ -414,7 +533,7 @@ export function IrrigationProgramsPage() {
         [key]: committedDraft,
       }));
       await reloadPrograms(selectedSite);
-      setActionFeedback(`Saved zone runtimes for ${row.program.name}.`);
+      setActionFeedback(`Saved watering groups for ${row.program.name}.`);
     } catch (error) {
       setActionFeedback(toIrrigationFeedback(error));
     } finally {
@@ -573,10 +692,22 @@ export function IrrigationProgramsPage() {
     setBusyKey('create');
     setActionFeedback('');
     try {
-      await mobileApi.createIrrigationProgram(deviceIds[0], { name, enabled: true });
+      const deviceId = deviceIds[0];
+      const [programResponse, zonesResponse] = await Promise.all([
+        mobileApi.createIrrigationProgram(deviceId, { name, enabled: true }),
+        mobileApi.listIrrigationZones(deviceId),
+      ]);
+      await mobileApi.replaceIrrigationProgramZones(deviceId, programResponse.program.program_id, {
+        zones: (zonesResponse.zones || []).map((zone, index) => ({
+          zone_id: zone.zone_id,
+          duration_seconds: 600,
+          sort_order: index + 1,
+          enabled: true,
+        })),
+      });
       setNewProgramName('');
       await reloadPrograms(selectedSite);
-      setActionFeedback(`Program "${name}" created.`);
+      setActionFeedback(`Program "${name}" created with one watering group per configured zone.`);
     } catch (error) {
       setActionFeedback(toIrrigationFeedback(error));
     } finally {
@@ -640,6 +771,22 @@ export function IrrigationProgramsPage() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(() => {
+    setPendingManualRuns((prev) => {
+      const now = Date.now();
+      let changed = false;
+      const next: Record<string, { programId: string; requestedAtMs: number }> = {};
+      for (const [deviceId, pending] of Object.entries(prev)) {
+        if (now - pending.requestedAtMs <= MANUAL_RUN_PENDING_TIMEOUT_MS) {
+          next[deviceId] = pending;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [nowMs]);
+
   const latestRunEvent = useMemo(() => events.find((event) => event.event_type === 'irrigation.run.updated') || null, [events]);
 
   return (
@@ -700,10 +847,12 @@ export function IrrigationProgramsPage() {
             const runtimeProgramName = (row.runtime?.active_program_name || '').trim();
             const runtimeProgramMatches = runtimeProgramName.length > 0 && runtimeProgramName === row.program.name;
             const runtimeShowsActiveZone = Boolean(row.runtime?.active_zone_id && row.runtime.active_zone_id > 0);
+            const outputsShowActive = (row.outputsActive || 0) > 0;
+            const activeZoneLabel = (row.activeZoneNames || []).join(' + ');
             const runtimeSignalIsFresh = runtimeAgeSeconds != null && runtimeAgeSeconds <= RUNTIME_SIGNAL_MAX_AGE_SECONDS;
             const runtimeShowsActiveProgram = runtimeSignalIsFresh
               && runtimeProgramMatches
-              && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0));
+              && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0) || outputsShowActive);
             const currentStepStartMs = parseTimestampMs(currentStep?.started_at);
             const liveCurrentStepRemainingSeconds = currentStep == null
               ? null
@@ -713,10 +862,30 @@ export function IrrigationProgramsPage() {
               && !activeProgram
               && Boolean(runtimeProgramName)
               && !runtimeProgramMatches
-              && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0));
+              && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0) || outputsShowActive);
+            const controllerHasUnattributedRun = !activeProgram
+              && !displayControllerLocalProgramRun
+              && !hasOtherRuntimeProgram
+              && (outputsShowActive || (runtimeSignalIsFresh && (runtimeShowsActiveZone || (runtimeRemainingSeconds != null && runtimeRemainingSeconds > 0))));
+            const pendingManual = pendingManualRuns[row.deviceId];
+            const pendingForThisProgram = Boolean(pendingManual && pendingManual.programId === row.program.program_id);
+            const controllerHasActiveProgram = Boolean(activeRun) || displayControllerLocalProgramRun || hasOtherRuntimeProgram || controllerHasUnattributedRun || Boolean(pendingManual);
+            const showStopControls = activeProgram || displayControllerLocalProgramRun || pendingForThisProgram || controllerHasUnattributedRun;
             const estimateLiters = Math.max(60, Math.round(row.program.seasonal_adjustment * Math.max(1, row.schedules.length) * 120));
+            const wateringGroups = Object.entries(zoneDraft)
+              .filter(([, draft]) => draft.enabled)
+              .reduce<Record<number, IrrigationZone[]>>((groups, [zoneId, draft]) => {
+                const zone = row.availableZones.find((item) => item.zone_id === zoneId);
+                if (zone) {
+                  (groups[draft.runGroup] ||= []).push(zone);
+                }
+                return groups;
+              }, {});
+            const orderedWateringGroups = Object.entries(wateringGroups)
+              .map(([runGroup, zones]) => ({ runGroup: Number(runGroup), zones }))
+              .sort((left, right) => left.runGroup - right.runGroup);
             return (
-            <section key={`${row.deviceId}:${row.program.program_id}`} className={`rounded-2xl app-surface p-4 shadow-soft border border-slate-100 ${hasOtherActiveProgram || hasOtherRuntimeProgram ? 'opacity-60' : ''}`}>
+            <section key={`${row.deviceId}:${row.program.program_id}`} className={`rounded-2xl app-surface p-4 shadow-soft border border-slate-100 ${hasOtherActiveProgram || hasOtherRuntimeProgram || controllerHasUnattributedRun ? 'opacity-60' : ''}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold">{row.program.name}</h2>
@@ -771,12 +940,22 @@ export function IrrigationProgramsPage() {
                 <p className="text-sm font-semibold mt-1">
                   {runBusy
                     ? 'Starting program...'
+                    : pendingForThisProgram
+                      ? 'Starting program on controller...'
                     : activeProgram && currentStep
                       ? `Running ${currentStep.zone_name || currentStep.local_ref || 'zone'}`
                       : displayControllerLocalProgramRun && row.runtime?.active_zone_name
                         ? `Running ${row.runtime.active_zone_name}`
                       : displayControllerLocalProgramRun
                         ? 'Program running on controller'
+                      : controllerHasUnattributedRun
+                        ? activeZoneLabel
+                          ? `Running ${activeZoneLabel}`
+                          : row.runtime?.active_zone_name
+                            ? `Running ${row.runtime.active_zone_name}`
+                            : row.runtime?.active_zone_id
+                              ? `Running Zone ${row.runtime.active_zone_id}`
+                              : 'Program running on controller'
                       : hasOtherActiveProgram || hasOtherRuntimeProgram
                         ? 'Another program is running on this controller'
                         : 'Idle'}
@@ -784,6 +963,16 @@ export function IrrigationProgramsPage() {
                 {activeProgram && currentStep ? (
                   <p className="text-xs text-muted mt-1">
                     Remaining {formatRemaining(liveCurrentStepRemainingSeconds ?? currentStep.duration_seconds)}{nextStep ? ` • Next ${nextStep.zone_name || nextStep.local_ref}` : ' • Last zone'}
+                  </p>
+                ) : pendingForThisProgram ? (
+                  <p className="text-xs text-muted mt-1">
+                    Waiting for controller runtime confirmation. You can stop immediately if needed.
+                  </p>
+                ) : controllerHasUnattributedRun ? (
+                  <p className="text-xs text-muted mt-1">
+                    {runtimeRemainingSeconds != null
+                      ? `Current zone remaining ${formatRemaining(runtimeRemainingSeconds)}.`
+                      : 'Active outputs are confirmed by controller telemetry.'} Stop is available while program attribution catches up.
                   </p>
                 ) : displayControllerLocalProgramRun ? (
                   <p className="text-xs text-muted mt-1">
@@ -797,62 +986,88 @@ export function IrrigationProgramsPage() {
               <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-muted">Program zones</p>
-                    <p className="text-sm font-semibold mt-1">Select zones and standard runtimes</p>
+                    <p className="text-xs uppercase tracking-wide text-muted">Watering groups</p>
+                    <p className="text-sm font-semibold mt-1">Each group runs together, then the next group begins</p>
                   </div>
-                  <IonButton
-                    size="small"
-                    fill="outline"
-                    disabled={busyKey === `zones:${key}`}
-                    onClick={() => { void saveProgramZones(row); }}
-                  >
-                    {busyKey === `zones:${key}` ? 'Saving...' : 'Save zones'}
-                  </IonButton>
+                  <div className="flex flex-wrap gap-2">
+                    <IonButton size="small" fill="outline" disabled={busyKey === `zones:${key}`} onClick={() => { void addWateringGroup(row); }}>
+                      Add group
+                    </IonButton>
+                    <IonButton size="small" disabled={busyKey === `zones:${key}`} onClick={() => { void saveProgramZones(row); }}>
+                      {busyKey === `zones:${key}` ? 'Saving...' : 'Save groups'}
+                    </IonButton>
+                  </div>
                 </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  {row.availableZones.map((zone) => {
-                    const draft = zoneDraft[zone.zone_id] || { enabled: false, durationSeconds: 600, runGroup: 1 };
-                    return (
-                      <div key={zone.zone_id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                        <label className="flex items-center justify-between gap-3 text-sm font-semibold">
-                          <span>{zone.name || zone.local_ref}</span>
-                          <input
-                            type="checkbox"
-                            checked={draft.enabled}
-                            onChange={(event) => updateProgramZoneDraft(row, zone, { enabled: event.target.checked })}
-                          />
-                        </label>
-                        <label className="mt-2 block text-xs text-muted">
-                          Runtime minutes
-                          <input
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-sm"
-                            type="number"
-                            min="1"
-                            max="1440"
-                            value={Math.max(1, Math.round(draft.durationSeconds / 60))}
-                            disabled={!draft.enabled}
-                            onChange={(event) => updateProgramZoneDraft(row, zone, { durationSeconds: Math.max(1, Number(event.target.value || 1)) * 60 })}
-                          />
-                        </label>
-                        <label className="mt-2 block text-xs text-muted">
-                          Run group
-                          <input
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-sm"
-                            type="number"
-                            min="1"
-                            max="15"
-                            value={draft.runGroup}
-                            disabled={!draft.enabled}
-                            onChange={(event) => updateProgramZoneDraft(row, zone, {
-                              runGroup: Math.max(1, Math.min(15, Number(event.target.value || 1))),
-                            })}
-                          />
-                        </label>
-                      </div>
-                    );
-                  })}
-                  {!row.availableZones.length ? <p className="text-sm text-muted">No zones configured for this controller.</p> : null}
-                </div>
+                {orderedWateringGroups.length ? (
+                  <div className="mt-3 grid gap-3">
+                    {orderedWateringGroups.map((group, index) => {
+                      const groupKey = `${key}:${group.runGroup}`;
+                      const availableZones = row.availableZones.filter((zone) => !zoneDraft[zone.zone_id]?.enabled);
+                      const groupRuntimeMinutes = Math.max(1, Math.round((zoneDraft[group.zones[0]?.zone_id]?.durationSeconds || 600) / 60));
+                      return (
+                        <div key={group.runGroup} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold">Group {index + 1} · Water together</p>
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="block text-xs text-muted">
+                                Runtime minutes
+                                <input
+                                  className="mt-1 w-28 rounded-lg border border-slate-200 px-2 py-1 text-sm bg-white"
+                                  type="number"
+                                  min="1"
+                                  max="1440"
+                                  value={groupRuntimeDrafts[groupKey] ?? String(groupRuntimeMinutes)}
+                                  onChange={(event) => {
+                                    const nextValue = event.target.value;
+                                    setGroupRuntimeDrafts((prev) => ({ ...prev, [groupKey]: nextValue }));
+                                    const enteredMinutes = Number(nextValue);
+                                    if (Number.isFinite(enteredMinutes) && enteredMinutes >= 1) {
+                                      updateWateringGroupDuration(row, group.runGroup, Math.min(1440, Math.round(enteredMinutes)) * 60);
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    const enteredMinutes = Number(groupRuntimeDrafts[groupKey]);
+                                    if (!Number.isFinite(enteredMinutes) || enteredMinutes < 1) {
+                                      setGroupRuntimeDrafts((prev) => ({ ...prev, [groupKey]: String(groupRuntimeMinutes) }));
+                                      return;
+                                    }
+                                    const normalizedMinutes = Math.min(1440, Math.round(enteredMinutes));
+                                    updateWateringGroupDuration(row, group.runGroup, normalizedMinutes * 60);
+                                    setGroupRuntimeDrafts((prev) => ({ ...prev, [groupKey]: String(normalizedMinutes) }));
+                                  }}
+                                />
+                              </label>
+                              <IonButton size="small" fill="clear" color="danger" onClick={() => removeWateringGroup(row, group.runGroup)}>
+                                Delete group
+                              </IonButton>
+                            </div>
+                          </div>
+                          <div className="mt-2 grid gap-2 md:grid-cols-3">
+                            {group.zones.map((zone) => (
+                              <div key={zone.zone_id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                <p className="text-sm font-semibold">{zone.name || zone.local_ref}</p>
+                                <IonButton size="small" fill="clear" color="medium" onClick={() => updateProgramZoneDraft(row, zone, { enabled: false })}>Remove zone</IonButton>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <select className="min-w-48 rounded-lg border border-slate-200 px-2 py-1 text-sm bg-white" value={groupZoneSelections[groupKey] || ''} onChange={(event) => setGroupZoneSelections((prev) => ({ ...prev, [groupKey]: event.target.value }))}>
+                              <option value="">Add an unassigned zone</option>
+                              {availableZones.map((zone) => <option key={zone.zone_id} value={zone.zone_id}>{zone.name || zone.local_ref}</option>)}
+                            </select>
+                            <IonButton size="small" fill="outline" disabled={group.zones.length >= 3 || !groupZoneSelections[groupKey]} onClick={() => {
+                              const zone = row.availableZones.find((item) => item.zone_id === groupZoneSelections[groupKey]);
+                              if (zone) updateProgramZoneDraft(row, zone, { enabled: true, durationSeconds: 600, runGroup: group.runGroup });
+                              setGroupZoneSelections((prev) => ({ ...prev, [groupKey]: '' }));
+                            }}>
+                              Add zone
+                            </IonButton>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : <p className="mt-3 text-sm text-muted">Add a watering group to begin building this program.</p>}
               </div>
 
               <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
@@ -1083,12 +1298,14 @@ export function IrrigationProgramsPage() {
               <div className="flex flex-wrap gap-2 mt-3">
                 <IonButton
                   size="small"
-                  disabled={runBusy || Boolean(activeRun) || displayControllerLocalProgramRun || hasOtherRuntimeProgram || !row.program.enabled}
+                  disabled={runBusy || !row.program.enabled || !orderedWateringGroups.length || controllerHasActiveProgram}
                   onClick={() => { void runProgramNow(row); }}
                 >
                   {runBusy ? 'Starting...' : 'Run now'}
                 </IonButton>
-                {activeProgram || displayControllerLocalProgramRun ? (
+                {!controllerHasActiveProgram && !orderedWateringGroups.length ? <p className="self-center text-xs text-muted">Add a watering group before running this program.</p> : null}
+                {controllerHasActiveProgram ? <p className="self-center text-xs text-muted">A controller run is active.</p> : null}
+                {showStopControls ? (
                   <>
                     <IonButton
                       size="small"
@@ -1096,7 +1313,7 @@ export function IrrigationProgramsPage() {
                       disabled={stopBusy || skipBusy}
                       onClick={() => { void stopProgramRun(row, activeRun); }}
                     >
-                      {stopBusy ? 'Stopping...' : 'Stop'}
+                      {stopBusy ? 'Stopping...' : 'Stop program'}
                     </IonButton>
                     <IonButton
                       size="small"

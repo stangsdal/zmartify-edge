@@ -125,6 +125,21 @@ export interface DeviceControllerSettingsUpdate {
   timezone?: string;
 }
 
+export interface DeviceControllerModeSetResponse {
+  device_id: string;
+  mode: string;
+  command_id: string;
+  command_status?: string | null;
+  command_topic?: string | null;
+}
+
+export interface DeviceControllerRebootResponse {
+  device_id: string;
+  local_url: string;
+  reboot_triggered: boolean;
+  response: Record<string, unknown>;
+}
+
 export interface DeviceSdCardStatus {
   device_id: string;
   local_url: string;

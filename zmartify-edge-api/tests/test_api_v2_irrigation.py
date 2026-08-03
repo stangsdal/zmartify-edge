@@ -162,6 +162,17 @@ def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
     assert outputs.status_code == 200
     assert len(outputs.json()["outputs"]) == 2
 
+    snapshot = client.get(f"/api/v2/sites/{_site_ref()}/irrigation/zone-snapshot", headers=headers)
+    assert snapshot.status_code == 200
+    assert snapshot.json()["devices"] == [
+        {
+            "device_id": device_id,
+            "display_name": "Dev Irrig",
+            "zones": [zone],
+            "outputs": outputs.json()["outputs"],
+        },
+    ]
+
     set_hydraulics = client.post(
         f"/api/v2/devices/{device_id}/irrigation/hydraulics",
         headers=headers,

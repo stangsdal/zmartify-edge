@@ -176,6 +176,27 @@ class DeviceControllerSettingsOut(BaseModel):
     reboot_required: bool = False
 
 
+class DeviceControllerModeIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    mode: str = Field(min_length=1)
+
+
+class DeviceControllerModeOut(BaseModel):
+    device_id: str
+    mode: str
+    command_id: str
+    command_status: str | None = None
+    command_topic: str | None = None
+
+
+class DeviceControllerRebootOut(BaseModel):
+    device_id: str
+    local_url: str
+    reboot_triggered: bool
+    response: dict
+
+
 class DeviceSdCardInitializeIn(BaseModel):
     format: bool = True
 

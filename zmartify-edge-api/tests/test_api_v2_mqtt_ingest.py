@@ -431,6 +431,48 @@ def test_v2_mqtt_irrigation_run_started_creates_active_manual_run(monkeypatch, t
     assert overview.json()["active_run_count"] == 1
 
 
+def test_v2_mqtt_irrigation_stop_all_deactivates_every_output(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi10")
+
+    for zone_id in (1, 2, 3):
+        started = client.post(
+            f"/api/v2/devices/{device_id}/ingest/mqtt/irrigation/outcome",
+            headers=headers,
+            json={
+                "schema_version": "2.0",
+                "source_timestamp": "2026-08-03T09:00:00Z",
+                "event_type": "run.started",
+                "severity": "info",
+                "result": "completed",
+                "command_id": f"cmd-start-{zone_id}",
+                "zone_id": zone_id,
+            },
+        )
+        assert started.status_code == 200
+
+    stopped = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/irrigation/outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-08-03T09:00:05Z",
+            "event_type": "run.stopped",
+            "severity": "info",
+            "result": "completed",
+            "command_id": "cmd-stop-all",
+            "detail": "stop_all",
+        },
+    )
+    assert stopped.status_code == 200
+    assert "outputs.deactivated:3" in stopped.json()["side_effects"]
+
+    outputs = client.get(f"/api/v2/devices/{device_id}/irrigation/outputs", headers=headers)
+    assert outputs.status_code == 200
+    assert all(not output["active"] for output in outputs.json()["outputs"])
+
+
 def test_v2_mqtt_irrigation_outcome_propagates_valve_fault(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}

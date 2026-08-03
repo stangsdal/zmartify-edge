@@ -13,6 +13,9 @@ export const toIrrigationFeedback = (error: unknown): string => {
   if (message.includes('controller telemetry is stale')) {
     return 'Controller telemetry is stale. Wait for fresh controller updates, then retry.';
   }
+  if (message.includes('controller_not_idle')) {
+    return 'Controller rejected the run as not idle. If no zone is currently running, set controller mode to Automatic in Devices > Controller settings, then retry.';
+  }
   if (message.includes('controller is offline or mqtt is disconnected')) {
     return 'Controller is offline or MQTT is disconnected. Reconnect it, then retry.';
   }

@@ -8,6 +8,8 @@ import subprocess
 import uuid
 
 from app.contracts import ContractValidationError, validate_mqtt_v2_command
+from app.db import get_connection
+from app.domain_model import log_event
 from app.registry import get_device_mqtt_credentials
 from app.mqtt_v2_topics import command_topic_for_irrigation, command_topics_for_setpoint, command_topics_for_zone_name
 
@@ -220,6 +222,38 @@ def publish_irrigation_command(
         "parameters": firmware_parameters,
     }
     _publish_to_topic(device_id, topic, json.dumps(payload, separators=(",", ":"), sort_keys=True), retain=False)
+    if command_type in {"irrigation.zone.start", "irrigation.zone.stop"}:
+        try:
+            device_pk_id = None
+            site_id = None
+            domain_id = None
+            with get_connection() as conn:
+                device = conn.execute(
+                    "SELECT id, site_id FROM devices WHERE device_id = ?",
+                    (device_id,),
+                ).fetchone()
+                if device is not None:
+                    device_pk_id = int(device["id"])
+                    site_id = int(device["site_id"]) if device["site_id"] is not None else None
+                    if site_id is not None:
+                        site = conn.execute("SELECT domain_id FROM sites WHERE id = ?", (site_id,)).fetchone()
+                        domain_id = int(site["domain_id"]) if site is not None and site["domain_id"] is not None else None
+            if device_pk_id is not None:
+                log_event(
+                    "irrigation_command_published",
+                    domain_id=domain_id,
+                    site_id=site_id,
+                    device_pk_id=device_pk_id,
+                    zone_id=firmware_parameters.get("zone_id"),
+                    payload={
+                        "command_id": command_id,
+                        "command_type": command_type,
+                        "target_ref": target_ref,
+                        "parameters": firmware_parameters,
+                    },
+                )
+        except OSError:
+            pass
     return {"command_id": command_id, "status": "published", "topic": topic}
 
 

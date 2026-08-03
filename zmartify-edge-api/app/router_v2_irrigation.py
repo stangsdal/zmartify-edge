@@ -23,6 +23,7 @@ from app.irrigation_domain import (
     get_irrigation_weather,
     get_controller_zone_capacity,
     get_site_irrigation_overview,
+    get_site_irrigation_zone_snapshot,
     has_active_irrigation_run,
     list_irrigation_runs,
     list_irrigation_outputs,
@@ -406,6 +407,14 @@ def create_irrigation_v2_router(require_roles) -> APIRouter:
         require_roles(request, {"owner", "admin", "installer", "viewer"})
         try:
             return get_site_irrigation_overview(site_id)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.get("/api/v2/sites/{site_id}/irrigation/zone-snapshot")
+    def v2_site_irrigation_zone_snapshot(site_id: str, request: Request) -> dict:
+        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        try:
+            return get_site_irrigation_zone_snapshot(site_id)
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

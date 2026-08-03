@@ -165,6 +165,9 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
   const [saving, setSaving] = useState(false);
   const [sdCardLoading, setSdCardLoading] = useState(false);
   const [sdCardInitializing, setSdCardInitializing] = useState(false);
+  const [changingMode, setChangingMode] = useState(false);
+  const [rebooting, setRebooting] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<'auto' | 'manual' | 'off' | 'service'>('auto');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [sdCardError, setSdCardError] = useState('');
@@ -269,6 +272,38 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
     }
   };
 
+  const setControllerMode = async (mode: 'auto' | 'manual' | 'off' | 'service') => {
+    try {
+      setChangingMode(true);
+      setError('');
+      setMessage('');
+      const response = await deviceApi.setControllerMode(deviceId, mode);
+      setSelectedMode(response.mode as 'auto' | 'manual' | 'off' | 'service');
+      setMessage(`Controller mode command submitted (${response.mode}). Command id: ${response.command_id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChangingMode(false);
+    }
+  };
+
+  const rebootController = async () => {
+    if (!window.confirm('Reboot controller now? Irrigation commands may be unavailable for about 60-90 seconds.')) {
+      return;
+    }
+    try {
+      setRebooting(true);
+      setError('');
+      setMessage('');
+      const response = await deviceApi.rebootController(deviceId);
+      setMessage(response.reboot_triggered ? 'Reboot command accepted by controller.' : 'Reboot command sent, but controller did not acknowledge success.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRebooting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mt-4 flex items-center gap-2 text-sm text-muted">
@@ -324,6 +359,43 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
       <IonButton className="mt-3" size="small" onClick={saveSettings} disabled={saving}>
         {saving ? 'Saving...' : 'Save settings'}
       </IonButton>
+
+      <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div>
+            <p className="font-semibold">Runtime controls</p>
+            <p className="text-xs text-muted">Set controller mode remotely and reboot without leaving the app.</p>
+          </div>
+          <IonButton
+            size="small"
+            color="warning"
+            onClick={rebootController}
+            disabled={rebooting || changingMode || saving || sdCardInitializing}
+          >
+            {rebooting ? 'Rebooting...' : 'Reboot controller'}
+          </IonButton>
+        </div>
+        <div className="grid gap-2 md:grid-cols-4">
+          {[
+            { value: 'auto', label: 'Automatic' },
+            { value: 'manual', label: 'Manual' },
+            { value: 'off', label: 'Off' },
+            { value: 'service', label: 'Service' },
+          ].map((option) => (
+            <IonButton
+              key={option.value}
+              size="small"
+              fill={selectedMode === option.value ? 'solid' : 'outline'}
+              onClick={() => {
+                void setControllerMode(option.value as 'auto' | 'manual' | 'off' | 'service');
+              }}
+              disabled={changingMode || rebooting || saving || sdCardInitializing}
+            >
+              {selectedMode === option.value && changingMode ? 'Sending...' : option.label}
+            </IonButton>
+          ))}
+        </div>
+      </div>
 
       <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">

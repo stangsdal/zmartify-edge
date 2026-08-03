@@ -17,6 +17,7 @@ from app.device_onboarding import (
     get_remote_sd_card_status,
     normalize_device_base_url,
     push_remote_onboarding_config,
+    trigger_remote_reboot,
 )
 from app.domain_model import DomainModelError, upsert_device_state
 from app.mqtt_commands import MqttCommandError, publish_irrigation_command
@@ -28,6 +29,7 @@ from app.registry import (
     create_device,
     ensure_device_admin_token,
     get_device,
+    get_device_admin_token,
     get_device_mqtt_credentials,
     get_device_onboarding_context,
     rotate_mqtt_client_password,
@@ -37,6 +39,9 @@ from app.registry import (
 from app.schemas import (
     DeviceClaimIn,
     DeviceClaimOut,
+    DeviceControllerModeIn,
+    DeviceControllerModeOut,
+    DeviceControllerRebootOut,
     DeviceControllerSettingsIn,
     DeviceControllerSettingsOut,
     DeviceDiscoverIn,
@@ -68,6 +73,37 @@ def _edge_public_mqtt_uri() -> str:
 
 def _allow_manual_firmware_refresh() -> bool:
     return os.getenv("ZMART_EDGE_ENABLE_MANUAL_FIRMWARE_REFRESH", "0").strip() == "1"
+
+
+def _controller_http_admin_token(device_id: str) -> str | None:
+    try:
+        token = get_device_admin_token(device_id)
+    except RegistryNotFoundError:
+        token = None
+    if token:
+        return token
+    fallback = os.getenv("ZIC_HTTP_ADMIN_TOKEN", "").strip()
+    return fallback or None
+
+
+def _normalize_controller_mode(mode: str) -> str:
+    text = str(mode or "").strip().lower()
+    aliases = {
+        "auto": "auto",
+        "automatic": "auto",
+        "manual": "manual",
+        "off": "off",
+        "disabled": "off",
+        "service": "service",
+        "diagnostics": "service",
+    }
+    normalized = aliases.get(text)
+    if normalized is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mode must be one of: auto, manual, off, service",
+        )
+    return normalized
 
 
 def _build_device_push_payload(device_id: str, claim_token: str | None) -> dict:
@@ -352,6 +388,69 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except (MqttCommandError, RegistryOperationError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @router.post("/devices/{device_id}/controller/mode", response_model=DeviceControllerModeOut)
+    def v2_set_device_controller_mode(device_id: str, payload: DeviceControllerModeIn, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        normalized_mode = _normalize_controller_mode(payload.mode)
+        try:
+            _ = _device_local_url(device_id)
+            command = publish_irrigation_command(
+                device_id,
+                "irrigation.config.system.mode",
+                None,
+                {"operational_mode": normalized_mode},
+            )
+            audit_action(
+                actor_user_id=request.state.auth_user.user_id,
+                action="set_controller_mode",
+                resource_type="device",
+                resource_id=device_id,
+                metadata={
+                    "mode": normalized_mode,
+                    "command_id": command.get("command_id"),
+                },
+            )
+            return {
+                "device_id": device_id,
+                "mode": normalized_mode,
+                "command_id": str(command.get("command_id") or ""),
+                "command_status": command.get("status"),
+                "command_topic": command.get("topic"),
+            }
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except (MqttCommandError, RegistryOperationError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @router.post("/devices/{device_id}/controller/reboot", response_model=DeviceControllerRebootOut)
+    def v2_reboot_device_controller(device_id: str, request: Request) -> dict:
+        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        try:
+            local_url = _device_local_url(device_id)
+            token = _controller_http_admin_token(device_id)
+            response = trigger_remote_reboot(local_url, admin_token=token)
+            reboot_triggered = bool(response.get("ok", True))
+            audit_action(
+                actor_user_id=request.state.auth_user.user_id,
+                action="reboot_controller",
+                resource_type="device",
+                resource_id=device_id,
+                metadata={
+                    "base_url": local_url,
+                    "reboot_triggered": reboot_triggered,
+                },
+            )
+            return {
+                "device_id": device_id,
+                "local_url": local_url,
+                "reboot_triggered": reboot_triggered,
+                "response": response,
+            }
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except DeviceOnboardingError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     @router.get("/devices/{device_id}/storage/sd-card", response_model=DeviceSdCardStatusOut)
     def v2_get_device_sd_card_status(device_id: str, request: Request) -> dict:

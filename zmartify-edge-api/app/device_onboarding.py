@@ -18,12 +18,20 @@ def normalize_device_base_url(base_url: str) -> str:
     return cleaned.rstrip("/")
 
 
-def _request_json(method: str, url: str, payload: dict | None = None, timeout_s: int = 10) -> dict:
+def _request_json(
+    method: str,
+    url: str,
+    payload: dict | None = None,
+    timeout_s: int = 10,
+    admin_token: str | None = None,
+) -> dict:
     data: bytes | None = None
     headers = {"Accept": "application/json"}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if admin_token:
+        headers["Authorization"] = f"Bearer {admin_token.strip()}"
 
     req = request.Request(url, data=data, headers=headers, method=method)
     try:
@@ -99,11 +107,19 @@ def push_remote_network_config(base_url: str, payload: dict) -> dict:
     return _request_json("POST", f"{normalized}/config/network", payload)
 
 
-def _request_octet_stream_json(method: str, url: str, payload: bytes, timeout_s: int = 120) -> dict:
+def _request_octet_stream_json(
+    method: str,
+    url: str,
+    payload: bytes,
+    timeout_s: int = 120,
+    admin_token: str | None = None,
+) -> dict:
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/octet-stream",
     }
+    if admin_token:
+        headers["Authorization"] = f"Bearer {admin_token.strip()}"
 
     req = request.Request(url, data=payload, headers=headers, method=method)
     try:
@@ -123,13 +139,19 @@ def _request_octet_stream_json(method: str, url: str, payload: bytes, timeout_s:
         raise DeviceOnboardingError("device returned invalid json") from exc
 
 
-def push_remote_firmware(base_url: str, firmware_bytes: bytes) -> dict:
+def push_remote_firmware(base_url: str, firmware_bytes: bytes, admin_token: str | None = None) -> dict:
     normalized = normalize_device_base_url(base_url)
     if not firmware_bytes:
         raise DeviceOnboardingError("firmware payload is empty")
-    return _request_octet_stream_json("POST", f"{normalized}/ota", firmware_bytes, timeout_s=180)
+    return _request_octet_stream_json(
+        "POST",
+        f"{normalized}/ota",
+        firmware_bytes,
+        timeout_s=180,
+        admin_token=admin_token,
+    )
 
 
-def trigger_remote_reboot(base_url: str) -> dict:
+def trigger_remote_reboot(base_url: str, admin_token: str | None = None) -> dict:
     normalized = normalize_device_base_url(base_url)
-    return _request_json("POST", f"{normalized}/reboot")
+    return _request_json("POST", f"{normalized}/reboot", admin_token=admin_token)

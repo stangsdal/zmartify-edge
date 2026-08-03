@@ -362,3 +362,98 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
     assert captured["command_type"] == "irrigation.config.storage.sd-card.initialize"
     assert captured["target_ref"] is None
     assert captured["payload"] == {"format": True}
+
+
+def test_api_v2_device_controller_mode_and_reboot(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    domain_id, site_id = _seed_domain_site(client, headers, suffix="ctrl")
+
+    import app.router_v2_device_lifecycle as lifecycle
+
+    monkeypatch.setattr(
+        lifecycle,
+        "discover_remote_device",
+        lambda _base_url: {
+            "base_url": "http://192.168.10.113",
+            "identity": {
+                "device_id": "zmartify-irrigation-control01",
+                "mac": "AA:BB:CC:DD:EE:33",
+                "firmware_version": "v5.2.7",
+            },
+            "claim": {},
+            "status": {"state": "discoverable"},
+        },
+    )
+    monkeypatch.setattr(lifecycle, "push_remote_onboarding_config", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        lifecycle,
+        "get_remote_onboarding_status",
+        lambda _base_url: {
+            "state": "claimed",
+            "device_id": "zmartify-irrigation-control01",
+            "edge_url": "https://pilot.zmartify.dk",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        },
+    )
+
+    claim = client.post(
+        "/api/v2/devices/claim",
+        headers=headers,
+        json={
+            "base_url": "http://192.168.10.113",
+            "claim_token": "claim-token",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Irrigation Control",
+        },
+    )
+    assert claim.status_code == 201
+
+    published: dict[str, object] = {}
+
+    def fake_publish(device_id: str, command_type: str, target_ref: str | None, payload: dict) -> dict:
+        published["device_id"] = device_id
+        published["command_type"] = command_type
+        published["target_ref"] = target_ref
+        published["payload"] = payload
+        return {
+            "command_id": "cmd-mode-1",
+            "status": "published",
+            "topic": "zmartify/v2/devices/zmartify-irrigation-control01/commands/irrigation/config/system/mode",
+        }
+
+    captured_reboot: dict[str, object] = {}
+
+    def fake_reboot(base_url: str, admin_token: str | None = None) -> dict:
+        captured_reboot["base_url"] = base_url
+        captured_reboot["admin_token"] = admin_token
+        return {"ok": True}
+
+    monkeypatch.setattr(lifecycle, "publish_irrigation_command", fake_publish)
+    monkeypatch.setattr(lifecycle, "trigger_remote_reboot", fake_reboot)
+
+    mode = client.post(
+        "/api/v2/devices/zmartify-irrigation-control01/controller/mode",
+        headers=headers,
+        json={"mode": "automatic"},
+    )
+    assert mode.status_code == 200
+    assert mode.json()["mode"] == "auto"
+    assert mode.json()["command_id"] == "cmd-mode-1"
+    assert published["device_id"] == "zmartify-irrigation-control01"
+    assert published["command_type"] == "irrigation.config.system.mode"
+    assert published["target_ref"] is None
+    assert published["payload"] == {"operational_mode": "auto"}
+
+    reboot = client.post(
+        "/api/v2/devices/zmartify-irrigation-control01/controller/reboot",
+        headers=headers,
+    )
+    assert reboot.status_code == 200
+    assert reboot.json()["reboot_triggered"] is True
+    assert captured_reboot["base_url"] == "http://192.168.10.113"
+    assert isinstance(captured_reboot["admin_token"], str)

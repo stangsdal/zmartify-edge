@@ -1,9 +1,10 @@
 import { IonButton, IonContent, IonPage } from '@ionic/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
+import { IrrigationZoneActionControl } from '../components/IrrigationZoneActionControl';
 import { SiteSelector } from '../components/SiteSelector';
-import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
-import { commandsApi } from '../api/commands';
+import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary } from '../api/mobile';
+import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
 
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
@@ -17,10 +18,6 @@ const zoneNumberFromRef = (ref: string): number | null => {
 };
 
 const zoneRefForNumber = (zoneNumber: number) => `zone-${zoneNumber}`;
-const zoneRefFromId = (zoneId: unknown) => {
-  const parsed = Number(zoneId);
-  return Number.isInteger(parsed) && parsed > 0 ? zoneRefForNumber(parsed) : '';
-};
 const fallbackOutputRefForZone = (zoneRef: string) => {
   const zoneNumber = zoneNumberFromRef(zoneRef);
   return zoneNumber == null ? `${zoneRef}-valve` : `output-${zoneNumber}`;
@@ -48,11 +45,9 @@ export function IrrigationSetupPage() {
   const [outputs, setOutputs] = useState<IrrigationOutput[]>([]);
   const [zoneCapacityByDevice, setZoneCapacityByDevice] = useState<Record<string, number>>({});
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, { name: string; enabled: boolean }>>({});
-  const [testRunZoneRefs, setTestRunZoneRefs] = useState<Record<string, boolean>>({});
-  const [pendingTestZoneRefs, setPendingTestZoneRefs] = useState<Record<string, number>>({});
   const [busyAction, setBusyAction] = useState('');
   const [feedback, setFeedback] = useState('');
-  const testRunTimers = useRef<Record<string, number>>({});
+  const { zoneRuns, startZone, stopZone } = useIrrigationRunState(selectedSite);
 
   const selectedDevice = useMemo(
     () => devices.find((device) => device.device_id === selectedDeviceId) || null,
@@ -120,16 +115,10 @@ export function IrrigationSetupPage() {
     if (!selectedDeviceId) {
       setZones([]);
       setOutputs([]);
-      setTestRunZoneRefs({});
-      setPendingTestZoneRefs({});
       return;
     }
     reloadDeviceSetup(selectedDeviceId).catch(console.error);
   }, [reloadDeviceSetup, selectedDeviceId]);
-
-  useEffect(() => () => {
-    Object.values(testRunTimers.current).forEach((timerId) => window.clearTimeout(timerId));
-  }, []);
 
   const outputRefForZone = useCallback((zoneRef: string) => {
     const zoneNumber = zoneNumberFromRef(zoneRef);
@@ -240,150 +229,24 @@ export function IrrigationSetupPage() {
     }));
   };
 
-  const clearTestRun = useCallback((zoneRef: string) => {
-    const timerId = testRunTimers.current[zoneRef];
-    if (timerId != null) {
-      window.clearTimeout(timerId);
-      delete testRunTimers.current[zoneRef];
-    }
-    setTestRunZoneRefs((prev) => {
-      const next = { ...prev };
-      delete next[zoneRef];
-      return next;
-    });
-  }, []);
-
-  const clearPendingTestRun = useCallback((zoneRef: string) => {
-    setPendingTestZoneRefs((prev) => {
-      const next = { ...prev };
-      delete next[zoneRef];
-      return next;
-    });
-  }, []);
-
-  const markPendingTestRun = useCallback((zoneRef: string) => {
-    setPendingTestZoneRefs((prev) => ({ ...prev, [zoneRef]: Date.now() }));
-  }, []);
-
-  const markTestRunning = useCallback((zoneRef: string) => {
-    clearTestRun(zoneRef);
-    clearPendingTestRun(zoneRef);
-    setTestRunZoneRefs((prev) => ({ ...prev, [zoneRef]: true }));
-    testRunTimers.current[zoneRef] = window.setTimeout(() => {
-      clearTestRun(zoneRef);
-    }, TEST_RUN_SECONDS * 1000);
-  }, [clearPendingTestRun, clearTestRun]);
-
-  const activeTestZoneRef = Object.keys(testRunZoneRefs)[0] || '';
-  const activePendingTestZoneRef = Object.keys(pendingTestZoneRefs)[0] || '';
-
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-
-    const unsubscribe = subscribeRealtimeTopics(['events'], (event) => {
-      if (event.event_type !== 'event.created') return;
-      const payload = (event.payload || {}) as Record<string, unknown>;
-      const mappedType = String(payload.event_type || '');
-      if (!mappedType.startsWith('irrigation_') && mappedType !== 'controller_fault') return;
-
-      const wrapped = payload.payload;
-      const outcome = (wrapped && typeof wrapped === 'object' ? wrapped : payload) as Record<string, unknown>;
-      if (outcome.device_id !== selectedDeviceId) return;
-
-      const zoneRef = zoneRefFromId(outcome.zone_id ?? payload.zone_id);
-      const outcomeType = String(outcome.event_type || '');
-      const result = String(outcome.result || '');
-      const detail = typeof outcome.detail === 'string' ? outcome.detail : '';
-
-      const started = outcomeType === 'run.started' || outcomeType === 'zone.started' || mappedType === 'irrigation_zone_started';
-      const stopped = outcomeType === 'run.stopped' || outcomeType === 'run.completed' || outcomeType === 'zone.stopped' || mappedType === 'irrigation_zone_stopped';
-      const rejected = result === 'rejected' || outcomeType.endsWith('.rejected') || mappedType === 'controller_fault';
-
-      if (zoneRef && started) {
-        markTestRunning(zoneRef);
-        setFeedback(`Controller started test run for ${zoneRef}.`);
-      } else if (zoneRef && stopped) {
-        clearPendingTestRun(zoneRef);
-        clearTestRun(zoneRef);
-        setFeedback(`Controller stopped test run for ${zoneRef}.`);
-      } else if (zoneRef && rejected) {
-        clearPendingTestRun(zoneRef);
-        clearTestRun(zoneRef);
-        const reason = detail || outcomeType || 'command rejected';
-        setFeedback(`Controller rejected ${zoneRef}: ${toIrrigationFeedback(reason)}.`);
-      }
-    });
-
-    return unsubscribe;
-  }, [clearPendingTestRun, clearTestRun, markTestRunning, selectedDeviceId]);
-
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-    const pendingEntries = Object.entries(pendingTestZoneRefs);
-    if (!pendingEntries.length) return;
-
-    let cancelled = false;
-    const checkPending = async () => {
-      try {
-        const response = await mobileApi.listIrrigationOutputs(selectedDeviceId);
-        if (cancelled) return;
-        const outputsNow = response.outputs || [];
-        setOutputs(outputsNow);
-
-        const now = Date.now();
-        for (const [zoneRef, requestedAt] of pendingEntries) {
-          const outputRef = outputRefForZone(zoneRef);
-          const output = outputsNow.find((item) => item.local_ref === outputRef);
-          if (output?.active) {
-            markTestRunning(zoneRef);
-            setFeedback(`Controller started test run for ${zoneRef}.`);
-            continue;
-          }
-          if (now - requestedAt > 15000) {
-            setFeedback(`No confirmation yet for ${zoneRef}. Check controller connectivity and try again.`);
-          }
-        }
-      } catch {
-        // Keep current UI state if fallback polling fails.
-      }
-    };
-
-    const timerId = window.setInterval(() => {
-      void checkPending();
-    }, 3000);
-    void checkPending();
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timerId);
-    };
-  }, [markTestRunning, outputRefForZone, pendingTestZoneRefs, selectedDeviceId]);
-
   const toggleZoneTest = async (zone: IrrigationZone) => {
     const localRef = zone.local_ref || zone.zone_id;
     if (!selectedDeviceId || !localRef) {
       setFeedback('Select a controller before testing a zone.');
       return;
     }
-    const isRunning = Boolean(testRunZoneRefs[localRef]);
-    const isPending = pendingTestZoneRefs[localRef] != null;
-    if (!isRunning && !isPending && ((activeTestZoneRef && activeTestZoneRef !== localRef) || (activePendingTestZoneRef && activePendingTestZoneRef !== localRef))) {
-      setFeedback(`Stop the running test for ${activeTestZoneRef} before starting another zone.`);
-      return;
-    }
+    const zoneRun = zoneRuns.find((item) => item.deviceId === selectedDeviceId && item.zoneRef === localRef);
     setBusyAction(`test:${zone.zone_id}`);
     setFeedback('');
     try {
-      if (isRunning) {
-        await commandsApi.stopIrrigationZone(selectedDeviceId, localRef);
-        setFeedback(`Stop command sent for ${localRef}. Waiting for controller confirmation.`);
+      if (zoneRun?.status === 'running') {
+        await stopZone(selectedDeviceId, localRef);
+        setFeedback(`Stopping ${zone.name || localRef}.`);
       } else {
-        await commandsApi.startIrrigationZone(selectedDeviceId, localRef, TEST_RUN_SECONDS);
-        markPendingTestRun(localRef);
-        setFeedback(`Start command sent for ${localRef}. Waiting for controller confirmation.`);
+        await startZone(selectedDeviceId, localRef, TEST_RUN_SECONDS);
+        setFeedback(`Starting ${zone.name || localRef} for 1 minute.`);
       }
     } catch (error) {
-      clearPendingTestRun(localRef);
       setFeedback(toIrrigationFeedback(error));
     } finally {
       setBusyAction('');
@@ -446,10 +309,7 @@ export function IrrigationSetupPage() {
                 const isSaving = busyAction === `zone:${zone.zone_id}`;
                 const isDeleting = busyAction === `delete:${zone.zone_id}`;
                 const isTesting = busyAction === `test:${zone.zone_id}`;
-                const isTestRunning = Boolean(testRunZoneRefs[localRef]);
-                const isPending = pendingTestZoneRefs[localRef] != null;
-                const activeOtherTestRef = activeTestZoneRef || activePendingTestZoneRef;
-                const isAnotherTestRunning = Boolean(activeOtherTestRef && activeOtherTestRef !== localRef);
+                const zoneRun = zoneRuns.find((item) => item.deviceId === selectedDeviceId && item.zoneRef === localRef);
                 return (
                   <article key={zone.zone_id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -476,15 +336,12 @@ export function IrrigationSetupPage() {
                       <IonButton size="small" expand="block" disabled={!selectedDeviceId || isSaving || isTesting || isDeleting} onClick={() => { void saveZone(zone, draft); }}>
                         {isSaving ? 'Saving...' : 'Save'}
                       </IonButton>
-                      <IonButton
-                        size="small"
-                        expand="block"
-                        color={isTestRunning ? 'danger' : 'medium'}
-                        disabled={!selectedDeviceId || isSaving || isTesting || isDeleting || isAnotherTestRunning || (!draft.enabled && !isTestRunning)}
-                        onClick={() => { void toggleZoneTest(zone); }}
-                      >
-                        {isTesting ? 'Sending...' : isPending ? 'Waiting...' : isTestRunning ? 'Stop test' : isAnotherTestRunning ? 'Test running' : 'Test 1 min'}
-                      </IonButton>
+                      <IrrigationZoneActionControl
+                        status={zoneRun?.status}
+                        disabled={!selectedDeviceId || isSaving || isTesting || isDeleting || !draft.enabled}
+                        onStart={() => { void toggleZoneTest(zone); }}
+                        onStop={() => { void toggleZoneTest(zone); }}
+                      />
                     </div>
                     <IonButton size="small" expand="block" fill="clear" color="danger" disabled={isSaving || isTesting || isDeleting} onClick={() => { void deleteZone(zone); }}>
                       {isDeleting ? 'Deleting...' : 'Delete zone'}

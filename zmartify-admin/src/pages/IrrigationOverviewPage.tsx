@@ -3,9 +3,10 @@ import { IonContent, IonPage } from '@ionic/react';
 import { NavLink } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { IrrigationSiteOverview, IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
+import { IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
 import { commandsApi } from '../api/commands';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
+import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
 
 interface DeviceZoneRow {
   deviceId: string;
@@ -43,11 +44,15 @@ const extractFromPayload = (payload: unknown, keys: string[]): number | null => 
 export function IrrigationOverviewPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
-  const [overview, setOverview] = useState<IrrigationSiteOverview | null>(null);
-  const [zones, setZones] = useState<DeviceZoneRow[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [busyAction, setBusyAction] = useState('');
   const [actionFeedback, setActionFeedback] = useState('');
+  const { overview, zoneRuns } = useIrrigationRunState(selectedSite);
+  const zones = useMemo<DeviceZoneRow[]>(() => zoneRuns.map((zoneRun) => ({
+    deviceId: zoneRun.deviceId,
+    displayName: zoneRun.displayName,
+    zone: zoneRun.zone,
+  })), [zoneRuns]);
 
   useEffect(() => {
     const loadSites = async () => {
@@ -62,39 +67,9 @@ export function IrrigationOverviewPage() {
     loadSites().catch(console.error);
   }, []);
 
-  useEffect(() => {
-    if (!selectedSite) return;
-    const loadSiteZones = async () => {
-      const [site, irrigationOverview] = await Promise.all([
-        mobileApi.getSite(selectedSite),
-        mobileApi.getIrrigationOverview(selectedSite),
-      ]);
-      setOverview(irrigationOverview);
-      const detailRows = await Promise.all(
-        site.devices.map(async (device) => {
-          const response = await mobileApi.listIrrigationZones(device.device_id);
-          return (response.zones || []).map((zone) => ({
-            deviceId: device.device_id,
-            displayName: device.display_name,
-            zone,
-          }));
-        })
-      );
-      setZones(detailRows.flat());
-    };
-    loadSiteZones().catch(console.error);
-  }, [selectedSite]);
-
-  useEffect(() => {
-    if (!selectedSite) return undefined;
-    const intervalId = window.setInterval(() => {
-      mobileApi.getIrrigationOverview(selectedSite).then(setOverview).catch(console.error);
-    }, 8000);
-    return () => window.clearInterval(intervalId);
-  }, [selectedSite]);
-
-  const activeDeviceIds = useMemo(() => new Set((overview?.devices || []).filter((device) => device.outputs.active > 0).map((device) => device.device_id)), [overview]);
-  const activeZones = useMemo(() => zones.filter((row) => activeDeviceIds.has(row.deviceId)), [activeDeviceIds, zones]);
+  const activeZones = useMemo(() => zoneRuns
+    .filter((zoneRun) => zoneRun.status === 'running' || zoneRun.status === 'starting' || zoneRun.status === 'stopping')
+    .map((zoneRun) => ({ deviceId: zoneRun.deviceId, displayName: zoneRun.displayName, zone: zoneRun.zone })), [zoneRuns]);
   const activeZone = activeZones[0] || null;
   const activeRuntime = useMemo(
     () => (overview?.devices || []).find((device) => device.runtime?.active_program_name || device.runtime?.active_zone_id != null) || null,
@@ -256,7 +231,7 @@ export function IrrigationOverviewPage() {
             <div className="space-y-2">
               {zones.map((row) => {
                 const zoneRef = row.zone.zone_id;
-                const active = activeDeviceIds.has(row.deviceId);
+                const active = activeZones.some((activeZoneRow) => activeZoneRow.deviceId === row.deviceId && activeZoneRow.zone.zone_id === row.zone.zone_id);
                 return (
                   <NavLink
                     key={zoneRef}

@@ -224,6 +224,90 @@ def list_irrigation_zones(device_external_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def get_site_irrigation_zone_snapshot(site_ref: str) -> dict[str, Any]:
+    with get_connection() as conn:
+        site = _resolve_site(conn, site_ref)
+        device_rows = conn.execute(
+            """
+            SELECT id, device_id, display_name
+            FROM devices
+            WHERE site_id = ?
+            ORDER BY id
+            """,
+            (site["id"],),
+        ).fetchall()
+        device_ids = [int(row["id"]) for row in device_rows]
+        if not device_ids:
+            return {"site_id": site["site_id"], "devices": []}
+
+        placeholders = ",".join("?" for _ in device_ids)
+        zone_rows = conn.execute(
+            f"""
+            SELECT device_id, uuid, local_ref, name, enabled, metadata_json, created_at, updated_at
+            FROM irrigation_zones
+            WHERE device_id IN ({placeholders})
+            ORDER BY device_id, id
+            """,
+            tuple(device_ids),
+        ).fetchall()
+        output_rows = conn.execute(
+            f"""
+            SELECT device_id, uuid, local_ref, name, enabled, active, fault, is_master_valve,
+                   metadata_json, created_at, updated_at
+            FROM irrigation_outputs
+            WHERE device_id IN ({placeholders})
+            ORDER BY device_id, id
+            """,
+            tuple(device_ids),
+        ).fetchall()
+
+    devices = {
+        int(row["id"]): {
+            "device_id": row["device_id"],
+            "display_name": row["display_name"],
+            "zones": [],
+            "outputs": [],
+        }
+        for row in device_rows
+    }
+    for row in zone_rows:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        devices[int(row["device_id"])]["zones"].append(
+            {
+                "zone_id": row["uuid"],
+                "local_ref": row["local_ref"],
+                "name": row["name"],
+                "enabled": bool(row["enabled"]),
+                "metadata": metadata,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            },
+        )
+    for row in output_rows:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        devices[int(row["device_id"])]["outputs"].append(
+            {
+                "output_id": row["uuid"],
+                "local_ref": row["local_ref"],
+                "name": row["name"],
+                "enabled": bool(row["enabled"]),
+                "active": bool(row["active"]),
+                "fault": row["fault"],
+                "is_master_valve": bool(row["is_master_valve"]),
+                "metadata": metadata,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            },
+        )
+    return {"site_id": site["site_id"], "devices": list(devices.values())}
+
+
 def upsert_irrigation_zone(
     device_external_id: str,
     *,
@@ -1235,6 +1319,21 @@ def list_irrigation_outputs(device_external_id: str) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def deactivate_irrigation_outputs(device_external_id: str) -> int:
+    with get_connection() as conn:
+        device = _resolve_device(conn, device_external_id)
+        cursor = conn.execute(
+            """
+            UPDATE irrigation_outputs
+            SET active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE device_id = ? AND active = 1
+            """,
+            (device["id"],),
+        )
+        conn.commit()
+    return int(cursor.rowcount)
 
 
 def upsert_irrigation_output_state(

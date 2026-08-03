@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { useLocation, useParams } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
+import { IrrigationZoneActionControl } from '../components/IrrigationZoneActionControl';
 import { IrrigationDeviceOverview, IrrigationZone, mobileApi, MobileEvent, subscribeRealtimeTopics } from '../api/mobile';
-import { commandsApi } from '../api/commands';
+import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
 
 interface RouteParams {
   zoneRef: string;
@@ -16,11 +17,12 @@ export function IrrigationZoneDetailPage() {
   const [zone, setZone] = useState<IrrigationZone | null>(null);
   const [deviceId, setDeviceId] = useState('');
   const [siteId, setSiteId] = useState('');
-  const [deviceOverview, setDeviceOverview] = useState<IrrigationDeviceOverview | null>(null);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [busyAction, setBusyAction] = useState('');
   const [commandFeedback, setCommandFeedback] = useState('');
+  const [commandFeedbackId, setCommandFeedbackId] = useState('');
+  const { overview, zoneRuns, startZone, stopZone } = useIrrigationRunState(siteId);
 
   const locationDeviceId = useMemo(() => new URLSearchParams(location.search).get('deviceId') || '', [location.search]);
 
@@ -38,9 +40,6 @@ export function IrrigationZoneDetailPage() {
               setZone(candidate);
               setDeviceId(device.device_id);
               setSiteId(site.site_id);
-              const irrigationOverview = await mobileApi.getIrrigationOverview(site.site_id);
-              setDeviceOverview((irrigationOverview.devices || []).find((row) => row.device_id === device.device_id) || null);
-
               const eventResponse = await mobileApi.listEvents(80, { siteId: site.site_id });
               const filtered = (eventResponse.events || []).filter((event) => {
                 const eventDeviceId = event.device_id || (typeof event.payload?.device_id === 'string' ? event.payload.device_id : '');
@@ -61,7 +60,6 @@ export function IrrigationZoneDetailPage() {
           if (!matchedDevice) continue;
           setSiteId(site.site_id);
           setDeviceId(locationDeviceId);
-          setDeviceOverview(matchedDevice);
           const eventResponse = await mobileApi.listEvents(80, { siteId: site.site_id });
           setEvents(
             (eventResponse.events || [])
@@ -92,22 +90,30 @@ export function IrrigationZoneDetailPage() {
         ...prev,
       ].slice(0, 20));
 
-      if (siteId) {
-        void mobileApi.getIrrigationOverview(siteId).then((overview) => {
-          setDeviceOverview((overview.devices || []).find((row) => row.device_id === deviceId) || null);
-        }).catch(console.error);
-      }
     });
 
     return unsubscribe;
-  }, [deviceId, siteId]);
+  }, [deviceId]);
+
+  const deviceOverview = useMemo<IrrigationDeviceOverview | null>(() =>
+    (overview?.devices || []).find((device) => device.device_id === deviceId) || null,
+  [deviceId, overview]);
+  const zoneRun = useMemo(() => zoneRuns.find((candidate) =>
+    candidate.deviceId === deviceId && candidate.zoneRef === (zone?.local_ref || zone?.zone_id),
+  ) || null, [deviceId, zone, zoneRuns]);
+  const isPendingStart = zoneRun?.status === 'starting';
+  const isPendingStop = zoneRun?.status === 'stopping';
+  const isZoneRunning = zoneRun?.status === 'running';
 
   const stateLabel = useMemo(() => {
     if (!zone) return 'Unknown';
     if (!zone.enabled) return 'Disabled';
-    if ((deviceOverview?.outputs?.active || 0) > 0) return 'Running';
+    if (isPendingStart) return 'Starting';
+    if (isPendingStop) return 'Stopping';
+    if (isZoneRunning) return 'Running';
+    if (zoneRun?.status === 'rejected') return 'Command rejected';
     return 'Ready';
-  }, [deviceOverview, zone]);
+  }, [isPendingStart, isPendingStop, isZoneRunning, zone, zoneRun]);
 
   const eventRows = useMemo(() => events.slice(0, 8), [events]);
 
@@ -121,11 +127,15 @@ export function IrrigationZoneDetailPage() {
     setCommandFeedback('');
     try {
       const result = action === 'start'
-        ? await commandsApi.startIrrigationZone(deviceId, targetRef, durationMinutes * 60)
-        : await commandsApi.stopIrrigationZone(deviceId, targetRef);
-      const status = typeof result.status === 'string' ? result.status : 'submitted';
+        ? await startZone(deviceId, targetRef, durationMinutes * 60)
+        : await stopZone(deviceId, targetRef);
       const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
-      setCommandFeedback(`${action === 'start' ? 'Start' : 'Stop'} command ${status}. Command id: ${commandId}`);
+      setCommandFeedback(
+        action === 'start'
+          ? `Starting ${zone.name || zone.local_ref} for ${durationMinutes} minutes.`
+          : `Stopping ${zone.name || zone.local_ref}.`,
+      );
+      setCommandFeedbackId(commandId === 'n/a' ? '' : commandId);
     } catch (error) {
       setCommandFeedback(error instanceof Error ? error.message : String(error));
     } finally {
@@ -151,24 +161,20 @@ export function IrrigationZoneDetailPage() {
               >
                 {[5, 10, 15, 20, 30, 45].map((value) => <option key={value} value={value}>{value} min</option>)}
               </select>
-              <button
-                type="button"
-                className="rounded-xl bg-teal-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
-                disabled={!zone || !deviceId || busyAction === 'start'}
-                onClick={() => { void runZoneCommand('start'); }}
-              >
-                {busyAction === 'start' ? 'Starting...' : 'Start zone'}
-              </button>
-              <button
-                type="button"
-                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-60"
-                disabled={!zone || !deviceId || busyAction === 'stop'}
-                onClick={() => { void runZoneCommand('stop'); }}
-              >
-                {busyAction === 'stop' ? 'Stopping...' : 'Stop zone'}
-              </button>
+              <IrrigationZoneActionControl
+                status={zoneRun?.status}
+                disabled={!zone || !deviceId || busyAction.length > 0}
+                onStart={() => { void runZoneCommand('start'); }}
+                onStop={() => { void runZoneCommand('stop'); }}
+              />
             </div>
             {commandFeedback ? <p className="text-sm text-muted mt-2">{commandFeedback}</p> : null}
+            {commandFeedbackId ? (
+              <details className="text-xs text-muted mt-2">
+                <summary>Command details</summary>
+                <p className="mt-1">Command ID: {commandFeedbackId}</p>
+              </details>
+            ) : null}
           </section>
 
           <section className="grid gap-3 md:grid-cols-3">

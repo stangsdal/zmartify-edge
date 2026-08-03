@@ -15,6 +15,7 @@ from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_comman
 from app.domain_model import log_event
 from app.irrigation_domain import (
     complete_irrigation_run,
+    deactivate_irrigation_outputs,
     ensure_irrigation_run_started,
     ensure_controller_zones,
     set_irrigation_rain_delay,
@@ -63,6 +64,33 @@ def _latest_sd_card_status(device_id: str) -> dict[str, Any]:
         return {}
     storage = _as_dict(payload.get("storage"))
     return _as_dict(storage.get("sd_card"))
+
+
+def _zone_id_for_command(device_id: str, command_id: str | None) -> int | None:
+    if not command_id:
+        return None
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT e.payload_json
+            FROM event_log e
+            JOIN devices d ON d.id = e.device_id
+            WHERE d.device_id = ? AND e.event_type = 'irrigation_command_published'
+            ORDER BY e.id DESC
+            LIMIT 100
+            """,
+            (device_id,),
+        ).fetchall()
+    for candidate in row:
+        try:
+            payload = json.loads(candidate["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if payload.get("command_id") != command_id:
+            continue
+        zone_id = _as_dict(payload.get("parameters")).get("zone_id")
+        return int(zone_id) if isinstance(zone_id, int) and zone_id > 0 else None
+    return None
 
 
 def ingest_mqtt_v2_reported_state(
@@ -307,7 +335,22 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
     severity = str(outcome.get("severity") or "info").strip().lower()
     result = str(outcome.get("result") or "").strip().lower()
     detail = str(outcome.get("detail") or "").strip() or None
+    outcome_payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
     command_id = str(outcome.get("command_id") or "").strip() or None
+    if not command_id:
+        for candidate in (
+            outcome.get("run_id"),
+            outcome_payload.get("command_id"),
+            outcome_payload.get("run_id"),
+            (outcome_payload.get("command") or {}).get("command_id") if isinstance(outcome_payload.get("command"), dict) else None,
+            (outcome_payload.get("command") or {}).get("id") if isinstance(outcome_payload.get("command"), dict) else None,
+            outcome_payload.get("id"),
+            outcome_payload.get("correlation_id"),
+        ):
+            value = str(candidate or "").strip()
+            if value:
+                command_id = value
+                break
     category = classify_irrigation_outcome_event_type(normalized_event_type)
     is_failure = severity in {"alarm", "critical"} or result in {"failed", "fault", "error"}
 
@@ -320,11 +363,11 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
         mapped_event_type = "controller_fault"
 
     side_effects: list[str] = []
-    outcome_payload = outcome.get("payload") if isinstance(outcome.get("payload"), dict) else {}
 
     run_id = str(outcome.get("run_id") or "").strip()
     if not run_id and category == "run" and command_id:
         run_id = command_id
+    zone_id = outcome.get("zone_id") if isinstance(outcome.get("zone_id"), int) else _zone_id_for_command(device_id, command_id)
     if normalized_event_type == "run.started" and run_id:
         try:
             ensure_irrigation_run_started(
@@ -370,13 +413,34 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
             except RegistryNotFoundError:
                 pass
 
+    if zone_id is not None and normalized_event_type in {"zone.started", "run.started", "zone.stopped", "run.stopped", "run.completed"}:
+        try:
+            active = normalized_event_type in {"zone.started", "run.started"}
+            upsert_irrigation_output_state(
+                device_id,
+                local_ref=f"output-{zone_id}",
+                name=f"Zone {zone_id}",
+                active=active,
+                metadata={"last_outcome_event": normalized_event_type},
+            )
+            side_effects.append("output.updated")
+        except RegistryNotFoundError:
+            pass
+
+    if normalized_event_type == "run.stopped" and detail == "stop_all":
+        try:
+            deactivated_count = deactivate_irrigation_outputs(device_id)
+            side_effects.append(f"outputs.deactivated:{deactivated_count}")
+        except RegistryNotFoundError:
+            pass
+
     context = _resolve_device_context(device_id)
     event = log_event(
         mapped_event_type,
         domain_id=context["domain_id"],
         site_id=context["site_id"],
         device_pk_id=context["device_pk_id"],
-        zone_id=int(outcome["zone_id"]) if isinstance(outcome.get("zone_id"), int) else None,
+        zone_id=zone_id,
         payload={
             "device_id": device_id,
             "event_type": normalized_event_type,
@@ -385,7 +449,7 @@ def ingest_mqtt_v2_irrigation_outcome(device_id: str, payload: dict[str, Any]) -
             "severity": severity,
             "result": result or None,
             "detail": detail,
-            "run_id": outcome.get("run_id"),
+            "run_id": run_id or None,
             "program_id": outcome.get("program_id"),
             "side_effects": side_effects,
             "payload": outcome_payload,

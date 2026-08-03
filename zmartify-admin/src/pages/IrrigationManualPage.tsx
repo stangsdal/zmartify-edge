@@ -2,30 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
-import { commandsApi } from '../api/commands';
+import { IrrigationZoneActionControl } from '../components/IrrigationZoneActionControl';
+import { MobileEvent, mobileApi, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
+import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
 
 const durations = [5, 10, 15, 20, 30, 45];
 
-interface ZoneCandidate {
-  deviceId: string;
-  displayName: string;
-  zone: IrrigationZone;
-  active: boolean;
-  zoneRef: string;
-}
+const zoneKey = (deviceId: string, zoneRef: string) => `${deviceId}:${zoneRef}`;
 
 export function IrrigationManualPage() {
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [selectedSite, setSelectedSite] = useState('');
-  const [zones, setZones] = useState<ZoneCandidate[]>([]);
-  const [selectedZoneRef, setSelectedZoneRef] = useState('');
+  const [selectedZoneKey, setSelectedZoneKey] = useState('');
   const [duration, setDuration] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [lastCommandId, setLastCommandId] = useState('');
   const [traceRows, setTraceRows] = useState<MobileEvent[]>([]);
+  const { zoneRuns, startZone, stopZone } = useIrrigationRunState(selectedSite);
 
   useEffect(() => {
     const loadSites = async () => {
@@ -39,33 +34,15 @@ export function IrrigationManualPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSite) return;
-    const loadSiteZones = async () => {
-      const site = await mobileApi.getSite(selectedSite);
-      const overview = await mobileApi.getIrrigationOverview(selectedSite);
-      const activeDeviceIds = new Set((overview.devices || []).filter((device) => device.outputs.active > 0).map((device) => device.device_id));
-      const detailRows = await Promise.all(site.devices.map(async (device) => {
-        const response = await mobileApi.listIrrigationZones(device.device_id);
-        return (response.zones || []).map((zone: IrrigationZone) => ({
-          deviceId: device.device_id,
-          displayName: device.display_name,
-          zone,
-          active: activeDeviceIds.has(device.device_id),
-          zoneRef: zone.local_ref || zone.zone_id,
-        }));
-      }));
-      const nextZones = detailRows.flat();
-      setZones(nextZones);
-      if (nextZones.length) {
-        const firstRef = nextZones[0].zoneRef;
-        setSelectedZoneRef((prev) => prev || firstRef);
-      } else {
-        setSelectedZoneRef('');
-      }
-      setFeedback('');
-    };
-    loadSiteZones().catch(console.error);
+    setSelectedZoneKey('');
+    setFeedback('');
+    setLastCommandId('');
   }, [selectedSite]);
+
+  useEffect(() => {
+    if (!zoneRuns.length) return;
+    setSelectedZoneKey((previous) => previous || zoneKey(zoneRuns[0].deviceId, zoneRuns[0].zoneRef));
+  }, [zoneRuns]);
 
   useEffect(() => {
     if (!selectedSite) return;
@@ -100,10 +77,9 @@ export function IrrigationManualPage() {
     return () => cleanup?.();
   }, [selectedSite]);
 
-  const selectedZone = useMemo(
-    () => zones.find((zone) => zone.zoneRef === selectedZoneRef) || null,
-    [selectedZoneRef, zones]
-  );
+  const selectedZone = useMemo(() => zoneRuns.find((zoneRun) =>
+    zoneKey(zoneRun.deviceId, zoneRun.zoneRef) === selectedZoneKey,
+  ) || null, [selectedZoneKey, zoneRuns]);
 
   const matchingTraceRows = useMemo(() => {
     if (!selectedZone) return traceRows.slice(0, 8);
@@ -127,11 +103,29 @@ export function IrrigationManualPage() {
     setIsSubmitting(true);
     setFeedback('');
     try {
-      const result = await commandsApi.startIrrigationZone(selectedZone.deviceId, selectedZone.zoneRef, duration * 60);
-      const status = typeof result.status === 'string' ? result.status : 'accepted';
+      const result = await startZone(selectedZone.deviceId, selectedZone.zoneRef, duration * 60);
       const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
       setLastCommandId(commandId === 'n/a' ? '' : commandId);
-      setFeedback(`Manual run command submitted (${status}). Command id: ${commandId}`);
+      setFeedback(`Starting ${selectedZone.zone.name || selectedZone.zone.local_ref} for ${duration} minutes.`);
+    } catch (error) {
+      setFeedback(toIrrigationFeedback(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const stopManual = async () => {
+    if (!selectedZone) {
+      setFeedback('Select a zone before stopping manual run.');
+      return;
+    }
+    setIsSubmitting(true);
+    setFeedback('');
+    try {
+      const result = await stopZone(selectedZone.deviceId, selectedZone.zoneRef);
+      const commandId = typeof result.command_id === 'string' ? result.command_id : 'n/a';
+      setLastCommandId(commandId === 'n/a' ? '' : commandId);
+      setFeedback(`Stopping ${selectedZone.zone.name || selectedZone.zone.local_ref}.`);
     } catch (error) {
       setFeedback(toIrrigationFeedback(error));
     } finally {
@@ -154,22 +148,25 @@ export function IrrigationManualPage() {
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Selected zone</p>
             <div className="grid gap-2 mt-2">
-              {zones.map((zone) => {
-                const ref = zone.zoneRef;
-                const active = ref === selectedZoneRef;
+              {zoneRuns.map((zone) => {
+                const key = zoneKey(zone.deviceId, zone.zoneRef);
+                const active = key === selectedZoneKey;
+                const starting = zone.status === 'starting';
+                const stopping = zone.status === 'stopping';
+                const running = zone.status === 'running';
                 return (
                   <button
-                    key={ref}
+                    key={key}
                     type="button"
                     className={`text-left rounded-xl px-3 py-2 border ${active ? 'border-teal-500 bg-teal-50' : 'border-slate-200'}`}
-                    onClick={() => setSelectedZoneRef(ref)}
+                    onClick={() => setSelectedZoneKey(key)}
                   >
                     <p className="font-semibold">{zone.zone.name || zone.zone.local_ref}</p>
-                    <p className="text-sm text-muted">{zone.displayName} · {!zone.zone.enabled ? 'Disabled' : zone.active ? 'Running' : 'Ready'}</p>
+                    <p className="text-sm text-muted">{zone.displayName} · {!zone.zone.enabled ? 'Disabled' : starting ? 'Starting...' : stopping ? 'Stopping...' : running ? 'Running' : 'Ready'}</p>
                   </button>
                 );
               })}
-              {!zones.length ? <p className="text-sm text-muted">No irrigation zones available.</p> : null}
+              {!zoneRuns.length ? <p className="text-sm text-muted">No irrigation zones available.</p> : null}
             </div>
           </section>
 
@@ -194,17 +191,21 @@ export function IrrigationManualPage() {
             <p className="text-base mt-1 font-semibold">
               {selectedZone ? `${selectedZone.zone.name || selectedZone.zone.local_ref} for ${duration} minutes` : 'Select a zone'}
             </p>
-            <button
-              type="button"
-              className="mt-3 rounded-xl bg-teal-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
-              onClick={() => {
-                void runManual();
-              }}
-              disabled={!selectedZone || isSubmitting}
-            >
-              {isSubmitting ? 'Submitting...' : 'Start zone'}
-            </button>
+            <div className="mt-3">
+              <IrrigationZoneActionControl
+                status={selectedZone?.status}
+                disabled={!selectedZone || isSubmitting}
+                onStart={() => { void runManual(); }}
+                onStop={() => { void stopManual(); }}
+              />
+            </div>
             {feedback ? <p className="text-sm mt-2 text-muted">{feedback}</p> : null}
+            {lastCommandId ? (
+              <details className="text-xs text-muted mt-2">
+                <summary>Command details</summary>
+                <p className="mt-1">Command ID: {lastCommandId}</p>
+              </details>
+            ) : null}
           </section>
 
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">

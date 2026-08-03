@@ -280,6 +280,16 @@ export interface IrrigationOutput {
   updated_at?: string;
 }
 
+export interface IrrigationZoneSnapshot {
+  site_id: string;
+  devices: Array<{
+    device_id: string;
+    display_name: string;
+    zones: IrrigationZone[];
+    outputs: IrrigationOutput[];
+  }>;
+}
+
 export interface IrrigationZoneUpsertPayload {
   local_ref: string;
   name: string;
@@ -431,6 +441,9 @@ export const mobileApi = {
 
   getIrrigationOverview: (siteId: string): Promise<IrrigationSiteOverview> =>
     apiClient.get(`/api/v2/sites/${encodeURIComponent(siteId)}/irrigation/overview`),
+
+  getIrrigationZoneSnapshot: (siteId: string): Promise<IrrigationZoneSnapshot> =>
+    apiClient.get(`/api/v2/sites/${encodeURIComponent(siteId)}/irrigation/zone-snapshot`),
 
   listIrrigationZones: (deviceId: string): Promise<{ device_id: string; zones: IrrigationZone[] }> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/zones`),

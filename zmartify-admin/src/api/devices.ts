@@ -1,5 +1,15 @@
 import { apiClient } from './client';
-import { Device, DeviceClaimRequest, DeviceControllerSettings, DeviceControllerSettingsUpdate, DeviceDiscovery, DeviceFreshness, DeviceSdCardStatus } from '../types/api';
+import {
+  Device,
+  DeviceClaimRequest,
+  DeviceControllerModeSetResponse,
+  DeviceControllerRebootResponse,
+  DeviceControllerSettings,
+  DeviceControllerSettingsUpdate,
+  DeviceDiscovery,
+  DeviceFreshness,
+  DeviceSdCardStatus,
+} from '../types/api';
 
 export const deviceApi = {
   list: () => apiClient.get('/devices'),
@@ -39,6 +49,12 @@ export const deviceApi = {
 
   updateControllerSettings: (deviceId: string, payload: DeviceControllerSettingsUpdate): Promise<DeviceControllerSettings> =>
     apiClient.put(`/api/v2/devices/${deviceId}/controller-settings`, payload),
+
+  setControllerMode: (deviceId: string, mode: 'auto' | 'manual' | 'off' | 'service'): Promise<DeviceControllerModeSetResponse> =>
+    apiClient.post(`/api/v2/devices/${deviceId}/controller/mode`, { mode }),
+
+  rebootController: (deviceId: string): Promise<DeviceControllerRebootResponse> =>
+    apiClient.post(`/api/v2/devices/${deviceId}/controller/reboot`, {}),
 
   getSdCardStatus: (deviceId: string): Promise<DeviceSdCardStatus> =>
     apiClient.get(`/api/v2/devices/${deviceId}/storage/sd-card`),
