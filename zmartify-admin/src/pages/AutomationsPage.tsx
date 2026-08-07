@@ -3,9 +3,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
+import { useAccess } from '../auth/AccessContext';
 
 export function AutomationsPage() {
   const history = useHistory();
+  const { context, selectedSiteId } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [error, setError] = useState('');
@@ -27,6 +29,8 @@ export function AutomationsPage() {
     const hvacEvents = events.filter((event) => event.event_type.toLowerCase().includes('setpoint')).length;
     return { totalSites, totalDevices, irrigationEvents, hvacEvents };
   }, [events, sites]);
+  const selectedSite = context?.sites.find((site) => site.id === selectedSiteId);
+  const selectedSiteBase = selectedSite ? `/app/sites/${selectedSite.uuid || selectedSite.id}` : '/app/home';
 
   return (
     <IonPage>
@@ -59,7 +63,7 @@ export function AutomationsPage() {
             <p className="text-sm text-muted mt-1">
               Manage sequential watering programs, weather adjustments and manual overrides.
             </p>
-            <IonButton className="mt-3" onClick={() => history.push('/app/control/irrigation/programs')}>
+            <IonButton className="mt-3" onClick={() => history.push(`${selectedSiteBase}/irrigation/programs`)}>
               Open programs
             </IonButton>
           </section>
@@ -69,7 +73,7 @@ export function AutomationsPage() {
             <p className="text-sm text-muted mt-1">
               Configure room behavior patterns and monitor setpoint operations from Control and Insights.
             </p>
-            <IonButton className="mt-3" fill="outline" onClick={() => history.push('/app/control/hvac/zones')}>
+            <IonButton className="mt-3" fill="outline" onClick={() => history.push(`${selectedSiteBase}/hvac/zones`)}>
               Open HVAC zones
             </IonButton>
           </section>

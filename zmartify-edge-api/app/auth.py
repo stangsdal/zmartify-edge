@@ -445,13 +445,7 @@ def register_user_with_invite(*, invite_token: str, username: str, display_name:
         except sqlite3.IntegrityError as exc:
             raise AuthError("username already exists") from exc
 
-        role_map = _role_ids(conn)
-        viewer_role_id = role_map.get(ROLE_VIEWER)
-        if viewer_role_id is None:
-            raise AuthError("viewer role missing")
-
         new_user_id = int(user_cur.lastrowid)
-        conn.execute("INSERT OR IGNORE INTO user_roles(user_id, role_id) VALUES (?, ?)", (new_user_id, viewer_role_id))
 
         invite_update = conn.execute(
             """
@@ -610,7 +604,7 @@ def authenticate_emergency_token(token: str) -> AuthenticatedUser | None:
     return AuthenticatedUser(
         user_id=None,
         username="emergency_token",
-        roles={ROLE_OWNER},
+        roles={ROLE_ADMINISTRATOR},
         token_id=None,
         emergency=True,
     )

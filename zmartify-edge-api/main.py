@@ -19,9 +19,8 @@ from app.auth import (
     authenticate_emergency_token,
     audit_action,
     ensure_bootstrap_administrator,
-    require_any_role,
 )
-from app.permissions import accessible_site_ids, require_site_permission
+from app.permissions import accessible_site_ids, require_global_admin, require_site_permission
 from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
 from app.db import get_connection, initialize_database
 from app.device_onboarding import (
@@ -534,12 +533,12 @@ async def shutdown_event() -> None:
     setpoint_outcome_listener.stop()
 
 
-def _require_roles(request: Request, allowed_roles: set[str]) -> None:
+def _require_roles(request: Request, _legacy_roles: set[str]) -> None:
     auth_user = getattr(request.state, "auth_user", None)
     if auth_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
     try:
-        require_any_role(auth_user, allowed_roles)
+        require_global_admin(auth_user)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
