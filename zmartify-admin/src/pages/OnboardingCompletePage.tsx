@@ -5,9 +5,11 @@ import { AppHeader } from '../components/AppHeader';
 import { deviceApi } from '../api/devices';
 import { onboardingFlow } from '../utils/onboardingFlow';
 import { parseApiError } from '../utils/apiError';
+import { useAccess } from '../auth/AccessContext';
 
 export function OnboardingCompletePage() {
   const history = useHistory();
+  const { context, selectedSiteId } = useAccess();
   const flow = onboardingFlow.load();
   const deviceId = flow.claimResult?.device?.device_id;
   const [statusText, setStatusText] = useState('Checking device status...');
@@ -82,6 +84,10 @@ export function OnboardingCompletePage() {
     || flow.discovery?.identity.product_type?.includes('irrigation')
     || flow.discovery?.identity.product_model?.includes('irrigation')
     || deviceId?.includes('irrigation');
+  const selectedSite = context?.sites.find((site) => site.id === selectedSiteId);
+  const irrigationRoute = selectedSite
+    ? `/app/sites/${selectedSite.uuid || selectedSite.id}/irrigation`
+    : '/app/control/irrigation/overview';
 
   return (
     <IonPage>
@@ -120,7 +126,7 @@ export function OnboardingCompletePage() {
               >
                 New onboarding
               </IonButton>
-              <IonButton onClick={() => history.push(isIrrigationController ? '/app/control/irrigation/overview' : '/app/devices')}>
+              <IonButton onClick={() => history.push(isIrrigationController ? irrigationRoute : '/app/devices')}>
                 {isIrrigationController ? 'Open irrigation control' : 'Go to devices'}
               </IonButton>
             </div>

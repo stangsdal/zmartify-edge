@@ -81,6 +81,7 @@ function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
 function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
   const history = useHistory();
   const [zones, setZones] = useState<IrrigationZone[]>([]);
+  const [siteRef, setSiteRef] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -89,6 +90,8 @@ function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
       setLoading(true);
       const response = await mobileApi.listIrrigationZones(deviceId);
       setZones(response.zones || []);
+      const device = await mobileApi.getDevice(deviceId).catch(() => null);
+      setSiteRef(device?.site?.site_id || '');
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -122,7 +125,7 @@ function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
           <IonButton size="small" fill="outline" onClick={() => { void fetchZones(); }}>
             Refresh
           </IonButton>
-          <IonButton size="small" onClick={() => history.push('/app/control/irrigation/setup')}>
+          <IonButton size="small" onClick={() => history.push(siteRef ? `/app/sites/${encodeURIComponent(siteRef)}/irrigation/setup` : '/app/control/irrigation/setup')}>
             Setup
           </IonButton>
         </div>
@@ -140,7 +143,11 @@ function IrrigationZonesPanel({ deviceId }: { deviceId: string }) {
             key={zone.zone_id}
             type="button"
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left bg-white"
-            onClick={() => history.push(`/app/control/irrigation/zones/${encodeURIComponent(zone.zone_id)}?deviceId=${encodeURIComponent(deviceId)}`)}
+            onClick={() => history.push(
+              siteRef
+                ? `/app/sites/${encodeURIComponent(siteRef)}/irrigation/zones/${encodeURIComponent(zone.zone_id)}`
+                : `/app/control/irrigation/zones/${encodeURIComponent(zone.zone_id)}?deviceId=${encodeURIComponent(deviceId)}`
+            )}
           >
             <p className="font-semibold">{zone.name || zone.local_ref}</p>
             <p className="text-xs text-muted">{zone.local_ref} · {zone.enabled ? 'Enabled' : 'Disabled'}</p>
