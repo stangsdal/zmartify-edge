@@ -10,8 +10,9 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.auth import AuthError, AuthenticatedUser, audit_action
 from app.device_onboarding import DeviceOnboardingError, push_remote_firmware, trigger_remote_reboot
+from app.mqtt_commands import MqttCommandError, publish_irrigation_command
 from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_permission
-from app.registry import RegistryNotFoundError, get_device_onboarding_context
+from app.registry import RegistryNotFoundError, get_device_admin_token, get_device_onboarding_context
 from app.schemas import DeviceOtaOut, DeviceOtaPollOut, DeviceOtaStageOut
 
 _REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
@@ -77,6 +78,17 @@ def _edge_public_base_url() -> str:
     if configured.rstrip("/") == _REQUIRED_PUBLIC_EDGE_URL:
         return _REQUIRED_PUBLIC_EDGE_URL
     return _REQUIRED_PUBLIC_EDGE_URL
+
+
+def _version_parts(value: str | None) -> tuple[int, int, int] | None:
+    normalized = str(value or "").strip().lower().lstrip("v").split("-", 1)[0]
+    if not normalized:
+        return None
+    parts = normalized.split(".")
+    if len(parts) > 3 or any(not item.isdigit() for item in parts):
+        return None
+    numbers = [int(item) for item in parts]
+    return tuple((numbers + [0, 0, 0])[:3])
 
 
 def create_device_ota_v2_router() -> APIRouter:
@@ -192,6 +204,30 @@ def create_device_ota_v2_router() -> APIRouter:
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    @router.post("/devices/{device_id}/ota/pull-config")
+    def v2_configure_device_pull_ota(device_id: str, request: Request) -> dict:
+        device = require_device_configure(device_id, request)
+        if str(device.get("device_type") or "") != "irrigation_controller":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pull OTA MQTT bootstrap is only supported for irrigation controllers")
+        try:
+            device_token = get_device_admin_token(device_id)
+            command = publish_irrigation_command(
+                device_id,
+                "irrigation.ota.config",
+                None,
+                {"edge_url": _edge_public_base_url(), "device_token": device_token},
+            )
+            audit_action(
+                actor_user_id=request.state.auth_user.user_id,
+                action="configure_device_pull_ota",
+                resource_type="device",
+                resource_id=device_id,
+                metadata={"command_id": command.get("command_id")},
+            )
+            return {"device_id": device_id, "status": "published", "command_id": command.get("command_id")}
+        except (RegistryNotFoundError, MqttCommandError) as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
     @router.get("/devices/{device_id}/ota/poll", response_model=DeviceOtaPollOut)
     def v2_device_ota_poll(device_id: str, request: Request, current_version: str | None = None) -> dict:
         _ = request
@@ -203,12 +239,15 @@ def create_device_ota_v2_router() -> APIRouter:
                 "reason": "no staged update",
             }
 
-        if not staged.get("force") and current_version and current_version.strip() == staged.get("version"):
-            return {
-                "device_id": device_id,
-                "update_available": False,
-                "reason": "already on staged version",
-            }
+        if not staged.get("force") and current_version:
+            current = _version_parts(current_version)
+            staged_version = _version_parts(staged.get("version"))
+            if current is not None and staged_version is not None and staged_version <= current:
+                return {
+                    "device_id": device_id,
+                    "update_available": False,
+                    "reason": "staged version is not newer than device version",
+                }
 
         base = _edge_public_base_url()
         return {

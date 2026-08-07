@@ -74,6 +74,15 @@ def test_api_v2_device_ota_flow(monkeypatch, tmp_path: Path):
     assert poll_current.status_code == 200
     assert poll_current.json()["update_available"] is False
 
+    poll_newer = client.get(
+        "/api/v2/devices/hvac-gateway-ota01/ota/poll",
+        headers={"Authorization": "Bearer emergency-token"},
+        params={"current_version": "2.1.0"},
+    )
+    assert poll_newer.status_code == 200
+    assert poll_newer.json()["update_available"] is False
+    assert poll_newer.json()["reason"] == "staged version is not newer than device version"
+
     downloaded = client.get(
         "/api/v2/devices/hvac-gateway-ota01/ota/download",
         headers={"Authorization": "Bearer emergency-token"},
