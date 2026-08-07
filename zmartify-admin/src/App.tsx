@@ -1,5 +1,5 @@
 import { ReactNode, useEffect } from 'react';
-import { Redirect, Route, useLocation } from 'react-router-dom';
+import { Redirect, Route, useHistory, useLocation } from 'react-router-dom';
 import { IonTabs, IonRouterOutlet } from '@ionic/react';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
@@ -37,10 +37,12 @@ import { OnboardingClaimPage } from './pages/OnboardingClaimPage';
 import { OnboardingAssignSitePage } from './pages/OnboardingAssignSitePage';
 import { OnboardingCompletePage } from './pages/OnboardingCompletePage';
 import { SystemsPage } from './pages/SystemsPage';
+import { SiteSystemsPage } from './pages/SiteSystemsPage';
 import { AutomationsPage } from './pages/AutomationsPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ResponsiveNavigation } from './components/ResponsiveNavigation';
 import { useAccess } from './auth/AccessContext';
+import { resolveSiteSelectionPath } from './auth/siteSelection';
 
 function SiteRouteGuard({ siteRef, product, permission, children }: { siteRef: string; product?: 'hvac' | 'irrigation'; permission?: 'operate' | 'configure' | 'administer'; children: ReactNode }) {
   const { context, isAuthenticated, isLoading, selectSite, can } = useAccess();
@@ -48,7 +50,7 @@ function SiteRouteGuard({ siteRef, product, permission, children }: { siteRef: s
 
   useEffect(() => {
     if (site) {
-      selectSite(site.id);
+      selectSite(site.id, { syncRoute: false });
     }
   }, [site?.id]);
 
@@ -71,8 +73,9 @@ function SiteRouteGuard({ siteRef, product, permission, children }: { siteRef: s
 }
 
 export function App() {
+  const history = useHistory();
   const location = useLocation();
-  const { context, isAdministrator, isAuthenticated, isLoading, selectedSiteId } = useAccess();
+  const { context, isAdministrator, isAuthenticated, isLoading, selectedSiteId, siteSelectionVersion } = useAccess();
   const appBase = '/app';
   const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`];
   const isPublicRoute = publicRoutePrefixes.some(
@@ -87,6 +90,18 @@ export function App() {
   const controlPath = selectedHasIrrigation ? `${selectedSiteBase}/irrigation` : selectedHasHvac ? `${selectedSiteBase}/hvac` : selectedSiteBase;
   const authChecked = !isLoading;
   const authLoadingView = <div style={{ padding: '16px' }}>Spinning up...</div>;
+
+  useEffect(() => {
+    if (!selectedSite || siteSelectionVersion === 0) {
+      return;
+    }
+
+    const replacementPath = resolveSiteSelectionPath(location.pathname, selectedSite);
+    if (!replacementPath) {
+      return;
+    }
+    history.replace(replacementPath);
+  }, [history, location.pathname, selectedSite, siteSelectionVersion]);
 
   const requireAuth = (view: JSX.Element) => {
     if (!authChecked) {
@@ -154,6 +169,11 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/sites/:siteRef/systems`}
+            render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef}><SiteSystemsPage /></SiteRouteGuard>}
+          />
+          <Route
+            exact
             path={`${appBase}/sites/:siteRef/irrigation/zones`}
             render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef} product="irrigation"><Redirect to={`${appBase}/sites/${match.params.siteRef}/irrigation`} /></SiteRouteGuard>}
           />
@@ -191,6 +211,21 @@ export function App() {
             exact
             path={`${appBase}/sites/:siteRef/hvac/history`}
             render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef} product="hvac"><HistoryPage /></SiteRouteGuard>}
+          />
+          <Route
+            exact
+            path={`${appBase}/sites/:siteRef/hvac/settings`}
+            render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef} product="hvac" permission="configure"><SettingsPage /></SiteRouteGuard>}
+          />
+          <Route
+            exact
+            path={`${appBase}/sites/:siteRef/irrigation/history`}
+            render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef} product="irrigation"><InsightsWaterPage /></SiteRouteGuard>}
+          />
+          <Route
+            exact
+            path={`${appBase}/sites/:siteRef/irrigation/settings`}
+            render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef} product="irrigation" permission="configure"><Redirect to={`${appBase}/sites/${match.params.siteRef}/irrigation/setup`} /></SiteRouteGuard>}
           />
           <Route
             exact
@@ -411,12 +446,12 @@ export function App() {
           <Route
             exact
             path={`${appBase}/sites`}
-              render={() => requireAdmin(<SitesPage />)}
+              render={() => <Redirect to={`${appBase}/admin/sites`} />}
           />
           <Route
             exact
             path={`${appBase}/devices`}
-              render={() => requireAdmin(<DevicesPage />)}
+              render={() => <Redirect to={`${appBase}/admin/devices`} />}
           />
           <Route
             exact
@@ -441,7 +476,7 @@ export function App() {
           <Route
             exact
             path={`${appBase}/users`}
-              render={() => requireAdmin(<UsersPage />)}
+              render={() => <Redirect to={`${appBase}/admin/users`} />}
           />
           <Route
             exact
@@ -461,6 +496,26 @@ export function App() {
           <Route
             exact
             path={`${appBase}/system`}
+              render={() => <Redirect to={`${appBase}/admin/system`} />}
+          />
+          <Route
+            exact
+            path={`${appBase}/admin/sites`}
+              render={() => requireAdmin(<SitesPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/admin/devices`}
+              render={() => requireAdmin(<DevicesPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/admin/users`}
+              render={() => requireAdmin(<UsersPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/admin/system`}
               render={() => requireAdmin(<SystemPage />)}
           />
           <Route

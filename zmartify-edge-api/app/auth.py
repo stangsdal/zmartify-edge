@@ -16,10 +16,6 @@ from argon2.exceptions import VerifyMismatchError
 
 from app.db import get_connection, get_db_path
 
-ROLE_OWNER = "owner"
-ROLE_ADMIN = "admin"
-ROLE_INSTALLER = "installer"
-ROLE_VIEWER = "viewer"
 ROLE_ADMINISTRATOR = "administrator"
 
 _PASSWORD_HASHER = PasswordHasher()
@@ -81,6 +77,11 @@ def _roles_for_user(conn: sqlite3.Connection, user_id: int) -> set[str]:
         (user_id,),
     ).fetchall()
     return {row["name"] for row in rows}
+
+
+def _validate_global_roles(roles: list[str]) -> None:
+    if set(roles) - {ROLE_ADMINISTRATOR}:
+        raise AuthError("only the administrator global role is supported")
 
 
 def _audit(conn: sqlite3.Connection, user_id: int | None, action: str, resource_type: str | None = None, resource_id: str | None = None, metadata: dict | None = None) -> None:
@@ -682,6 +683,7 @@ def get_user(user_id: int) -> dict:
 def create_user(*, actor_user_id: int | None, username: str, display_name: str, password: str, email: str | None, roles: list[str]) -> dict:
     if len(password) < 12:
         raise AuthError("password must be at least 12 characters")
+    _validate_global_roles(roles)
 
     with get_connection() as conn:
         try:
@@ -740,6 +742,7 @@ def reset_user_password(*, actor_user_id: int | None, user_id: int, password: st
 
 
 def set_user_roles(*, actor_user_id: int | None, user_id: int, roles: list[str]) -> dict:
+    _validate_global_roles(roles)
     with get_connection() as conn:
         exists = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
         if exists is None:

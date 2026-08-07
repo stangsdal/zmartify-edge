@@ -50,7 +50,4 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
 
-INSERT OR IGNORE INTO roles(name) VALUES ('owner');
-INSERT OR IGNORE INTO roles(name) VALUES ('admin');
-INSERT OR IGNORE INTO roles(name) VALUES ('installer');
-INSERT OR IGNORE INTO roles(name) VALUES ('viewer');
+INSERT OR IGNORE INTO roles(name) VALUES ('administrator');

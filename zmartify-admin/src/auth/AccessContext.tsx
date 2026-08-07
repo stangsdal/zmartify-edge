@@ -36,7 +36,8 @@ type AccessContextValue = {
   isLoading: boolean;
   isAdministrator: boolean;
   selectedSiteId: number | null;
-  selectSite: (siteId: number) => void;
+  siteSelectionVersion: number;
+  selectSite: (siteId: number, options?: { syncRoute?: boolean }) => void;
   refresh: () => Promise<void>;
   canAccessProduct: (siteId: number, product: ProductType) => boolean;
   can: (siteId: number, product: ProductType, permission: Permission) => boolean;
@@ -48,6 +49,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   const [context, setContext] = useState<AccessContextResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  const [siteSelectionVersion, setSiteSelectionVersion] = useState(0);
 
   const refresh = async () => {
     if (!localStorage.getItem('admin_api_token')) {
@@ -100,12 +102,16 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     isLoading,
     isAdministrator: context?.is_administrator === true,
     selectedSiteId,
-    selectSite: (siteId) => {
+    siteSelectionVersion,
+    selectSite: (siteId, options) => {
       if (!context?.is_administrator && !context?.sites.some((site) => site.id === siteId)) {
         return;
       }
       localStorage.setItem('zmartify_selected_site_id', String(siteId));
       setSelectedSiteId(siteId);
+      if (options?.syncRoute !== false) {
+        setSiteSelectionVersion((version) => version + 1);
+      }
     },
     refresh,
     canAccessProduct: (siteId, product) => can(siteId, product, 'read'),

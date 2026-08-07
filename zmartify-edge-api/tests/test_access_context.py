@@ -68,3 +68,11 @@ def test_access_context_resolves_site_role_and_product_allow_list(monkeypatch, t
             ],
         }
     ]
+
+    products = client.get(
+        f"/api/v2/sites/{site_id}/products",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+
+    assert products.status_code == 200
+    assert products.json() == {"site_id": site_id, "products": body["sites"][0]["products"]}

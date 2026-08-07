@@ -1,23 +1,7 @@
 import { IonIcon } from '@ionic/react';
-import {
-  alertCircleOutline,
-  analyticsOutline,
-  constructOutline,
-  hardwareChipOutline,
-  homeOutline,
-  layersOutline,
-  peopleOutline,
-  settingsOutline,
-  waterOutline,
-} from 'ionicons/icons';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAccess } from '../auth/AccessContext';
-
-type NavItem = {
-  label: string;
-  path: string;
-  icon: string;
-};
+import { navigationForLayout } from './navigationManifest';
 
 interface ResponsiveNavigationProps {
   appBase: string;
@@ -34,34 +18,9 @@ export function ResponsiveNavigation({ appBase }: ResponsiveNavigationProps) {
   const hasHvac = site?.products.some((product) => product.type === 'hvac' && product.allowed) === true;
   const hasIrrigation = site?.products.some((product) => product.type === 'irrigation' && product.allowed) === true;
 
-  const mobileItems: NavItem[] = [
-    { label: 'Home', path: siteBase, icon: homeOutline },
-    ...(hasHvac ? [{ label: 'HVAC', path: `${siteBase}/hvac`, icon: homeOutline }] : []),
-    ...(hasIrrigation ? [{ label: 'Irrigation', path: `${siteBase}/irrigation`, icon: waterOutline }] : []),
-    { label: 'Alerts', path: `${siteBase}/alerts`, icon: alertCircleOutline },
-    { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
-  ];
-
-  const desktopItems: NavItem[] = isAdministrator
-    ? [
-        { label: 'Overview', path: siteBase, icon: homeOutline },
-        { label: 'Sites', path: `${appBase}/sites`, icon: layersOutline },
-        { label: 'Systems', path: `${appBase}/systems`, icon: hardwareChipOutline },
-        { label: 'Devices', path: `${appBase}/devices`, icon: hardwareChipOutline },
-        { label: 'Automations', path: `${appBase}/automations`, icon: constructOutline },
-        { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
-        { label: 'Alerts', path: `${siteBase}/alerts`, icon: alertCircleOutline },
-        { label: 'Users', path: `${appBase}/users`, icon: peopleOutline },
-        { label: 'Integrations', path: `${appBase}/integrations`, icon: layersOutline },
-        { label: 'System', path: `${appBase}/system`, icon: settingsOutline },
-      ]
-    : [
-      { label: 'Overview', path: siteBase, icon: homeOutline },
-      ...(hasHvac ? [{ label: 'HVAC', path: `${siteBase}/hvac`, icon: homeOutline }] : []),
-      ...(hasIrrigation ? [{ label: 'Irrigation', path: `${siteBase}/irrigation`, icon: waterOutline }] : []),
-        { label: 'Alerts', path: `${siteBase}/alerts`, icon: alertCircleOutline },
-        { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
-      ];
+  const navigationContext = { appBase, siteBase, isAdministrator, hasHvac, hasIrrigation };
+  const mobileItems = navigationForLayout(navigationContext, 'mobile');
+  const desktopItems = navigationForLayout(navigationContext, 'desktop');
 
   return (
     <>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from math import ceil
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -405,7 +406,7 @@ def _supports_controller_local_program_run(device_id: str) -> bool:
 def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
     router = APIRouter(tags=["api-v2-irrigation"])
 
-    def require_irrigation_permission(request: Request) -> None:
+    def require_irrigation_permission(request: Request, permission: Literal["read", "operate", "configure"]) -> None:
         device_id = request.path_params.get("device_id")
         site_ref = request.path_params.get("site_id")
         if device_id:
@@ -427,21 +428,14 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
         auth_user = getattr(request.state, "auth_user", None)
         if auth_user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-        path = request.url.path
-        permission = "read" if request.method == "GET" else "configure"
-        if any(segment in path for segment in ("/commands", "/runs/", "/rain-delay", "/programs")):
-            permission = "operate"
         try:
-            require_site_permission(auth_user, site_id, product_type="irrigation", permission=permission)  # type: ignore[arg-type]
+            require_site_permission(auth_user, site_id, product_type="irrigation", permission=permission)
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-    def require_roles(request: Request, _legacy_roles: set[str]) -> None:
-        require_irrigation_permission(request)
-
     @router.get("/api/v2/sites/{site_id}/irrigation/overview")
     def v2_site_irrigation_overview(site_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return get_site_irrigation_overview(site_id)
         except RegistryNotFoundError as exc:
@@ -449,7 +443,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/sites/{site_id}/irrigation/zone-snapshot")
     def v2_site_irrigation_zone_snapshot(site_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return get_site_irrigation_zone_snapshot(site_id)
         except RegistryNotFoundError as exc:
@@ -457,7 +451,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/zones")
     def v2_list_irrigation_zones(device_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return {"device_id": device_id, "zones": list_irrigation_zones(device_id)}
         except RegistryNotFoundError as exc:
@@ -465,7 +459,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.put("/api/v2/devices/{device_id}/irrigation/zones")
     def v2_upsert_irrigation_zone(device_id: str, payload: IrrigationZoneUpsertIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "configure")
         try:
             _ensure_zone_within_controller_capacity(device_id, payload.local_ref)
             zone = upsert_irrigation_zone(
@@ -483,7 +477,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.delete("/api/v2/devices/{device_id}/irrigation/zones/{zone_id}")
     def v2_delete_irrigation_zone(device_id: str, zone_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "configure")
         try:
             delete_irrigation_zone(device_id, zone_id)
             return {"deleted": True}
@@ -492,7 +486,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/outputs")
     def v2_list_irrigation_outputs(device_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return {"device_id": device_id, "outputs": list_irrigation_outputs(device_id)}
         except RegistryNotFoundError as exc:
@@ -500,7 +494,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.put("/api/v2/devices/{device_id}/irrigation/outputs")
     def v2_upsert_irrigation_output(device_id: str, payload: IrrigationOutputUpsertIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "configure")
         try:
             output = upsert_irrigation_output_state(
                 device_id,
@@ -518,7 +512,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/programs")
     def v2_list_irrigation_programs(device_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return {"device_id": device_id, "programs": list_irrigation_programs(device_id)}
         except RegistryNotFoundError as exc:
@@ -526,7 +520,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/programs")
     def v2_create_irrigation_program(device_id: str, payload: IrrigationProgramCreateIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             program = create_irrigation_program(
                 device_id,
@@ -544,7 +538,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/programs/{program_id}")
     def v2_get_irrigation_program(device_id: str, program_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return {"device_id": device_id, "program": get_irrigation_program(device_id, program_id)}
         except RegistryNotFoundError as exc:
@@ -552,7 +546,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.put("/api/v2/devices/{device_id}/irrigation/programs/{program_id}")
     def v2_update_irrigation_program(device_id: str, program_id: str, payload: IrrigationProgramUpdateIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             program = update_irrigation_program(
                 device_id,
@@ -571,7 +565,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.delete("/api/v2/devices/{device_id}/irrigation/programs/{program_id}")
     def v2_delete_irrigation_program(device_id: str, program_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             delete_irrigation_program(device_id, program_id)
             _sync_irrigation_programs_to_controller(device_id)
@@ -583,7 +577,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/zones")
     def v2_list_irrigation_program_zones(device_id: str, program_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             zones = list_program_zones(device_id, program_id)
             return {"device_id": device_id, "program_id": program_id, "zones": zones}
@@ -597,7 +591,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
         payload: IrrigationProgramZonesReplaceIn,
         request: Request,
     ) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             zones = replace_program_zones(device_id, program_id, [zone.model_dump() for zone in payload.zones])
             _sync_irrigation_programs_to_controller(device_id)
@@ -609,7 +603,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules")
     def v2_list_irrigation_program_schedules(device_id: str, program_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             schedules = list_program_schedules(device_id, program_id)
             return {"device_id": device_id, "program_id": program_id, "schedules": schedules}
@@ -623,7 +617,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
         payload: IrrigationScheduleCreateIn,
         request: Request,
     ) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             _ensure_irrigation_schedule_editable(device_id)
             schedule = create_program_schedule(
@@ -655,7 +649,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
         payload: IrrigationScheduleUpdateIn,
         request: Request,
     ) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             _ensure_irrigation_schedule_editable(device_id)
             schedule = update_program_schedule(
@@ -682,7 +676,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.delete("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules/{schedule_id}")
     def v2_delete_irrigation_program_schedule(device_id: str, program_id: str, schedule_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             _ensure_irrigation_schedule_editable(device_id)
             delete_program_schedule(device_id, program_id, schedule_id)
@@ -697,7 +691,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/runs")
     def v2_list_irrigation_runs(device_id: str, request: Request, limit: int = 50) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return {"device_id": device_id, "runs": list_irrigation_runs(device_id, limit=limit)}
         except RegistryNotFoundError as exc:
@@ -705,7 +699,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/hydraulics")
     def v2_get_irrigation_hydraulics(device_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return get_irrigation_hydraulics(device_id)
         except RegistryNotFoundError as exc:
@@ -713,7 +707,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/hydraulics")
     def v2_upsert_irrigation_hydraulics(device_id: str, payload: IrrigationHydraulicsIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "configure")
         try:
             return upsert_irrigation_hydraulics_state(
                 device_id,
@@ -727,7 +721,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/power")
     def v2_get_irrigation_power(device_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return get_irrigation_power(device_id)
         except RegistryNotFoundError as exc:
@@ -735,7 +729,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/power")
     def v2_upsert_irrigation_power(device_id: str, payload: IrrigationPowerIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "configure")
         try:
             return upsert_irrigation_power_state(
                 device_id,
@@ -750,7 +744,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.get("/api/v2/devices/{device_id}/irrigation/weather")
     def v2_get_irrigation_weather(device_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer", "viewer"})
+        require_irrigation_permission(request, "read")
         try:
             return get_irrigation_weather(device_id)
         except RegistryNotFoundError as exc:
@@ -758,7 +752,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/weather")
     def v2_upsert_irrigation_weather(device_id: str, payload: IrrigationWeatherIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "configure")
         try:
             return upsert_irrigation_weather_state(
                 device_id,
@@ -773,7 +767,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/rain-delay")
     def v2_set_irrigation_rain_delay(device_id: str, payload: RainDelayIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             return set_irrigation_rain_delay(device_id, delay_hours=payload.delay_hours, reason=payload.reason)
         except RegistryNotFoundError as exc:
@@ -781,7 +775,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/commands")
     def v2_publish_irrigation_command(device_id: str, payload: IrrigationCommandIn, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         if not payload.command_type.startswith("irrigation."):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="only irrigation commands are supported by this endpoint")
         try:
@@ -799,7 +793,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/run")
     def v2_start_irrigation_program_run(device_id: str, program_id: str, request: Request, payload: IrrigationRunIn) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         run = None
         try:
             _ensure_irrigation_device_commandable(device_id)
@@ -838,7 +832,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/stop")
     def v2_stop_irrigation_program_run(device_id: str, run_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             run_snapshot = _find_irrigation_run(device_id, run_id)
             current_step = None
@@ -869,7 +863,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/skip")
     def v2_skip_irrigation_program_run_step(device_id: str, run_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             run_snapshot = _find_irrigation_run(device_id, run_id)
             if run_snapshot.get("trigger_type") == "manual_controller":
@@ -925,7 +919,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
 
     @router.post("/api/v2/devices/{device_id}/irrigation/runs/{run_id}/complete")
     def v2_complete_irrigation_run(device_id: str, run_id: str, request: Request) -> dict:
-        require_roles(request, {"owner", "admin", "installer"})
+        require_irrigation_permission(request, "operate")
         try:
             run = complete_irrigation_run(device_id, run_id)
             return {"device_id": device_id, "run": run}

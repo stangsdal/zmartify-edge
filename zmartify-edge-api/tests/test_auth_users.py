@@ -96,6 +96,26 @@ def test_user_crud_with_owner(monkeypatch, tmp_path: Path):
     assert len(audit.json()) >= 1
 
 
+def test_legacy_global_roles_are_rejected(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_ENABLE_EMERGENCY_TOKEN", "1")
+    monkeypatch.setenv("ADMIN_API_TOKEN", "emergency-token")
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/users",
+        headers={"Authorization": "Bearer emergency-token"},
+        json={
+            "username": "legacy-role-user",
+            "display_name": "Legacy Role User",
+            "password": "long-password-1234",
+            "roles": ["viewer"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "only the administrator global role is supported"
+
+
 def test_auth_me_with_bearer_token(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("ZMART_EDGE_ENABLE_EMERGENCY_TOKEN", "1")
     monkeypatch.setenv("ADMIN_API_TOKEN", "emergency-token")

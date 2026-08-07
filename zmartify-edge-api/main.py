@@ -11,10 +11,6 @@ from fastapi.staticfiles import StaticFiles
 
 from app.auth import (
     AuthError,
-    ROLE_ADMIN,
-    ROLE_INSTALLER,
-    ROLE_OWNER,
-    ROLE_VIEWER,
     authenticate_bearer_token,
     authenticate_emergency_token,
     audit_action,
@@ -533,7 +529,7 @@ async def shutdown_event() -> None:
     setpoint_outcome_listener.stop()
 
 
-def _require_roles(request: Request, _legacy_roles: set[str]) -> None:
+def _require_global_administrator(request: Request) -> None:
     auth_user = getattr(request.state, "auth_user", None)
     if auth_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
@@ -541,6 +537,10 @@ def _require_roles(request: Request, _legacy_roles: set[str]) -> None:
         require_global_admin(auth_user)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+def _require_roles(request: Request, _legacy_roles: set[str]) -> None:
+    _require_global_administrator(request)
 
 
 def _require_authenticated(request: Request) -> None:
@@ -616,7 +616,7 @@ def _build_device_push_payload(request: Request, device_id: str, claim_token: st
 
 @app.post("/devices", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
 def api_create_device(payload: DeviceCreate, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         device = create_device(
             device_id=payload.device_id,
@@ -634,7 +634,7 @@ def api_create_device(payload: DeviceCreate, request: Request) -> dict:
 
 @app.post("/devices/discover", response_model=DeviceDiscoverOut)
 def api_discover_device(payload: DeviceDiscoverIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         discovered = discover_remote_device(payload.base_url)
         audit_action(
@@ -650,7 +650,7 @@ def api_discover_device(payload: DeviceDiscoverIn, request: Request) -> dict:
 
 @app.post("/devices/claim", response_model=DeviceClaimOut, status_code=status.HTTP_201_CREATED)
 def api_claim_device(payload: DeviceClaimIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         discovered = discover_remote_device(payload.base_url)
         identity = discovered["identity"]
@@ -667,7 +667,7 @@ def api_claim_device(payload: DeviceClaimIn, request: Request) -> dict:
             is_reclaim = False
         except RegistryConflictError:
             # Existing device re-claim: only owner/admin can rotate creds and overwrite remote config.
-            _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+            _require_global_administrator(request)
             is_reclaim = True
             device = get_device(device_id)
 
@@ -718,13 +718,13 @@ def api_claim_device(payload: DeviceClaimIn, request: Request) -> dict:
 
 @app.get("/devices", response_model=list[DeviceOut])
 def api_list_devices(request: Request) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     return list_devices()
 
 
 @app.get("/devices/{device_id}", response_model=DeviceOut)
 def api_get_device(device_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     try:
         return get_device(device_id)
     except RegistryNotFoundError as exc:
@@ -733,7 +733,7 @@ def api_get_device(device_id: str, request: Request) -> dict:
 
 @app.post("/devices/{device_id}/push-config", response_model=DeviceOnboardingStatusOut)
 def api_push_device_config(device_id: str, payload: DevicePushConfigIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         device = get_device_onboarding_context(device_id)
         local_url = device.get("local_url")
@@ -752,7 +752,7 @@ def api_push_device_config(device_id: str, payload: DevicePushConfigIn, request:
 
 @app.get("/devices/{device_id}/onboarding-status", response_model=DeviceOnboardingStatusOut)
 def api_device_onboarding_status(device_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     try:
         device = get_device_onboarding_context(device_id)
         local_url = device.get("local_url")
@@ -777,7 +777,7 @@ def api_device_onboarding_status(device_id: str, request: Request) -> dict:
 
 @app.get("/devices/{device_id}/zones", response_model=list[ZoneOut])
 def api_device_zones(device_id: str, request: Request) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     try:
         return list_device_zones(device_id)
     except RegistryNotFoundError as exc:
@@ -786,7 +786,7 @@ def api_device_zones(device_id: str, request: Request) -> list[dict]:
 
 @app.get("/devices/{device_id}/zones/{zone_id}", response_model=ZoneOut)
 def api_get_device_zone(device_id: str, zone_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     try:
         return get_device_zone(device_id, zone_id)
     except RegistryNotFoundError as exc:
@@ -795,7 +795,7 @@ def api_get_device_zone(device_id: str, zone_id: int, request: Request) -> dict:
 
 @app.post("/devices/{device_id}/zones/{zone_id}/rename", response_model=ZoneOut)
 def api_rename_device_zone(device_id: str, zone_id: int, payload: ZoneRenameIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         if should_forward_setpoint_commands():
             try:
@@ -817,7 +817,7 @@ def api_rename_device_zone(device_id: str, zone_id: int, payload: ZoneRenameIn, 
 
 @app.post("/devices/{device_id}/zones/{zone_id}/metadata", response_model=ZoneOut)
 def api_set_device_zone_metadata(device_id: str, zone_id: int, payload: ZoneMetadataIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         if payload.name and should_forward_setpoint_commands():
             try:
@@ -847,7 +847,7 @@ def api_set_device_zone_metadata(device_id: str, zone_id: int, payload: ZoneMeta
 
 @app.get("/devices/{device_id}/channels", response_model=list[ChannelOut])
 def api_device_channels(device_id: str, request: Request) -> list[dict]:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     try:
         return list_device_channels(device_id)
     except RegistryNotFoundError as exc:
@@ -856,7 +856,7 @@ def api_device_channels(device_id: str, request: Request) -> list[dict]:
 
 @app.get("/devices/{device_id}/channels/{channel_id}", response_model=ChannelOut)
 def api_get_device_channel(device_id: str, channel_id: int, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_global_administrator(request)
     try:
         return get_device_channel(device_id, channel_id)
     except RegistryNotFoundError as exc:
@@ -865,7 +865,7 @@ def api_get_device_channel(device_id: str, channel_id: int, request: Request) ->
 
 @app.post("/devices/{device_id}/channels/{channel_id}/metadata", response_model=ChannelOut)
 def api_set_device_channel_metadata(device_id: str, channel_id: int, payload: ChannelMetadataIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         channel = set_channel_metadata(
             device_id,
@@ -887,7 +887,7 @@ def api_set_device_channel_metadata(device_id: str, channel_id: int, payload: Ch
 
 @app.post("/devices/{device_id}/channels/{channel_id}/state", response_model=ChannelOut)
 def api_set_device_channel_state(device_id: str, channel_id: int, payload: ChannelStateIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         return upsert_channel_state(
             device_id,
@@ -904,7 +904,7 @@ def api_set_device_channel_state(device_id: str, channel_id: int, payload: Chann
 
 @app.post("/devices/{device_id}/channels/{channel_id}/link-zones", response_model=ChannelOut)
 def api_set_device_channel_zone_links(device_id: str, channel_id: int, payload: ChannelZoneLinksIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         channel = set_channel_zone_links(device_id, channel_id, payload.zone_ids)
         log_event(
@@ -922,7 +922,7 @@ def api_set_device_channel_zone_links(device_id: str, channel_id: int, payload: 
 def api_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request: Request) -> dict:
     device_token_device_id = getattr(request.state, "device_token_device_id", None)
     if device_token_device_id != device_id:
-        _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        _require_global_administrator(request)
     try:
         validate_mqtt_v2_reported_state(
             {
@@ -965,7 +965,7 @@ def api_refresh_device_firmware(
     request: Request,
     base_url: str | None = None,
 ) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     if not _allow_manual_firmware_refresh():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     try:
@@ -1015,7 +1015,7 @@ def api_refresh_device_firmware(
 
 @app.post("/devices/{device_id}/assign-site", response_model=DeviceOut)
 def api_assign_site(device_id: str, payload: DeviceAssignSite, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         return assign_device_site(device_id, payload.site_id)
     except RegistryNotFoundError as exc:
@@ -1024,7 +1024,7 @@ def api_assign_site(device_id: str, payload: DeviceAssignSite, request: Request)
 
 @app.post("/devices/{device_id}/rename", response_model=DeviceOut)
 def api_rename_device(device_id: str, payload: DeviceRename, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+    _require_global_administrator(request)
     try:
         return rename_device(device_id, payload.display_name)
     except RegistryNotFoundError as exc:
@@ -1033,7 +1033,7 @@ def api_rename_device(device_id: str, payload: DeviceRename, request: Request) -
 
 @app.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 def api_delete_device(device_id: str, request: Request) -> Response:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+    _require_global_administrator(request)
     try:
         delete_device(device_id)
         audit_action(actor_user_id=request.state.auth_user.user_id, action="delete_device", resource_type="device", resource_id=device_id)

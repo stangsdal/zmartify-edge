@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthError, AuthenticatedUser
 from app.db import get_connection
-from app.permissions import accessible_site_ids, require_global_admin, require_site_permission
+from app.permissions import access_context, accessible_site_ids, require_global_admin, require_site_permission
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -196,6 +196,16 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
             return _site_v2_payload(get_site(site_id))
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.get("/sites/{site_ref}/products")
+    def v2_get_site_products(site_ref: str, request: Request) -> dict:
+        site_id = _resolve_site_id(site_ref)
+        user = auth_user(request)
+        require_site_read(site_id, request)
+        site = next((item for item in access_context(user)["sites"] if int(item["id"]) == site_id), None)
+        if site is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+        return {"site_id": site_id, "products": site["products"]}
 
     @router.get("/devices")
     def v2_list_devices(request: Request) -> list[dict]:
