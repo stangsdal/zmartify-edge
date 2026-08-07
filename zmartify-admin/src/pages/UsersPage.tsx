@@ -18,23 +18,18 @@ import {
   IonSelectOption,
 } from '@ionic/react';
 import { usersApi } from '../api/users';
-import { domainApi } from '../api/domains';
-import { siteApi } from '../api/sites';
-import { Domain, Site, User } from '../types/api';
+import { User } from '../types/api';
 
 export function UsersPage() {
-  const roleOptions = ['owner', 'admin', 'installer', 'viewer'];
+  const roleOptions = ['administrator'];
   const [users, setUsers] = useState<User[]>([]);
-  const [siteOptions, setSiteOptions] = useState<Array<{ id: number; label: string }>>([]);
   const [error, setError] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [roles, setRoles] = useState<string[]>(['viewer']);
+  const [roles, setRoles] = useState<string[]>([]);
   const [roleEditUser, setRoleEditUser] = useState<User | null>(null);
   const [roleEditSelected, setRoleEditSelected] = useState<string[]>([]);
-  const [siteAccessUser, setSiteAccessUser] = useState<User | null>(null);
-  const [siteAccessSelected, setSiteAccessSelected] = useState<number[]>([]);
   const [siteAccessLoading, setSiteAccessLoading] = useState(false);
 
   const load = async () => {
@@ -46,28 +41,8 @@ export function UsersPage() {
     }
   };
 
-  const loadSiteOptions = async () => {
-    try {
-      const domains: Domain[] = await domainApi.list();
-      const siteLists = await Promise.all(domains.map((domain) => siteApi.listByDomain(domain.id)));
-      const flatSites: Site[] = siteLists.flat();
-      setSiteOptions(
-        flatSites.map((site) => {
-          const domain = domains.find((d) => d.id === site.domain_id);
-          return {
-            id: site.id,
-            label: domain ? `${site.name} (${domain.name})` : site.name,
-          };
-        })
-      );
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
   useEffect(() => {
     load();
-    loadSiteOptions();
   }, []);
 
   const create = async () => {
@@ -81,7 +56,7 @@ export function UsersPage() {
       setUsername('');
       setDisplayName('');
       setPassword('');
-      setRoles(['viewer']);
+      setRoles([]);
       await load();
     } catch (e) {
       setError(String(e));
@@ -110,40 +85,6 @@ export function UsersPage() {
       setSiteAccessLoading(false);
       setRoleEditUser(null);
       setRoleEditSelected([]);
-    }
-  };
-
-  const changeSiteAccess = async (user: User) => {
-    try {
-      setSiteAccessLoading(true);
-      const current = await usersApi.getSiteAccess(user.id);
-      setSiteAccessSelected(current.site_ids);
-      setSiteAccessUser(user);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSiteAccessLoading(false);
-    }
-  };
-
-  const saveSiteAccess = async (selectedValues: Array<string | number>) => {
-    if (!siteAccessUser) {
-      return;
-    }
-    try {
-      setSiteAccessLoading(true);
-      const parsed = selectedValues
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value > 0)
-        .map((value) => Math.trunc(value));
-      await usersApi.setSiteAccess(siteAccessUser.id, parsed);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSiteAccessLoading(false);
-      setSiteAccessUser(null);
-      setSiteAccessSelected([]);
     }
   };
 
@@ -185,37 +126,6 @@ export function UsersPage() {
           onDidDismiss={() => {
             setRoleEditUser(null);
             setRoleEditSelected([]);
-          }}
-        />
-        <IonAlert
-          isOpen={siteAccessUser !== null}
-          header={siteAccessUser ? `Site Access: ${siteAccessUser.username}` : 'Site Access'}
-          message="Choose the properties this user can access. Clear all for unrestricted access."
-          inputs={siteOptions.map((site) => ({
-            type: 'checkbox',
-            label: site.label,
-            value: String(site.id),
-            checked: siteAccessSelected.includes(site.id),
-          }))}
-          buttons={[
-            {
-              text: 'Cancel',
-              role: 'cancel',
-              handler: () => {
-                setSiteAccessUser(null);
-                setSiteAccessSelected([]);
-              },
-            },
-            {
-              text: 'Save',
-              handler: (selected: Array<string | number>) => {
-                void saveSiteAccess(selected || []);
-              },
-            },
-          ]}
-          onDidDismiss={() => {
-            setSiteAccessUser(null);
-            setSiteAccessSelected([]);
           }}
         />
         {error && <p style={{ color: 'red' }}>{error}</p>}
@@ -266,9 +176,6 @@ export function UsersPage() {
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <IonButton size="small" onClick={() => changeRoles(u)}>
                     Change Roles
-                  </IonButton>
-                  <IonButton size="small" onClick={() => changeSiteAccess(u)}>
-                    Site Access
                   </IonButton>
                   {u.enabled ? (
                     <IonButton size="small" color="warning" onClick={async () => { await usersApi.disable(u.id); await load(); }}>

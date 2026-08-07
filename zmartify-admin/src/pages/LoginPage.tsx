@@ -13,7 +13,7 @@ import {
   IonSpinner,
 } from '@ionic/react';
 import { apiClient } from '../api/client';
-import { authApi } from '../api/auth';
+import { authApi, SiteInvitationValidateResponse } from '../api/auth';
 import { InviteValidateResponse } from '../types/api';
 
 function formatLoginError(error: unknown): string {
@@ -54,6 +54,8 @@ export function LoginPage() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [inviteToken, setInviteToken] = useState('');
   const [inviteState, setInviteState] = useState<InviteValidateResponse | null>(null);
+  const [siteInviteToken, setSiteInviteToken] = useState('');
+  const [siteInviteState, setSiteInviteState] = useState<SiteInvitationValidateResponse | null>(null);
   const [isInviteLoading, setIsInviteLoading] = useState(false);
   const history = useHistory();
   const inviteOriginBaseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://pilot.zmartify.dk';
@@ -70,16 +72,19 @@ export function LoginPage() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const token = (params.get('invite_token') || '').trim();
+    const siteToken = (params.get('site_invitation_token') || '').trim();
     setInviteToken(token);
+    setSiteInviteToken(siteToken);
 
     // QR invite links should always validate against the same host that served the link.
-    if (token && baseUrl !== inviteOriginBaseUrl) {
+    if ((token || siteToken) && baseUrl !== inviteOriginBaseUrl) {
       setBaseUrl(inviteOriginBaseUrl);
       apiClient.setBaseUrl(inviteOriginBaseUrl);
     }
 
-    if (!token) {
+    if (!token && !siteToken) {
       setInviteState(null);
+      setSiteInviteState(null);
       return;
     }
 
@@ -87,15 +92,23 @@ export function LoginPage() {
     const validateInvite = async () => {
       try {
         setIsInviteLoading(true);
-        const effectiveBaseUrl = token ? inviteOriginBaseUrl : baseUrl;
+        const effectiveBaseUrl = token || siteToken ? inviteOriginBaseUrl : baseUrl;
         apiClient.setBaseUrl(effectiveBaseUrl);
-        const result = await authApi.validateInvite(token);
+        const result = token ? await authApi.validateInvite(token) : await authApi.validateSiteInvitation(siteToken);
         if (!canceled) {
-          setInviteState(result);
+          if (token) {
+            setInviteState(result as InviteValidateResponse);
+          } else {
+            setSiteInviteState(result as SiteInvitationValidateResponse);
+          }
         }
       } catch {
         if (!canceled) {
-          setInviteState({ valid: false, reason: 'failed to validate invite' });
+          if (token) {
+            setInviteState({ valid: false, reason: 'failed to validate invite' });
+          } else {
+            setSiteInviteState({ valid: false, product_types: [], reason: 'failed to validate invite' });
+          }
         }
       } finally {
         if (!canceled) {
@@ -168,6 +181,9 @@ export function LoginPage() {
       apiClient.setBaseUrl(baseUrl);
       const data = await authApi.login(user, pass);
       apiClient.setAuthToken(data.access_token);
+      if (siteInviteToken) {
+        await authApi.acceptSiteInvitation(siteInviteToken);
+      }
       navigateToHome();
     } catch (e) {
       setMessageTone('error');
@@ -179,17 +195,23 @@ export function LoginPage() {
 
   const handleRegister = async () => {
     const token = inviteToken.trim();
+    const siteToken = siteInviteToken.trim();
     const user = username.trim();
     const pass = password.trim();
     const name = displayName.trim();
     const mail = email.trim();
 
-    if (!token) {
+    if (!token && !siteToken) {
       setMessageTone('error');
-      setMessage('Registration requires a valid QR invite token.');
+      setMessage('Registration requires a valid invitation.');
       return;
     }
-    if (!inviteState?.valid) {
+    if (token && !inviteState?.valid) {
+      setMessageTone('error');
+      setMessage('Invite token is invalid or expired.');
+      return;
+    }
+    if (siteToken && !siteInviteState?.valid) {
       setMessageTone('error');
       setMessage('Invite token is invalid or expired.');
       return;
@@ -210,13 +232,15 @@ export function LoginPage() {
       setMessageTone('info');
       setMessage('Creating account...');
       apiClient.setBaseUrl(inviteOriginBaseUrl);
-      const data = await authApi.registerByInvite({
-        invite_token: token,
-        username: user,
-        display_name: name,
-        password: pass,
-        email: mail || undefined,
-      });
+      const data = siteToken
+        ? await authApi.registerBySiteInvitation({ token: siteToken, username: user, display_name: name, password: pass })
+        : await authApi.registerByInvite({
+          invite_token: token,
+          username: user,
+          display_name: name,
+          password: pass,
+          email: mail || undefined,
+        });
       apiClient.setAuthToken(data.access_token);
       navigateToHome();
     } catch (e) {
@@ -279,6 +303,23 @@ export function LoginPage() {
               </div>
             )}
 
+            {!!siteInviteToken && (
+              <div style={{ marginTop: '16px', padding: '10px', borderRadius: '8px', background: '#f6f8ff' }}>
+                <strong>Site invitation</strong>
+                {isInviteLoading && <p style={{ margin: '6px 0 0' }}>Validating invitation...</p>}
+                {!isInviteLoading && siteInviteState?.valid && (
+                  <p style={{ margin: '6px 0 0', color: '#146c2e' }}>
+                    Invitation to {siteInviteState.site_name} as {siteInviteState.role}. Sign in to accept it, or create an account below.
+                  </p>
+                )}
+                {!isInviteLoading && siteInviteState && !siteInviteState.valid && (
+                  <p style={{ margin: '6px 0 0', color: '#b00020' }}>
+                    Invitation invalid: {siteInviteState.reason || 'unknown reason'}.
+                  </p>
+                )}
+              </div>
+            )}
+
             <IonLabel style={{ marginTop: '16px', display: 'block' }}>
               Username
             </IonLabel>
@@ -288,7 +329,7 @@ export function LoginPage() {
               placeholder="admin"
             />
 
-            {!!inviteToken && (
+            {!!(inviteToken || siteInviteToken) && (
               <>
                 <IonLabel style={{ marginTop: '16px', display: 'block' }}>
                   Display Name
@@ -299,15 +340,15 @@ export function LoginPage() {
                   placeholder="Your full name"
                 />
 
-                <IonLabel style={{ marginTop: '16px', display: 'block' }}>
+                {!!inviteToken && <IonLabel style={{ marginTop: '16px', display: 'block' }}>
                   Email (optional)
-                </IonLabel>
-                <IonInput
+                </IonLabel>}
+                {!!inviteToken && <IonInput
                   value={email}
                   onIonChange={(e) => setEmail(e.detail.value || '')}
                   placeholder="name@example.com"
                   type="email"
-                />
+                />}
               </>
             )}
 
@@ -325,12 +366,12 @@ export function LoginPage() {
               <IonButton onClick={handleLogin} expand="block" disabled={isLoggingIn || isRegistering}>
                 {isLoggingIn ? <IonSpinner name="crescent" /> : 'Login'}
               </IonButton>
-              {!!inviteToken && (
+              {!!(inviteToken || siteInviteToken) && (
                 <IonButton
                   onClick={handleRegister}
                   expand="block"
                   color="success"
-                  disabled={isRegistering || isLoggingIn || isInviteLoading || !inviteState?.valid}
+                  disabled={isRegistering || isLoggingIn || isInviteLoading || (inviteToken ? !inviteState?.valid : !siteInviteState?.valid)}
                 >
                   {isRegistering ? <IonSpinner name="crescent" /> : 'Register'}
                 </IonButton>

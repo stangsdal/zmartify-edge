@@ -5,7 +5,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import AuthError, AuthenticatedUser, ROLE_ADMIN, ROLE_OWNER, ROLE_VIEWER, ROLE_INSTALLER
+from app.auth import AuthError, AuthenticatedUser
 from app.db import get_connection
 from app.permissions import accessible_site_ids, require_global_admin, require_site_permission
 from app.registry import (

@@ -6,9 +6,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from app.auth import (
     AuthError,
-    ROLE_ADMIN,
-    ROLE_INSTALLER,
-    ROLE_OWNER,
     get_user,
     is_initialized,
     issue_registration_invite,
@@ -19,6 +16,7 @@ from app.auth import (
     register_user_with_invite,
     validate_registration_invite,
 )
+from app.permissions import require_global_admin
 from app.schemas import (
     AuthLoginIn,
     AuthLoginOut,
@@ -36,6 +34,15 @@ from app.schemas import (
 
 def create_auth_invites_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
     router = APIRouter(tags=["auth-invites"])
+
+    def require_platform_administrator(request: Request) -> None:
+        auth_user = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_global_admin(auth_user)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     @router.get("/setup/status", response_model=SetupStatusOut)
     def setup_status() -> dict:
@@ -97,7 +104,7 @@ def create_auth_invites_router(require_roles: Callable[[Request, set[str]], None
 
     @router.post("/admin/invites/register", response_model=InviteCreateOut)
     def admin_create_registration_invite(payload: InviteCreateIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_platform_administrator(request)
         auth_user = request.state.auth_user
         try:
             return issue_registration_invite(
@@ -111,7 +118,7 @@ def create_auth_invites_router(require_roles: Callable[[Request, set[str]], None
 
     @router.post("/admin/invites/register/bulk", response_model=InviteBulkCreateOut)
     def admin_create_registration_invites_bulk(payload: InviteBulkCreateIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_platform_administrator(request)
         auth_user = request.state.auth_user
         try:
             return issue_registration_invites_bulk(
@@ -125,7 +132,7 @@ def create_auth_invites_router(require_roles: Callable[[Request, set[str]], None
 
     @router.get("/admin/invites/register", response_model=list[InviteListItemOut])
     def admin_list_registration_invites(request: Request, limit: int = 200) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_platform_administrator(request)
         return list_registration_invites(limit=limit)
 
     return router

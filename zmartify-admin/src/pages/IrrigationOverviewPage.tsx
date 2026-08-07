@@ -7,6 +7,7 @@ import { IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary } from '../ap
 import { commandsApi } from '../api/commands';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
 import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
+import { useAccess } from '../auth/AccessContext';
 
 interface DeviceZoneRow {
   deviceId: string;
@@ -42,12 +43,17 @@ const extractFromPayload = (payload: unknown, keys: string[]): number | null => 
 };
 
 export function IrrigationOverviewPage() {
+  const { context, selectedSiteId, selectSite, can } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
+  const selectedSite = selectedSiteId ? String(selectedSiteId) : '';
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [busyAction, setBusyAction] = useState('');
   const [actionFeedback, setActionFeedback] = useState('');
   const { overview, zoneRuns } = useIrrigationRunState(selectedSite);
+  const canOperate = selectedSiteId != null && can(selectedSiteId, 'irrigation', 'operate');
+  const canConfigure = selectedSiteId != null && can(selectedSiteId, 'irrigation', 'configure');
+  const site = context?.sites.find((candidate) => candidate.id === selectedSiteId);
+  const siteBase = site ? `/app/sites/${site.uuid || site.id}` : '/app/home';
   const zones = useMemo<DeviceZoneRow[]>(() => zoneRuns.map((zoneRun) => ({
     deviceId: zoneRun.deviceId,
     displayName: zoneRun.displayName,
@@ -58,9 +64,6 @@ export function IrrigationOverviewPage() {
     const loadSites = async () => {
       const response = await mobileApi.listSites();
       setSites(response.sites || []);
-      if ((response.sites || []).length) {
-        setSelectedSite((prev) => prev || response.sites[0].site_id);
-      }
       const eventResponse = await mobileApi.listEvents(80);
       setEvents(eventResponse.events || []);
     };
@@ -139,7 +142,7 @@ export function IrrigationOverviewPage() {
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
             value={selectedSite}
-            onChange={setSelectedSite}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
           <section className="rounded-3xl p-6 text-white app-home-hero">
@@ -167,7 +170,7 @@ export function IrrigationOverviewPage() {
                 Next: {nextRuntime.runtime.next_program_name || 'Scheduled program'} at {new Date(nextRuntime.runtime.next_run_at).toLocaleString()}.
               </p>
             ) : null}
-            <div className="mt-5 flex flex-wrap gap-2">
+            {canOperate ? <div className="mt-5 flex flex-wrap gap-2">
               <button
                 type="button"
                 className="rounded-xl bg-white/95 px-4 py-2 text-sm font-semibold text-teal-800 disabled:opacity-60"
@@ -184,7 +187,7 @@ export function IrrigationOverviewPage() {
               >
                 {busyAction === 'rain-delay' ? 'Setting...' : 'Rain delay 24h'}
               </button>
-            </div>
+            </div> : null}
             {actionFeedback ? <p className="mt-3 text-sm opacity-90">{actionFeedback}</p> : null}
           </section>
 
@@ -204,23 +207,23 @@ export function IrrigationOverviewPage() {
           </section>
 
           <section className="grid gap-2 md:grid-cols-2">
-            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/zones">
+            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to={`${siteBase}/irrigation/zones`}>
               <p className="font-semibold">Zones</p>
               <p className="text-sm text-muted mt-1">Inspect zone state and run manual control.</p>
             </NavLink>
-            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/manual">
+            {canOperate ? <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to={`${siteBase}/irrigation/manual`}>
               <p className="font-semibold">Manual run</p>
               <p className="text-sm text-muted mt-1">Start temporary irrigation with controlled duration.</p>
-            </NavLink>
-            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/setup">
+            </NavLink> : null}
+            {canConfigure ? <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to={`${siteBase}/irrigation/setup`}>
               <p className="font-semibold">Setup</p>
               <p className="text-sm text-muted mt-1">Configure controller zones and valve outputs.</p>
-            </NavLink>
-            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/programs">
+            </NavLink> : null}
+            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to={`${siteBase}/irrigation/programs`}>
               <p className="font-semibold">Programs</p>
               <p className="text-sm text-muted mt-1">Review schedules and watering estimates.</p>
             </NavLink>
-            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to="/app/control/irrigation/hydraulics">
+            <NavLink className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100 no-underline text-current" to={`${siteBase}/irrigation/hydraulics`}>
               <p className="font-semibold">Hydraulics and power</p>
               <p className="text-sm text-muted mt-1">Flow, pressure and transformer diagnostics.</p>
             </NavLink>
@@ -235,7 +238,7 @@ export function IrrigationOverviewPage() {
                 return (
                   <NavLink
                     key={zoneRef}
-                    to={`/app/control/irrigation/zones/${encodeURIComponent(zoneRef)}?deviceId=${encodeURIComponent(row.deviceId)}`}
+                    to={`${siteBase}/irrigation/zones/${encodeURIComponent(zoneRef)}?deviceId=${encodeURIComponent(row.deviceId)}`}
                     className="block rounded-xl border border-slate-200/70 p-3 no-underline text-current"
                   >
                     <p className="font-semibold">{row.zone.name || row.zone.local_ref}</p>

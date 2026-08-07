@@ -103,6 +103,11 @@ export function AlertsPage() {
         : (detail.zones || [])[0];
       if (!matchedZone) return;
       const zoneRef = matchedZone.zone_uuid || `${deviceId}:${matchedZone.zone_id}`;
+      const siteRef = detail.site?.site_id;
+      if (siteRef) {
+        history.push(`/app/sites/${encodeURIComponent(siteRef)}/irrigation/zones/${encodeURIComponent(zoneRef)}`);
+        return;
+      }
       history.push(`/app/control/irrigation/zones/${encodeURIComponent(zoneRef)}?deviceId=${encodeURIComponent(deviceId)}`);
     } catch (error) {
       console.error(error);

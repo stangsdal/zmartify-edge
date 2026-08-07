@@ -312,7 +312,7 @@ def test_notification_read_and_read_all(monkeypatch, tmp_path: Path):
             "username": "mobileviewer",
             "display_name": "Mobile Viewer",
             "password": "VeryStrongPass123!",
-            "roles": ["viewer"],
+            "roles": [],
         },
     )
     assert created_user.status_code == 201
@@ -581,7 +581,7 @@ def test_mobile_viewer_site_scope_restricts_visible_properties(monkeypatch, tmp_
             "username": "peter",
             "display_name": "Peter Viewer",
             "password": "VeryStrongPass123!",
-            "roles": ["viewer"],
+            "roles": [],
         },
     )
     assert user.status_code == 201
@@ -619,7 +619,7 @@ def test_mobile_viewer_without_site_assignments_sees_no_properties(monkeypatch, 
             "username": "viewer-no-sites",
             "display_name": "Viewer No Sites",
             "password": "VeryStrongPass123!",
-            "roles": ["viewer"],
+            "roles": [],
         },
     )
     assert user.status_code == 201
@@ -712,7 +712,7 @@ def test_mobile_site_user_can_change_setpoint(monkeypatch, tmp_path: Path):
             "username": "user-setpoint",
             "display_name": "User Setpoint",
             "password": "VeryStrongPass123!",
-            "roles": ["viewer"],
+            "roles": [],
         },
     )
     assert user.status_code == 201

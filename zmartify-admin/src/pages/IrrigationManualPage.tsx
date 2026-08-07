@@ -6,14 +6,16 @@ import { IrrigationZoneActionControl } from '../components/IrrigationZoneActionC
 import { MobileEvent, mobileApi, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
 import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
+import { useAccess } from '../auth/AccessContext';
 
 const durations = [5, 10, 15, 20, 30, 45];
 
 const zoneKey = (deviceId: string, zoneRef: string) => `${deviceId}:${zoneRef}`;
 
 export function IrrigationManualPage() {
+  const { selectedSiteId, selectSite, can } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
+  const selectedSite = selectedSiteId ? String(selectedSiteId) : '';
   const [selectedZoneKey, setSelectedZoneKey] = useState('');
   const [duration, setDuration] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -21,14 +23,12 @@ export function IrrigationManualPage() {
   const [lastCommandId, setLastCommandId] = useState('');
   const [traceRows, setTraceRows] = useState<MobileEvent[]>([]);
   const { zoneRuns, startZone, stopZone } = useIrrigationRunState(selectedSite);
+  const canOperate = selectedSiteId != null && can(selectedSiteId, 'irrigation', 'operate');
 
   useEffect(() => {
     const loadSites = async () => {
       const response = await mobileApi.listSites();
       setSites(response.sites || []);
-      if ((response.sites || []).length) {
-        setSelectedSite((prev) => prev || response.sites[0].site_id);
-      }
     };
     loadSites().catch(console.error);
   }, []);
@@ -142,7 +142,7 @@ export function IrrigationManualPage() {
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
             value={selectedSite}
-            onChange={setSelectedSite}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
@@ -186,7 +186,7 @@ export function IrrigationManualPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+          {canOperate ? <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Command preview</p>
             <p className="text-base mt-1 font-semibold">
               {selectedZone ? `${selectedZone.zone.name || selectedZone.zone.local_ref} for ${duration} minutes` : 'Select a zone'}
@@ -206,7 +206,7 @@ export function IrrigationManualPage() {
                 <p className="mt-1">Command ID: {lastCommandId}</p>
               </details>
             ) : null}
-          </section>
+          </section> : null}
 
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Feedback trace</p>

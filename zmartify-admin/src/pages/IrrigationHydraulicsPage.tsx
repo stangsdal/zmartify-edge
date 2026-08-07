@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationSiteOverview, mobileApi, MobileEvent, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
+import { useAccess } from '../auth/AccessContext';
 
 const parseNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -34,8 +35,9 @@ const pickMetric = (events: MobileEvent[], keys: string[], fallback: number): nu
 };
 
 export function IrrigationHydraulicsPage() {
+  const { selectedSiteId, selectSite } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
+  const selectedSite = selectedSiteId ? String(selectedSiteId) : '';
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [overview, setOverview] = useState<IrrigationSiteOverview | null>(null);
 
@@ -43,9 +45,6 @@ export function IrrigationHydraulicsPage() {
     const loadSites = async () => {
       const response = await mobileApi.listSites();
       setSites(response.sites || []);
-      if ((response.sites || []).length) {
-        setSelectedSite((prev) => prev || response.sites[0].site_id);
-      }
     };
     loadSites().catch(console.error);
   }, []);
@@ -125,7 +124,7 @@ export function IrrigationHydraulicsPage() {
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
             value={selectedSite}
-            onChange={setSelectedSite}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
           <section className="grid gap-3 md:grid-cols-2">

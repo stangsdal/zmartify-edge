@@ -5,6 +5,7 @@ import { AppHeader } from '../components/AppHeader';
 import { IrrigationZoneActionControl } from '../components/IrrigationZoneActionControl';
 import { IrrigationDeviceOverview, IrrigationZone, mobileApi, MobileEvent, subscribeRealtimeTopics } from '../api/mobile';
 import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
+import { useAccess } from '../auth/AccessContext';
 
 interface RouteParams {
   zoneRef: string;
@@ -13,10 +14,11 @@ interface RouteParams {
 export function IrrigationZoneDetailPage() {
   const { zoneRef } = useParams<RouteParams>();
   const location = useLocation();
+  const { selectedSiteId, selectSite } = useAccess();
   const resolvedRef = decodeURIComponent(zoneRef);
   const [zone, setZone] = useState<IrrigationZone | null>(null);
   const [deviceId, setDeviceId] = useState('');
-  const [siteId, setSiteId] = useState('');
+  const siteId = selectedSiteId ? String(selectedSiteId) : '';
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [busyAction, setBusyAction] = useState('');
@@ -39,7 +41,7 @@ export function IrrigationZoneDetailPage() {
             if (candidateRef === resolvedRef) {
               setZone(candidate);
               setDeviceId(device.device_id);
-              setSiteId(site.site_id);
+              selectSite(Number(site.site_id));
               const eventResponse = await mobileApi.listEvents(80, { siteId: site.site_id });
               const filtered = (eventResponse.events || []).filter((event) => {
                 const eventDeviceId = event.device_id || (typeof event.payload?.device_id === 'string' ? event.payload.device_id : '');
@@ -58,7 +60,7 @@ export function IrrigationZoneDetailPage() {
           const irrigationOverview = await mobileApi.getIrrigationOverview(site.site_id);
           const matchedDevice = (irrigationOverview.devices || []).find((row) => row.device_id === locationDeviceId);
           if (!matchedDevice) continue;
-          setSiteId(site.site_id);
+          selectSite(Number(site.site_id));
           setDeviceId(locationDeviceId);
           const eventResponse = await mobileApi.listEvents(80, { siteId: site.site_id });
           setEvents(
@@ -72,7 +74,7 @@ export function IrrigationZoneDetailPage() {
       setZone(null);
     };
     load().catch(console.error);
-  }, [locationDeviceId, resolvedRef]);
+  }, [locationDeviceId, resolvedRef, selectSite]);
 
   useEffect(() => {
     if (!deviceId) return;

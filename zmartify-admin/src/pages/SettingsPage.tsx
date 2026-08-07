@@ -6,6 +6,7 @@ import { authApi } from '../api/auth';
 import { apiClient } from '../api/client';
 import { deviceApi } from '../api/devices';
 import { mobileApi } from '../api/mobile';
+import { useAccess } from '../auth/AccessContext';
 
 interface DeviceHealthRow {
   deviceId: string;
@@ -34,9 +35,10 @@ interface DeviceHealthRow {
 
 export function SettingsPage() {
   const history = useHistory();
+  const { selectedSiteId, selectSite } = useAccess();
   const [darkMode, setDarkMode] = useState<boolean>(() => localStorage.getItem('theme_mode') === 'dark');
   const [sites, setSites] = useState<Array<{ site_id: string; site_name: string }>>([]);
-  const [activeSite, setActiveSite] = useState('');
+  const activeSite = selectedSiteId ? String(selectedSiteId) : '';
   const [profileLabel, setProfileLabel] = useState('Unknown');
   const [healthRows, setHealthRows] = useState<DeviceHealthRow[]>([]);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -78,7 +80,6 @@ export function SettingsPage() {
     mobileApi.listSites().then((res) => {
       const options = (res.sites || []).map((s) => ({ site_id: s.site_id, site_name: s.site_name }));
       setSites(options);
-      if (options.length) setActiveSite(options[0].site_id);
     }).catch(console.error);
 
     authApi.me().then((me) => {
@@ -210,7 +211,7 @@ export function SettingsPage() {
             <p className="font-semibold mb-2">Site Management</p>
             <IonItem>
               <IonLabel>Property</IonLabel>
-              <IonSelect value={activeSite} onIonChange={(e) => setActiveSite(String(e.detail.value))}>
+              <IonSelect value={activeSite} onIonChange={(e) => selectSite(Number(e.detail.value))}>
                 {sites.map((site) => (
                   <IonSelectOption key={site.site_id} value={site.site_id}>{site.site_name}</IonSelectOption>
                 ))}

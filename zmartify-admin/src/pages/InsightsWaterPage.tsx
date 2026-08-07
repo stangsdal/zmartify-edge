@@ -3,6 +3,7 @@ import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { mobileApi, MobileEvent, MobileSiteSummary, subscribeRealtimeTopics } from '../api/mobile';
+import { useAccess } from '../auth/AccessContext';
 
 const parseNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -34,8 +35,9 @@ const readMetric = (events: MobileEvent[], keys: string[], fallback: number): nu
 };
 
 export function InsightsWaterPage() {
+  const { selectedSiteId, selectSite } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
+  const selectedSite = selectedSiteId ? String(selectedSiteId) : '';
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [overview, setOverview] = useState<any | null>(null);
 
@@ -43,9 +45,6 @@ export function InsightsWaterPage() {
     const load = async () => {
       const siteResponse = await mobileApi.listSites();
       setSites(siteResponse.sites || []);
-      if ((siteResponse.sites || []).length) {
-        setSelectedSite((prev) => prev || siteResponse.sites[0].site_id);
-      }
       const eventResponse = await mobileApi.listEvents(160);
       setEvents(eventResponse.events || []);
     };
@@ -128,7 +127,7 @@ export function InsightsWaterPage() {
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
             value={selectedSite}
-            onChange={setSelectedSite}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
           <section className="grid gap-3 md:grid-cols-2">

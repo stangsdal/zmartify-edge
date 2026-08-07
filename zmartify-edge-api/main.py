@@ -19,7 +19,6 @@ from app.auth import (
     authenticate_emergency_token,
     audit_action,
     ensure_bootstrap_administrator,
-    list_user_site_access,
     require_any_role,
 )
 from app.permissions import accessible_site_ids, require_site_permission
@@ -265,6 +264,8 @@ for ionic_pwa_dist in ionic_pwa_dist_candidates:
 
 def _is_protected_path(path: str) -> bool:
     if path == "/api/v2/device-bootstrap/config":
+        return False
+    if path in {"/api/v2/site-invitations/validate", "/api/v2/site-invitations/register"}:
         return False
     if path.startswith("/api/v2/devices/") and "/ota/download" in path:
         return False
@@ -541,6 +542,11 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
         require_any_role(auth_user, allowed_roles)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+def _require_authenticated(request: Request) -> None:
+    if getattr(request.state, "auth_user", None) is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
 
 
 app.include_router(create_core_v2_router(_require_roles))
@@ -1039,19 +1045,19 @@ def api_delete_device(device_id: str, request: Request) -> Response:
 
 @app.get("/mobile/sites")
 def mobile_sites(request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     return {"sites": list_mobile_sites(site_ids=_mobile_site_scope_ids(request))}
 
 
 @app.get("/mobile/domains")
 def mobile_domains(request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     return {"domains": list_mobile_domains(site_ids=_mobile_site_scope_ids(request))}
 
 
 @app.get("/mobile/sites/{site_id}")
 def mobile_site_detail(site_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     resolved_site_id = _resolve_site_filter_id(site_id)
     _enforce_mobile_site_scope(request, resolved_site_id)
     try:
@@ -1076,7 +1082,7 @@ def mobile_site_detail(site_id: str, request: Request) -> dict:
 
 @app.get("/mobile/sites/{site_id}/devices")
 def mobile_site_devices(site_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     resolved_site_id = _resolve_site_filter_id(site_id)
     _enforce_mobile_site_scope(request, resolved_site_id)
     try:
@@ -1102,7 +1108,7 @@ def mobile_site_devices(site_id: str, request: Request) -> dict:
 
 @app.get("/mobile/sites/{site_id}/zones")
 def mobile_site_zones(site_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     resolved_site_id = _resolve_site_filter_id(site_id)
     _enforce_mobile_site_scope(request, resolved_site_id)
     try:
@@ -1138,7 +1144,7 @@ def mobile_site_zones(site_id: str, request: Request) -> dict:
 
 @app.get("/mobile/devices/{device_id}")
 def mobile_device(device_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     site_pk_id = _resolve_device_site_pk_id(device_id)
     if site_pk_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
@@ -1189,7 +1195,7 @@ def mobile_device(device_id: str, request: Request) -> dict:
 
 @app.get("/mobile/devices/{device_id}/zones")
 def mobile_device_zones(device_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     site_pk_id = _resolve_device_site_pk_id(device_id)
     if site_pk_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
@@ -1202,7 +1208,7 @@ def mobile_device_zones(device_id: str, request: Request) -> dict:
 
 @app.get("/mobile/zones/{zone_ref}")
 def mobile_zone_by_ref(zone_ref: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     try:
         device_id, zone_id = resolve_zone_ref(zone_ref)
         site_pk_id = _resolve_device_site_pk_id(device_id)
@@ -1219,7 +1225,7 @@ def mobile_zone_by_ref(zone_ref: str, request: Request) -> dict:
 
 @app.get("/mobile/devices/{device_id}/channels")
 def mobile_device_channels(device_id: str, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+    _require_authenticated(request)
     site_pk_id = _resolve_device_site_pk_id(device_id)
     if site_pk_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")

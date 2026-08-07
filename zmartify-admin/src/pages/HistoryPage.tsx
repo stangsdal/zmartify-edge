@@ -7,11 +7,13 @@ import { HistoryChart } from '../components/HistoryChart';
 import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
 import { historyApi, HistoryWindow } from '../api/history';
 import { DeviceHistory, ZoneHistory } from '../types/api';
+import { useAccess } from '../auth/AccessContext';
 
 export function HistoryPage() {
+  const { selectedSiteId, selectSite } = useAccess();
   const location = useLocation();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [siteId, setSiteId] = useState('');
+  const siteId = selectedSiteId ? String(selectedSiteId) : '';
   const [deviceId, setDeviceId] = useState('');
   const [devices, setDevices] = useState<Array<{ device_id: string; display_name: string }>>([]);
   const [zones, setZones] = useState<Array<MobileZone & { device_id: string; label: string }>>([]);
@@ -33,7 +35,6 @@ export function HistoryPage() {
       if (!res.sites?.length) return;
 
       if (!initialZoneRef) {
-        setSiteId(res.sites[0].site_id);
         return;
       }
 
@@ -47,7 +48,7 @@ export function HistoryPage() {
               return ref === initialZoneRef;
             });
             if (matchingZone) {
-              setSiteId(site.site_id);
+              selectSite(Number(site.site_id));
               setDeviceId(device.device_id);
               return;
             }
@@ -57,10 +58,9 @@ export function HistoryPage() {
         }
       }
 
-      setSiteId(res.sites[0].site_id);
     };
     loadSites().catch(console.error);
-  }, [initialZoneRef]);
+  }, [initialZoneRef, selectSite]);
 
   useEffect(() => {
     if (!siteId) return;
@@ -173,7 +173,7 @@ export function HistoryPage() {
       />
       <IonContent className="ion-padding">
         <div className="space-y-4 pb-20 lg:pb-8">
-          <SiteSelector options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))} value={siteId} onChange={setSiteId} />
+          <SiteSelector options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))} value={siteId} onChange={(selectedId) => selectSite(Number(selectedId))} />
 
           <section className="grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">

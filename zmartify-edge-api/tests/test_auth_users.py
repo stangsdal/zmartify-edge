@@ -57,9 +57,9 @@ def test_user_crud_with_owner(monkeypatch, tmp_path: Path):
         headers=headers,
         json={
             "username": "tech1",
-            "display_name": "Installer Tech",
+            "display_name": "Site Member",
             "password": "long-password-1234",
-            "roles": ["installer"],
+            "roles": [],
         },
     )
     assert create.status_code == 201
@@ -77,9 +77,9 @@ def test_user_crud_with_owner(monkeypatch, tmp_path: Path):
     assert enabled.status_code == 200
     assert enabled.json()["enabled"] == 1
 
-    role_change = client.post(f"/users/{user_id}/roles", headers=headers, json={"roles": ["viewer"]})
+    role_change = client.post(f"/users/{user_id}/roles", headers=headers, json={"roles": []})
     assert role_change.status_code == 200
-    assert role_change.json()["roles"] == ["viewer"]
+    assert role_change.json()["roles"] == []
 
     reset = client.post(
         f"/users/{user_id}/reset-password",
@@ -109,7 +109,7 @@ def test_auth_me_with_bearer_token(monkeypatch, tmp_path: Path):
             "username": "admin2",
             "display_name": "Admin Two",
             "password": "VeryStrongPass123!",
-            "roles": ["admin"],
+            "roles": ["administrator"],
         },
     )
     assert created.status_code == 201
@@ -121,4 +121,4 @@ def test_auth_me_with_bearer_token(monkeypatch, tmp_path: Path):
     me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["username"] == "admin2"
-    assert "admin" in me.json()["roles"]
+    assert "administrator" in me.json()["roles"]

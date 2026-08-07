@@ -35,6 +35,8 @@ type AccessContextValue = {
   isAuthenticated: boolean;
   isLoading: boolean;
   isAdministrator: boolean;
+  selectedSiteId: number | null;
+  selectSite: (siteId: number) => void;
   refresh: () => Promise<void>;
   canAccessProduct: (siteId: number, product: ProductType) => boolean;
   can: (siteId: number, product: ProductType, permission: Permission) => boolean;
@@ -45,6 +47,7 @@ const AccessContext = createContext<AccessContextValue | null>(null);
 export function AccessProvider({ children }: { children: ReactNode }) {
   const [context, setContext] = useState<AccessContextResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
 
   const refresh = async () => {
     if (!localStorage.getItem('admin_api_token')) {
@@ -55,7 +58,11 @@ export function AccessProvider({ children }: { children: ReactNode }) {
 
     setIsLoading(true);
     try {
-      setContext(await authApi.accessContext());
+      const nextContext = await authApi.accessContext();
+      setContext(nextContext);
+      const persistedSiteId = Number(localStorage.getItem('zmartify_selected_site_id'));
+      const selectedSite = nextContext.sites.find((site) => site.id === persistedSiteId) || nextContext.sites[0];
+      setSelectedSiteId(selectedSite?.id ?? null);
     } catch {
       localStorage.removeItem('admin_api_token');
       setContext(null);
@@ -92,6 +99,14 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     isAuthenticated: context !== null,
     isLoading,
     isAdministrator: context?.is_administrator === true,
+    selectedSiteId,
+    selectSite: (siteId) => {
+      if (!context?.is_administrator && !context?.sites.some((site) => site.id === siteId)) {
+        return;
+      }
+      localStorage.setItem('zmartify_selected_site_id', String(siteId));
+      setSelectedSiteId(siteId);
+    },
     refresh,
     canAccessProduct: (siteId, product) => can(siteId, product, 'read'),
     can,

@@ -6,6 +6,7 @@ import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationOutput, IrrigationZone, mobileApi, MobileSiteDevice, MobileSiteSummary } from '../api/mobile';
 import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
+import { useAccess } from '../auth/AccessContext';
 
 const defaultZoneName = (ref: string) => `Zone ${ref.replace(/^zone[-_]?/i, '') || ref}`;
 const TEST_RUN_SECONDS = 60;
@@ -37,8 +38,10 @@ const isIrrigationController = (device: MobileSiteDevice): boolean => {
 };
 
 export function IrrigationSetupPage() {
+  const { selectedSiteId, selectSite, can } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
+  const selectedSite = selectedSiteId ? String(selectedSiteId) : '';
+  const canConfigure = selectedSiteId != null && can(selectedSiteId, 'irrigation', 'configure');
   const [devices, setDevices] = useState<MobileSiteDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [zones, setZones] = useState<IrrigationZone[]>([]);
@@ -81,9 +84,6 @@ export function IrrigationSetupPage() {
     const loadSites = async () => {
       const response = await mobileApi.listSites();
       setSites(response.sites || []);
-      if ((response.sites || []).length) {
-        setSelectedSite((prev) => prev || response.sites[0].site_id);
-      }
     };
     loadSites().catch(console.error);
   }, []);
@@ -265,10 +265,10 @@ export function IrrigationSetupPage() {
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
             value={selectedSite}
-            onChange={setSelectedSite}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
-          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+          {canConfigure ? <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Controller</p>
             <select
               className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
@@ -286,7 +286,7 @@ export function IrrigationSetupPage() {
                 {selectedDevice.online ? 'Online' : 'Offline'} · MQTT {selectedDevice.mqtt_connected ? 'connected' : 'not connected'}
               </p>
             ) : <p className="text-sm text-muted mt-2">No irrigation controllers are assigned to this site.</p>}
-          </section>
+          </section> : null}
 
           {feedback ? <p className="text-sm text-muted">{feedback}</p> : null}
 

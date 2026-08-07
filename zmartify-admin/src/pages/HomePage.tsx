@@ -5,10 +5,11 @@ import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
 import { notificationsApi } from '../api/notifications';
+import { useAccess } from '../auth/AccessContext';
 
 export function HomePage() {
+  const { selectedSiteId, selectSite } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState<string>('');
   const [zones, setZones] = useState<MobileZone[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
@@ -17,9 +18,6 @@ export function HomePage() {
     const load = async () => {
       const siteRes = await mobileApi.listSites();
       setSites(siteRes.sites || []);
-      const firstSite = siteRes.sites?.[0]?.site_id;
-      if (firstSite) setSelectedSite(firstSite);
-
       const eventRes = await mobileApi.listEvents(8);
       setEvents(eventRes.events || []);
 
@@ -30,9 +28,9 @@ export function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSite) return;
+    if (!selectedSiteId) return;
     const loadZones = async () => {
-      const siteZones = await mobileApi.getSiteZones(selectedSite);
+      const siteZones = await mobileApi.getSiteZones(String(selectedSiteId));
       const allZones = (siteZones.devices || []).flatMap((d) => d.zones || []);
       setZones(allZones);
 
@@ -61,7 +59,7 @@ export function HomePage() {
     return () => {
       cleanup?.();
     };
-  }, [selectedSite]);
+  }, [selectedSiteId]);
 
   const indoorAverage = useMemo(() => {
     const values = zones.map((z) => z.current_temperature_c).filter((v): v is number => typeof v === 'number');
@@ -112,8 +110,8 @@ export function HomePage() {
           <SiteSelector
             label="Property"
             options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))}
-            value={selectedSite}
-            onChange={setSelectedSite}
+            value={selectedSiteId ? String(selectedSiteId) : ''}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
           <motion.section

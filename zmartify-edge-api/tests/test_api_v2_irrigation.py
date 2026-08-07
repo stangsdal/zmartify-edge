@@ -108,6 +108,12 @@ def test_irrigation_endpoints_require_product_and_operation_permissions(monkeypa
     viewer_login = client.post("/auth/login", json={"username": "irrigation-viewer", "password": "VeryStrongPass123!"})
     assert viewer_login.status_code == 200
     viewer_headers = {"Authorization": f"Bearer {viewer_login.json()['access_token']}"}
+    assert client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=viewer_headers).status_code == 200
+    assert client.put(
+        f"/api/v2/devices/{device_id}/irrigation/zones",
+        headers=viewer_headers,
+        json={"local_ref": "zone-1", "name": "Viewer must not configure"},
+    ).status_code == 403
     assert client.post(f"/api/v2/devices/{device_id}/irrigation/rain-delay", headers=viewer_headers, json={"delay_hours": 24}).status_code == 403
 
 

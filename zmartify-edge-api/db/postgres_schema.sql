@@ -129,6 +129,42 @@ CREATE INDEX IF NOT EXISTS idx_site_memberships_user ON site_memberships(user_id
 CREATE INDEX IF NOT EXISTS idx_site_memberships_site ON site_memberships(site_id, status);
 CREATE INDEX IF NOT EXISTS idx_devices_product_type ON devices(product_type);
 
+CREATE TABLE IF NOT EXISTS site_invitations (
+    id BIGSERIAL PRIMARY KEY,
+    uuid TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
+    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    invited_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    expires_at TEXT NOT NULL,
+    accepted_at TEXT,
+    accepted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (role IN ('owner', 'user', 'viewer'))
+);
+
+CREATE TABLE IF NOT EXISTS site_invitation_product_access (
+    invitation_id BIGINT NOT NULL REFERENCES site_invitations(id) ON DELETE CASCADE,
+    product_type TEXT NOT NULL,
+    PRIMARY KEY(invitation_id, product_type),
+    CHECK (product_type IN ('hvac', 'irrigation', 'weather', 'energy'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_invitations_email ON site_invitations(email, expires_at);
+CREATE INDEX IF NOT EXISTS idx_site_invitations_site ON site_invitations(site_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS system_email_settings (
+    id SMALLINT PRIMARY KEY CHECK (id = 1),
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    password_encrypted TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS api_tokens (
     id BIGSERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,

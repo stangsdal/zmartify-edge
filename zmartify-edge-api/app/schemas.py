@@ -551,10 +551,6 @@ class UserResetPasswordIn(BaseModel):
     password: str = Field(min_length=12)
 
 
-class UserSiteAccessUpdateIn(BaseModel):
-    site_ids: list[int] = Field(default_factory=list)
-
-
 class SiteMembershipCreateIn(BaseModel):
     user_id: int
     role: str = Field(pattern=r"^(owner|user|viewer)$")
@@ -587,6 +583,71 @@ class SiteMembershipCandidateOut(BaseModel):
     username: str
     display_name: str
     email: str | None
+
+
+class SiteInvitationCreateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    email: str = Field(min_length=3, max_length=320)
+    role: str = Field(pattern=r"^(owner|user|viewer)$")
+    product_types: list[str] = Field(default_factory=list)
+    expires_hours: int = Field(default=168, ge=1, le=720)
+
+
+class SiteInvitationOut(BaseModel):
+    id: int
+    uuid: str
+    email: str
+    site_id: int
+    site_name: str
+    role: str
+    product_types: list[str]
+    expires_at: str
+    accepted_at: str | None
+    created_at: str
+
+
+class SiteInvitationAcceptIn(BaseModel):
+    token: str = Field(min_length=16)
+
+
+class SiteInvitationRegisterIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    token: str = Field(min_length=16)
+    username: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=12)
+
+
+class SiteInvitationValidateOut(BaseModel):
+    valid: bool
+    site_name: str | None = None
+    role: str | None = None
+    product_types: list[str] = Field(default_factory=list)
+    expires_at: str | None = None
+    reason: str | None = None
+
+
+class SystemEmailSettingsIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=465, ge=1, le=65535)
+    username: str = Field(min_length=1, max_length=320)
+    sender: str = Field(min_length=1, max_length=320)
+    password: str | None = Field(default=None, min_length=1)
+
+
+class SystemEmailSettingsOut(BaseModel):
+    configured: bool
+    source: str
+    host: str | None
+    port: int
+    username: str | None
+    sender: str | None
+    password_configured: bool
+    updated_at: str | None
 
 
 class UserOut(BaseModel):

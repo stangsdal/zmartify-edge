@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.auth import AuthError, ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, ROLE_VIEWER
+from app.auth import AuthError
 from app.contracts import ContractValidationError, validate_mqtt_v2_reported_state
 from app.domain_model import (
     DomainModelError,
@@ -25,7 +25,7 @@ from app.domain_model import (
     upsert_channel_state,
 )
 from app.mqtt_commands import MqttCommandError, publish_zone_name_command, should_forward_setpoint_commands
-from app.permissions import require_site_permission
+from app.permissions import require_global_admin, require_site_permission
 from app.registry import RegistryNotFoundError
 from app.schemas import (
     ChannelMetadataIn,
@@ -177,7 +177,13 @@ def create_device_domain_v2_router(
     def v2_ingest_device_twin(device_id: str, payload: DeviceTwinIngestIn, request: Request) -> dict:
         device_token_device_id = getattr(request.state, "device_token_device_id", None)
         if device_token_device_id != device_id:
-            require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+            auth_user = getattr(request.state, "auth_user", None)
+            if auth_user is None:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+            try:
+                require_global_admin(auth_user)
+            except AuthError as exc:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         try:
             validate_mqtt_v2_reported_state(
                 {

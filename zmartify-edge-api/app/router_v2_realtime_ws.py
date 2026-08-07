@@ -8,15 +8,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.auth import (
     AuthError,
     AuthenticatedUser,
-    ROLE_ADMIN,
-    ROLE_INSTALLER,
-    ROLE_OWNER,
-    ROLE_VIEWER,
     authenticate_bearer_token,
     authenticate_emergency_token,
-    list_user_site_access,
-    require_any_role,
 )
+from app.db import get_connection
+from app.permissions import is_global_administrator, require_site_permission
 
 
 class RealtimeHubProtocol(Protocol):
@@ -30,14 +26,10 @@ def _filter_topics_for_user(auth_user: AuthenticatedUser, topics: list[str]) -> 
     if not normalized:
         return []
 
-    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
+    if is_global_administrator(auth_user):
         return normalized
 
     allowed: list[str] = []
-    scoped_site_ids: set[int] = set()
-    if auth_user.user_id is not None:
-        scoped_site_ids = set(list_user_site_access(auth_user.user_id))
-
     for topic in normalized:
         if topic.startswith("user:") and topic.endswith(":notifications"):
             parts = topic.split(":")
@@ -47,13 +39,49 @@ def _filter_topics_for_user(auth_user: AuthenticatedUser, topics: list[str]) -> 
 
         if topic.startswith("site:") and topic.endswith(":events"):
             parts = topic.split(":")
-            if len(parts) == 3 and parts[1].isdigit() and int(parts[1]) in scoped_site_ids:
-                allowed.append(topic)
+            if len(parts) == 3:
+                with get_connection() as conn:
+                    row = conn.execute("SELECT id FROM sites WHERE CAST(id AS TEXT) = ? OR uuid = ?", (parts[1], parts[1])).fetchone()
+                if row is not None:
+                    try:
+                        require_site_permission(auth_user, int(row["id"]), product_type=None, permission="read")
+                        allowed.append(topic)
+                    except AuthError:
+                        pass
             continue
 
-        # Keep current HVAC state topics available to existing non-admin clients.
-        if topic.startswith("device:") or topic.startswith("zone:"):
-            allowed.append(topic)
+        if topic.startswith("device:"):
+            parts = topic.split(":")
+            if len(parts) >= 3:
+                with get_connection() as conn:
+                    row = conn.execute("SELECT site_id, product_type FROM devices WHERE device_id = ?", (parts[1],)).fetchone()
+                if row is not None and row["site_id"] and row["product_type"]:
+                    try:
+                        require_site_permission(auth_user, int(row["site_id"]), product_type=str(row["product_type"]), permission="read")
+                        allowed.append(topic)
+                    except AuthError:
+                        pass
+            continue
+
+        if topic.startswith("zone:"):
+            parts = topic.split(":")
+            if len(parts) >= 3:
+                with get_connection() as conn:
+                    row = conn.execute(
+                        """
+                        SELECT d.site_id, d.product_type
+                        FROM zone_metadata zm
+                        JOIN devices d ON d.id = zm.device_id
+                        WHERE zm.uuid = ?
+                        """,
+                        (parts[1],),
+                    ).fetchone()
+                if row is not None and row["site_id"] and row["product_type"]:
+                    try:
+                        require_site_permission(auth_user, int(row["site_id"]), product_type=str(row["product_type"]), permission="read")
+                        allowed.append(topic)
+                    except AuthError:
+                        pass
 
     return sorted(set(allowed))
 
@@ -75,12 +103,6 @@ def create_realtime_ws_v2_router(realtime_hub: RealtimeHubProtocol) -> APIRouter
             if auth_user is None:
                 await websocket.close(code=4403, reason="invalid bearer token")
                 return
-
-        try:
-            require_any_role(auth_user, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        except AuthError:
-            await websocket.close(code=4403, reason="insufficient role permissions")
-            return
 
         await websocket.accept()
         await websocket.send_json({"type": "ready", "protocol": "v2"})

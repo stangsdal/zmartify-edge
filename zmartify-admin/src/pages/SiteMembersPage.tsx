@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
-import { IonButton, IonContent, IonItem, IonLabel, IonLoading, IonPage, IonSelect, IonSelectOption } from '@ionic/react';
+import { IonButton, IonContent, IonInput, IonItem, IonLabel, IonLoading, IonPage, IonSelect, IonSelectOption } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
 import { useAccess } from '../auth/AccessContext';
-import { SiteMembership, SiteMembershipCandidate, siteMembersApi } from '../api/siteMembers';
+import { SiteInvitation, SiteMembership, SiteMembershipCandidate, siteMembersApi } from '../api/siteMembers';
 
 const productTypes = ['hvac', 'irrigation', 'weather', 'energy'];
 
 export function SiteMembersPage() {
-  const { context, isAdministrator } = useAccess();
+  const { context, isAdministrator, selectedSiteId, selectSite } = useAccess();
   const manageableSites = (context?.sites || []).filter((site) => isAdministrator || site.role === 'owner');
-  const [siteId, setSiteId] = useState<number | null>(manageableSites[0]?.id ?? null);
+  const siteId = manageableSites.some((site) => site.id === selectedSiteId) ? selectedSiteId : manageableSites[0]?.id ?? null;
   const [members, setMembers] = useState<SiteMembership[]>([]);
   const [candidates, setCandidates] = useState<SiteMembershipCandidate[]>([]);
+  const [invitations, setInvitations] = useState<SiteInvitation[]>([]);
   const [candidateId, setCandidateId] = useState<number | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
   const [newRole, setNewRole] = useState('user');
   const [newProducts, setNewProducts] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -21,12 +23,14 @@ export function SiteMembersPage() {
   const load = async (selectedSiteId: number) => {
     try {
       setLoading(true);
-      const [memberRows, candidateRows] = await Promise.all([
+      const [memberRows, candidateRows, invitationRows] = await Promise.all([
         siteMembersApi.list(selectedSiteId),
         siteMembersApi.candidates(selectedSiteId),
+        siteMembersApi.invitations(selectedSiteId),
       ]);
       setMembers(memberRows);
       setCandidates(candidateRows);
+      setInvitations(invitationRows);
       setCandidateId(candidateRows[0]?.id ?? null);
       setError('');
     } catch (loadError) {
@@ -35,6 +39,12 @@ export function SiteMembersPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (siteId !== null && siteId !== selectedSiteId) {
+      selectSite(siteId);
+    }
+  }, [selectedSiteId, siteId, selectSite]);
 
   useEffect(() => {
     if (siteId !== null) {
@@ -60,6 +70,24 @@ export function SiteMembersPage() {
       await refresh();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inviteMember = async () => {
+    if (siteId === null || !inviteEmail.trim()) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await siteMembersApi.invite(siteId, { email: inviteEmail.trim(), role: newRole, product_types: newProducts });
+      setInviteEmail('');
+      setNewRole('user');
+      setNewProducts([]);
+      await refresh();
+    } catch (inviteError) {
+      setError(inviteError instanceof Error ? inviteError.message : String(inviteError));
     } finally {
       setLoading(false);
     }
@@ -107,10 +135,33 @@ export function SiteMembersPage() {
             <>
               <IonItem>
                 <IonLabel position="stacked">Site</IonLabel>
-                <IonSelect value={siteId} interface="popover" onIonChange={(event) => setSiteId(Number(event.detail.value))}>
+                <IonSelect value={siteId} interface="popover" onIonChange={(event) => selectSite(Number(event.detail.value))}>
                   {manageableSites.map((site) => <IonSelectOption key={site.id} value={site.id}>{site.name}</IonSelectOption>)}
                 </IonSelect>
               </IonItem>
+
+              <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+                <h2 className="text-lg font-semibold">Invite person</h2>
+                <IonItem>
+                  <IonLabel position="stacked">Email</IonLabel>
+                  <IonInput value={inviteEmail} type="email" placeholder="name@example.com" onIonChange={(event) => setInviteEmail(event.detail.value || '')} />
+                </IonItem>
+                <IonItem>
+                  <IonLabel position="stacked">Site role</IonLabel>
+                  <IonSelect value={newRole} interface="popover" onIonChange={(event) => setNewRole(String(event.detail.value))}>
+                    <IonSelectOption value="owner">Owner</IonSelectOption>
+                    <IonSelectOption value="user">User</IonSelectOption>
+                    <IonSelectOption value="viewer">Viewer</IonSelectOption>
+                  </IonSelect>
+                </IonItem>
+                <IonItem>
+                  <IonLabel position="stacked">System access</IonLabel>
+                  <IonSelect value={newProducts} multiple interface="popover" onIonChange={(event) => setNewProducts((event.detail.value as string[]) || [])}>
+                    {productTypes.map((product) => <IonSelectOption key={product} value={product}>{product}</IonSelectOption>)}
+                  </IonSelect>
+                </IonItem>
+                <IonButton className="ion-margin-top" onClick={() => void inviteMember()} disabled={!inviteEmail.trim()}>Send invitation</IonButton>
+              </section>
 
               {candidates.length > 0 ? (
                 <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
@@ -169,6 +220,19 @@ export function SiteMembersPage() {
                   </article>
                 ))}
               </section>
+
+              {invitations.length > 0 ? (
+                <section className="space-y-3">
+                  <h2 className="text-lg font-semibold">Invitations</h2>
+                  {invitations.map((invitation) => (
+                    <article key={invitation.id} className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+                      <p className="font-semibold">{invitation.email}</p>
+                      <p className="text-sm text-muted">{invitation.role} - {invitation.product_types.length ? invitation.product_types.join(', ') : 'All systems'}</p>
+                      <p className="text-sm text-muted">{invitation.accepted_at ? 'Accepted' : `Expires ${new Date(invitation.expires_at).toLocaleString()}`}</p>
+                    </article>
+                  ))}
+                </section>
+              ) : null}
             </>
           ) : null}
         </div>

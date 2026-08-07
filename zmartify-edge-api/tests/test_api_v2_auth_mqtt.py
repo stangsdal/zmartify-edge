@@ -41,9 +41,26 @@ def test_api_v2_auth_and_users(monkeypatch, tmp_path: Path):
     user_detail = client.get(f"/api/v2/users/{user_id}", headers=headers)
     assert user_detail.status_code == 200
 
-    site_access = client.get(f"/api/v2/users/{user_id}/site-access", headers=headers)
-    assert site_access.status_code == 200
-    assert "site_ids" in site_access.json()
+
+def test_legacy_mqtt_client_routes_require_platform_administrator(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    administrator_headers = {"Authorization": "Bearer emergency-token"}
+    assert client.get("/mqtt/clients", headers=administrator_headers).status_code == 200
+
+    from app.auth import hash_password
+    from app.db import get_connection
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            ("legacy-mqtt-viewer", "legacy-mqtt-viewer", "Legacy MQTT Viewer", hash_password("VeryStrongPass123!")),
+        )
+        conn.commit()
+
+    login = client.post("/auth/login", json={"username": "legacy-mqtt-viewer", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get("/mqtt/clients", headers=viewer_headers).status_code == 403
 
 
 def test_api_v2_mqtt_clients_flow(monkeypatch, tmp_path: Path):

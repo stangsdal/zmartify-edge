@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from cryptography.fernet import Fernet
 
 
 def _client(monkeypatch, tmp_path: Path) -> TestClient:
@@ -88,3 +89,107 @@ def test_site_owner_manages_members_and_cannot_remove_final_owner(monkeypatch, t
     final_owner = client.delete(f"/api/v2/sites/{site_id}/members/{owner_membership_id}", headers=owner_headers)
     assert final_owner.status_code == 400
     assert "at least one active owner" in final_owner.json()["detail"]
+
+
+def test_matching_email_accepts_site_invitation_once(monkeypatch, tmp_path: Path):
+    _client(monkeypatch, tmp_path)
+
+    from app.auth import AuthError, hash_password
+    from app.db import get_connection
+    from app.site_invitations import accept_site_invitation, create_site_invitation
+
+    with get_connection() as conn:
+        domain_id = conn.execute("INSERT INTO domains(uuid, slug, name) VALUES (?, ?, ?)", (str(uuid.uuid4()), "invite-domain", "Invite Domain")).lastrowid
+        site_id = conn.execute("INSERT INTO sites(uuid, domain_id, slug, name) VALUES (?, ?, ?, ?)", (str(uuid.uuid4()), domain_id, "invite-site", "Invite Site")).lastrowid
+        user_id = conn.execute(
+            "INSERT INTO users(uuid, username, email, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, ?, 1)",
+            (str(uuid.uuid4()), "invited-user", "member@example.com", "Invited User", hash_password("VeryStrongPass123!")),
+        ).lastrowid
+        conn.commit()
+
+    invitation, token = create_site_invitation(
+        site_id=site_id,
+        email="member@example.com",
+        role="user",
+        product_types=["hvac"],
+        invited_by_user_id=None,
+    )
+    membership = accept_site_invitation(token=token, user_id=user_id, user_email="member@example.com")
+    assert membership["role"] == "user"
+    assert membership["product_types"] == ["hvac"]
+
+    with get_connection() as conn:
+        accepted = conn.execute("SELECT accepted_by_user_id FROM site_invitations WHERE id = ?", (invitation["id"],)).fetchone()
+        assert accepted["accepted_by_user_id"] == user_id
+
+    try:
+        accept_site_invitation(token=token, user_id=user_id, user_email="member@example.com")
+    except AuthError as exc:
+        assert "already accepted" in str(exc)
+    else:
+        raise AssertionError("accepted invitation should not be reusable")
+
+
+def test_new_account_registers_and_accepts_site_invitation(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+
+    from app.db import get_connection
+    from app.site_invitations import create_site_invitation
+
+    with get_connection() as conn:
+        domain_id = conn.execute("INSERT INTO domains(uuid, slug, name) VALUES (?, ?, ?)", (str(uuid.uuid4()), "new-account-domain", "New Account Domain")).lastrowid
+        site_id = conn.execute("INSERT INTO sites(uuid, domain_id, slug, name) VALUES (?, ?, ?, ?)", (str(uuid.uuid4()), domain_id, "new-account-site", "New Account Site")).lastrowid
+        conn.commit()
+
+    _invitation, token = create_site_invitation(
+        site_id=site_id,
+        email="new.member@example.com",
+        role="viewer",
+        product_types=["irrigation"],
+        invited_by_user_id=None,
+    )
+    validated = client.get("/api/v2/site-invitations/validate", params={"token": token})
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+    assert validated.json()["site_name"] == "New Account Site"
+
+    registered = client.post(
+        "/api/v2/site-invitations/register",
+        json={"token": token, "username": "new-member", "display_name": "New Member", "password": "VeryStrongPass123!"},
+    )
+    assert registered.status_code == 200
+
+    with get_connection() as conn:
+        member = conn.execute(
+            """
+            SELECT sm.role, sm.status, spa.product_type
+            FROM site_memberships sm
+            JOIN users u ON u.id = sm.user_id
+            JOIN site_membership_product_access spa ON spa.membership_id = sm.id
+            WHERE u.username = ?
+            """,
+            ("new-member",),
+        ).fetchone()
+        assert member["role"] == "viewer"
+        assert member["status"] == "active"
+        assert member["product_type"] == "irrigation"
+
+
+def test_encrypted_email_settings_do_not_return_password(monkeypatch, tmp_path: Path):
+    _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZMART_EDGE_SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
+
+    from app.email_settings import get_email_settings, smtp_configuration, update_email_settings
+
+    settings = update_email_settings(
+        host="mail.example.com",
+        port=465,
+        username="sender@example.com",
+        sender="sender@example.com",
+        password="not-returned",
+        actor_user_id=None,
+    )
+    assert settings["password_configured"] is True
+    assert "password" not in settings
+    assert get_email_settings()["source"] == "settings"
+    assert smtp_configuration()["password"] == "not-returned"

@@ -5,10 +5,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER
+from app.auth import AuthError
 from app.contracts import ContractValidationError
 from app.domain_model import DomainModelError
 from app.mqtt_v2_ingest import ingest_mqtt_v2_irrigation_outcome, ingest_mqtt_v2_reported_state, ingest_mqtt_v2_setpoint_outcome
+from app.permissions import require_global_admin
 from app.registry import RegistryNotFoundError
 
 
@@ -18,11 +19,20 @@ def create_mqtt_ingest_v2_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-mqtt-ingest"])
 
+    def require_platform_administrator(request: Request) -> None:
+        auth_user = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_global_admin(auth_user)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
     @router.post("/devices/{device_id}/ingest/mqtt/reported-state")
     def v2_ingest_mqtt_reported_state(device_id: str, payload: dict[str, Any], request: Request) -> dict:
         device_token_device_id = getattr(request.state, "device_token_device_id", None)
         if device_token_device_id != device_id:
-            require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+            require_platform_administrator(request)
         try:
             return ingest_mqtt_v2_reported_state(
                 device_id,
@@ -41,7 +51,7 @@ def create_mqtt_ingest_v2_router(
     def v2_ingest_mqtt_setpoint_outcome(device_id: str, zone_id: int, payload: dict[str, Any], request: Request) -> dict:
         device_token_device_id = getattr(request.state, "device_token_device_id", None)
         if device_token_device_id != device_id:
-            require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+            require_platform_administrator(request)
         try:
             return ingest_mqtt_v2_setpoint_outcome(device_id, zone_id, payload)
         except ContractValidationError as exc:
@@ -55,7 +65,7 @@ def create_mqtt_ingest_v2_router(
     def v2_ingest_mqtt_irrigation_outcome(device_id: str, payload: dict[str, Any], request: Request) -> dict:
         device_token_device_id = getattr(request.state, "device_token_device_id", None)
         if device_token_device_id != device_id:
-            require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+            require_platform_administrator(request)
         try:
             return ingest_mqtt_v2_irrigation_outcome(device_id, payload)
         except ContractValidationError as exc:

@@ -6,15 +6,16 @@ import { SiteSelector } from '../components/SiteSelector';
 import { RoomCard } from '../components/RoomCard';
 import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
 import { apiClient } from '../api/client';
+import { useAccess } from '../auth/AccessContext';
 
 interface RoomWithRef extends MobileZone {
   zone_ref: string;
 }
 
 export function RoomsPage() {
+  const { context, selectedSiteId, selectSite, can } = useAccess();
   const history = useHistory();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
   const emptyResponseStreakRef = useRef(0);
@@ -106,17 +107,16 @@ export function RoomsPage() {
     const loadSites = async () => {
       const res = await mobileApi.listSites();
       setSites(res.sites || []);
-      if (res.sites?.length) setSelectedSite(res.sites[0].site_id);
     };
     loadSites().catch(console.error);
   }, []);
 
   useEffect(() => {
-    if (!selectedSite) return;
+    if (!selectedSiteId) return;
     let cancelled = false;
 
     const loadRooms = async () => {
-      const siteZones = await mobileApi.getSiteZones(selectedSite);
+      const siteZones = await mobileApi.getSiteZones(String(selectedSiteId));
       const nextRooms: RoomWithRef[] = (siteZones.devices || []).flatMap((device) =>
         (device.zones || []).map((zone) => ({
           ...zone,
@@ -152,7 +152,7 @@ export function RoomsPage() {
       window.clearInterval(intervalId);
       emptyResponseStreakRef.current = 0;
     };
-  }, [selectedSite]);
+  }, [selectedSiteId]);
 
   useEffect(() => {
     const activeRefs = new Set(rooms.map((room) => room.zone_ref));
@@ -198,6 +198,10 @@ export function RoomsPage() {
   );
 
   const offlineRooms = useMemo(() => sortedRooms.filter((room) => room.online === false).length, [sortedRooms]);
+  const canOperate = selectedSiteId != null && can(selectedSiteId, 'hvac', 'operate');
+  const canConfigure = selectedSiteId != null && can(selectedSiteId, 'hvac', 'configure');
+  const site = context?.sites.find((candidate) => candidate.id === selectedSiteId);
+  const siteBase = site ? `/app/sites/${site.uuid || site.id}` : '/app/home';
 
   return (
     <IonPage>
@@ -207,8 +211,8 @@ export function RoomsPage() {
           <SiteSelector
             label="Site"
             options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))}
-            value={selectedSite}
-            onChange={setSelectedSite}
+            value={selectedSiteId ? String(selectedSiteId) : ''}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
           <section className="grid gap-3 md:grid-cols-3">
@@ -236,14 +240,16 @@ export function RoomsPage() {
               <RoomCard
                 key={room.zone_ref}
                 zone={room}
-                onOpen={() => navigateWithBlur(`/app/rooms/${encodeURIComponent(room.zone_ref)}`)}
-                onHistory={() => navigateWithBlur(`/app/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
+                onOpen={() => navigateWithBlur(`${siteBase}/hvac/zones/${encodeURIComponent(room.zone_ref)}`)}
+                onHistory={() => navigateWithBlur(`${siteBase}/hvac/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
                 onRename={() => {
                   void handleRename(room);
                 }}
                 onSetpointChange={(delta) => {
                   void handleSetpointChange(room, delta);
                 }}
+                canOperate={canOperate}
+                canConfigure={canConfigure}
               />
             ))}
             {!sortedRooms.length ? <p className="text-sm text-muted">No rooms found for this property.</p> : null}

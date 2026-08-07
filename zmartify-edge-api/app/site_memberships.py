@@ -90,29 +90,41 @@ def _validate(role: str, status: str, product_types: list[str]) -> None:
         raise AuthError("unknown product type")
 
 
-def create_site_member(*, site_id: int, user_id: int, role: str, status: str, product_types: list[str], invited_by_user_id: int | None) -> dict:
+def create_site_member_in_connection(conn, *, site_id: int, user_id: int, role: str, status: str, product_types: list[str], invited_by_user_id: int | None) -> dict:
     _validate(role, status, product_types)
-    with get_connection() as conn:
-        if not _site_exists(conn, site_id):
-            raise AuthError("site not found")
-        if conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is None:
-            raise AuthError("user not found")
-        if conn.execute("SELECT 1 FROM site_memberships WHERE user_id = ? AND site_id = ?", (user_id, site_id)).fetchone():
-            raise AuthError("user already has a membership at this site")
-        cur = conn.execute(
-            """
-            INSERT INTO site_memberships(uuid, user_id, site_id, role, status, invited_by_user_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (str(uuid.uuid4()), user_id, site_id, role, status, invited_by_user_id),
+    if not _site_exists(conn, site_id):
+        raise AuthError("site not found")
+    if conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is None:
+        raise AuthError("user not found")
+    if conn.execute("SELECT 1 FROM site_memberships WHERE user_id = ? AND site_id = ?", (user_id, site_id)).fetchone():
+        raise AuthError("user already has a membership at this site")
+    cur = conn.execute(
+        """
+        INSERT INTO site_memberships(uuid, user_id, site_id, role, status, invited_by_user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (str(uuid.uuid4()), user_id, site_id, role, status, invited_by_user_id),
+    )
+    membership_id = int(cur.lastrowid)
+    for product_type in sorted(set(product_types)):
+        conn.execute(
+            "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, ?)",
+            (membership_id, product_type),
         )
-        membership_id = int(cur.lastrowid)
-        for product_type in sorted(set(product_types)):
-            conn.execute(
-                "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, ?)",
-                (membership_id, product_type),
-            )
-        result = _member_out(conn, membership_id)
+    return _member_out(conn, membership_id)
+
+
+def create_site_member(*, site_id: int, user_id: int, role: str, status: str, product_types: list[str], invited_by_user_id: int | None) -> dict:
+    with get_connection() as conn:
+        result = create_site_member_in_connection(
+            conn,
+            site_id=site_id,
+            user_id=user_id,
+            role=role,
+            status=status,
+            product_types=product_types,
+            invited_by_user_id=invited_by_user_id,
+        )
         conn.commit()
         return result
 

@@ -11,6 +11,7 @@ import {
   waterOutline,
 } from 'ionicons/icons';
 import { NavLink, useLocation } from 'react-router-dom';
+import { useAccess } from '../auth/AccessContext';
 
 type NavItem = {
   label: string;
@@ -20,41 +21,45 @@ type NavItem = {
 
 interface ResponsiveNavigationProps {
   appBase: string;
-  isAdmin?: boolean;
-  controlPath: string;
 }
 
 const isActive = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
-export function ResponsiveNavigation({ appBase, isAdmin = false, controlPath }: ResponsiveNavigationProps) {
+export function ResponsiveNavigation({ appBase }: ResponsiveNavigationProps) {
   const location = useLocation();
+  const { context, isAdministrator, selectedSiteId } = useAccess();
+  const site = context?.sites.find((candidate) => candidate.id === selectedSiteId);
+  const siteRef = site?.uuid || site?.id;
+  const siteBase = siteRef ? `${appBase}/sites/${siteRef}` : `${appBase}/home`;
+  const hasHvac = site?.products.some((product) => product.type === 'hvac' && product.allowed) === true;
+  const hasIrrigation = site?.products.some((product) => product.type === 'irrigation' && product.allowed) === true;
 
   const mobileItems: NavItem[] = [
-    { label: 'Home', path: `${appBase}/home`, icon: homeOutline },
-    { label: 'Control', path: controlPath, icon: waterOutline },
-    { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
-    { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
+    { label: 'Home', path: siteBase, icon: homeOutline },
+    ...(hasHvac ? [{ label: 'HVAC', path: `${siteBase}/hvac`, icon: homeOutline }] : []),
+    ...(hasIrrigation ? [{ label: 'Irrigation', path: `${siteBase}/irrigation`, icon: waterOutline }] : []),
+    { label: 'Alerts', path: `${siteBase}/alerts`, icon: alertCircleOutline },
     { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
   ];
 
-  const desktopItems: NavItem[] = isAdmin
+  const desktopItems: NavItem[] = isAdministrator
     ? [
-        { label: 'Overview', path: `${appBase}/overview`, icon: homeOutline },
+        { label: 'Overview', path: siteBase, icon: homeOutline },
         { label: 'Sites', path: `${appBase}/sites`, icon: layersOutline },
         { label: 'Systems', path: `${appBase}/systems`, icon: hardwareChipOutline },
         { label: 'Devices', path: `${appBase}/devices`, icon: hardwareChipOutline },
         { label: 'Automations', path: `${appBase}/automations`, icon: constructOutline },
         { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
-        { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
+        { label: 'Alerts', path: `${siteBase}/alerts`, icon: alertCircleOutline },
         { label: 'Users', path: `${appBase}/users`, icon: peopleOutline },
         { label: 'Integrations', path: `${appBase}/integrations`, icon: layersOutline },
         { label: 'System', path: `${appBase}/system`, icon: settingsOutline },
       ]
     : [
-        { label: 'Overview', path: `${appBase}/overview`, icon: homeOutline },
-        { label: 'Control', path: controlPath, icon: waterOutline },
-        { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
-        { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
+      { label: 'Overview', path: siteBase, icon: homeOutline },
+      ...(hasHvac ? [{ label: 'HVAC', path: `${siteBase}/hvac`, icon: homeOutline }] : []),
+      ...(hasIrrigation ? [{ label: 'Irrigation', path: `${siteBase}/irrigation`, icon: waterOutline }] : []),
+        { label: 'Alerts', path: `${siteBase}/alerts`, icon: alertCircleOutline },
         { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
       ];
 

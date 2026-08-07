@@ -15,6 +15,7 @@ import {
   subscribeRealtimeTopics,
 } from '../api/mobile';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
+import { useAccess } from '../auth/AccessContext';
 
 type DeviceProgram = {
   deviceId: string;
@@ -147,8 +148,10 @@ const isIrrigationController = (device: { device_id: string; display_name: strin
 };
 
 export function IrrigationProgramsPage() {
+  const { selectedSiteId, selectSite, can } = useAccess();
   const [sites, setSites] = useState<MobileSiteSummary[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
+  const selectedSite = selectedSiteId ? String(selectedSiteId) : '';
+  const canOperate = selectedSiteId != null && can(selectedSiteId, 'irrigation', 'operate');
   const [programRows, setProgramRows] = useState<DeviceProgram[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [deviceIds, setDeviceIds] = useState<string[]>([]);
@@ -719,9 +722,6 @@ export function IrrigationProgramsPage() {
     const loadSites = async () => {
       const response = await mobileApi.listSites();
       setSites(response.sites || []);
-      if ((response.sites || []).length) {
-        setSelectedSite((prev) => prev || response.sites[0].site_id);
-      }
     };
     loadSites().catch(console.error);
   }, []);
@@ -798,10 +798,10 @@ export function IrrigationProgramsPage() {
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
             value={selectedSite}
-            onChange={setSelectedSite}
+            onChange={(siteId) => selectSite(Number(siteId))}
           />
 
-          <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+          {canOperate ? <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Create program</p>
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <input
@@ -815,7 +815,7 @@ export function IrrigationProgramsPage() {
               </IonButton>
             </div>
             {actionFeedback ? <p className="text-sm text-muted mt-2">{actionFeedback}</p> : null}
-          </section>
+          </section> : null}
 
           {programRows.map((row) => {
             const key = programKey(row);
@@ -891,7 +891,7 @@ export function IrrigationProgramsPage() {
                   <h2 className="text-lg font-semibold">{row.program.name}</h2>
                   <p className="text-sm text-muted">{row.displayName} • {scheduleSummary}</p>
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
+                {canOperate ? <div className="flex flex-wrap items-center justify-end gap-2">
                   <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
                     <span>{row.program.enabled ? 'Enabled' : 'Not Enabled'}</span>
                     <IonToggle
@@ -909,7 +909,7 @@ export function IrrigationProgramsPage() {
                   >
                     {deleteProgramBusy ? 'Deleting...' : 'Delete program'}
                   </IonButton>
-                </div>
+                </div> : null}
               </div>
 
               <div className="grid grid-cols-2 gap-3 mt-4">
@@ -983,7 +983,7 @@ export function IrrigationProgramsPage() {
                 ) : null}
               </div>
 
-              <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
+              {canOperate ? <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted">Watering groups</p>
@@ -1068,9 +1068,9 @@ export function IrrigationProgramsPage() {
                     })}
                   </div>
                 ) : <p className="mt-3 text-sm text-muted">Add a watering group to begin building this program.</p>}
-              </div>
+              </div> : null}
 
-              <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
+              {canOperate ? <div className="mt-3 rounded-xl border border-slate-200 px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted">Schedule</p>
@@ -1293,9 +1293,9 @@ export function IrrigationProgramsPage() {
                 ) : (
                   <p className="mt-3 text-sm text-muted">No saved schedules yet.</p>
                 )}
-              </div>
+              </div> : null}
 
-              <div className="flex flex-wrap gap-2 mt-3">
+              {canOperate ? <div className="flex flex-wrap gap-2 mt-3">
                 <IonButton
                   size="small"
                   disabled={runBusy || !row.program.enabled || !orderedWateringGroups.length || controllerHasActiveProgram}
@@ -1325,7 +1325,7 @@ export function IrrigationProgramsPage() {
                     </IonButton>
                   </>
                 ) : null}
-              </div>
+              </div> : null}
             </section>
           )})}
 
