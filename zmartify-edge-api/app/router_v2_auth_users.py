@@ -11,11 +11,11 @@ from app.auth import (
     login,
     logout_token,
 )
-from app.email_delivery import EmailDeliveryError, send_site_invitation
+from app.email_delivery import EmailDeliveryError, send_site_invitation, send_smtp_test_email
 from app.email_settings import EmailSettingsError, get_email_settings, update_email_settings
 from app.permissions import access_context, require_global_admin
 from app.permissions import require_site_permission
-from app.schemas import AuthLoginOut, SiteInvitationAcceptIn, SiteInvitationCreateIn, SiteInvitationOut, SiteInvitationRegisterIn, SiteInvitationValidateOut, SiteMembershipCandidateOut, SiteMembershipCreateIn, SiteMembershipOut, SiteMembershipUpdateIn, SystemEmailSettingsIn, SystemEmailSettingsOut, UserOut
+from app.schemas import AuthLoginOut, SiteInvitationAcceptIn, SiteInvitationCreateIn, SiteInvitationOut, SiteInvitationRegisterIn, SiteInvitationValidateOut, SiteMembershipCandidateOut, SiteMembershipCreateIn, SiteMembershipOut, SiteMembershipUpdateIn, SystemEmailSettingsIn, SystemEmailSettingsOut, SystemEmailTestIn, UserOut
 from app.site_invitations import accept_site_invitation, create_site_invitation, delete_site_invitation, invitation_url, list_site_invitations, register_and_accept_site_invitation, validate_site_invitation
 from app.site_memberships import create_site_member, delete_site_member, list_site_member_candidates, list_site_members, update_site_member
 
@@ -89,6 +89,15 @@ def create_auth_users_v2_router(require_roles: Callable[[Request, set[str]], Non
             )
         except EmailSettingsError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    @router.post("/admin/system/email-settings/test")
+    def v2_test_system_email_settings(payload: SystemEmailTestIn, request: Request) -> dict:
+        require_platform_administration(request)
+        try:
+            send_smtp_test_email(recipient=payload.recipient)
+        except EmailDeliveryError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return {"sent": True}
 
     @router.get("/sites/{site_id}/members", response_model=list[SiteMembershipOut])
     def v2_list_site_members(site_id: int, request: Request) -> list[dict]:

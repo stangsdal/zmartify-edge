@@ -650,6 +650,12 @@ class SystemEmailSettingsOut(BaseModel):
     updated_at: str | None
 
 
+class SystemEmailTestIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    recipient: str = Field(min_length=3, max_length=320)
+
+
 class UserOut(BaseModel):
     id: int
     uuid: str | None = None

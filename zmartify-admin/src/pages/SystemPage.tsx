@@ -29,6 +29,8 @@ export function SystemPage() {
   const [username, setUsername] = useState('');
   const [sender, setSender] = useState('');
   const [password, setPassword] = useState('');
+  const [testRecipient, setTestRecipient] = useState('');
+  const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -55,6 +57,18 @@ export function SystemPage() {
       setMessage('Email settings updated.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const testEmailSettings = async () => {
+    try {
+      setTesting(true);
+      await apiClient.post('/api/v2/admin/system/email-settings/test', { recipient: testRecipient });
+      setMessage(`Test email sent to ${testRecipient}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -94,6 +108,13 @@ export function SystemPage() {
               <IonInput value={password} type="password" placeholder={settings?.password_configured ? 'Leave blank to keep the current password' : ''} onIonChange={(event) => setPassword(event.detail.value || '')} />
             </IonItem>
             <IonButton className="ion-margin-top" onClick={() => void saveEmailSettings()} disabled={!host || !username || !sender || !port}>Save email settings</IonButton>
+            <IonItem className="ion-margin-top">
+              <IonLabel position="stacked">Test recipient</IonLabel>
+              <IonInput value={testRecipient} type="email" onIonChange={(event) => setTestRecipient(event.detail.value || '')} />
+            </IonItem>
+            <IonButton fill="outline" className="ion-margin-top" onClick={() => void testEmailSettings()} disabled={!settings?.password_configured || !testRecipient || testing}>
+              {testing ? 'Sending test email...' : 'Send test email'}
+            </IonButton>
             {message ? <p className="text-sm text-muted mt-2">{message}</p> : null}
           </section>
         </div>

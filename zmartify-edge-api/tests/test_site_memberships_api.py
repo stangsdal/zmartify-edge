@@ -200,3 +200,29 @@ def test_email_settings_timestamp_serializes_postgres_datetime():
     from app.email_settings import _timestamp_string
 
     assert _timestamp_string(datetime(2026, 8, 7, 12, 8, 46, tzinfo=timezone.utc)) == "2026-08-07T12:08:46+00:00"
+
+
+def test_administrator_can_send_smtp_test_email(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    from app.auth import create_user
+
+    create_user(
+        actor_user_id=None,
+        username="smtp-admin",
+        display_name="SMTP Administrator",
+        password="VeryStrongPass123!",
+        email=None,
+        roles=["administrator"],
+    )
+    sent_to: list[str] = []
+    monkeypatch.setattr("app.router_v2_auth_users.send_smtp_test_email", lambda *, recipient: sent_to.append(recipient))
+
+    response = client.post(
+        "/api/v2/admin/system/email-settings/test",
+        headers=_login(client, "smtp-admin"),
+        json={"recipient": "operator@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"sent": True}
+    assert sent_to == ["operator@example.com"]

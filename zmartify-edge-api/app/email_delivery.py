@@ -10,7 +10,7 @@ class EmailDeliveryError(RuntimeError):
     pass
 
 
-def send_site_invitation(*, recipient: str, site_name: str, role: str, invitation_url: str) -> None:
+def _send_email(*, recipient: str, subject: str, content: str) -> None:
     try:
         settings = smtp_configuration()
     except EmailSettingsError as exc:
@@ -24,13 +24,10 @@ def send_site_invitation(*, recipient: str, site_name: str, role: str, invitatio
         raise EmailDeliveryError("outbound email is not configured")
 
     message = EmailMessage()
-    message["Subject"] = f"Invitation to {site_name}"
+    message["Subject"] = subject
     message["From"] = sender
     message["To"] = recipient
-    message.set_content(
-        f"You have been invited to {site_name} as a {role}.\n\n"
-        f"Accept the invitation by opening this link:\n{invitation_url}\n"
-    )
+    message.set_content(content)
     try:
         if port == 465:
             with smtplib.SMTP_SSL(host, port, timeout=15) as client:
@@ -42,4 +39,23 @@ def send_site_invitation(*, recipient: str, site_name: str, role: str, invitatio
                 client.login(username, password)
                 client.send_message(message)
     except (OSError, smtplib.SMTPException) as exc:
-        raise EmailDeliveryError("could not send invitation email") from exc
+        raise EmailDeliveryError("could not send email") from exc
+
+
+def send_site_invitation(*, recipient: str, site_name: str, role: str, invitation_url: str) -> None:
+    _send_email(
+        recipient=recipient,
+        subject=f"Invitation to {site_name}",
+        content=(
+            f"You have been invited to {site_name} as a {role}.\n\n"
+            f"Accept the invitation by opening this link:\n{invitation_url}\n"
+        ),
+    )
+
+
+def send_smtp_test_email(*, recipient: str) -> None:
+    _send_email(
+        recipient=recipient,
+        subject="Zmartify SMTP test",
+        content="This is a test email from Zmartify. Your SMTP settings are working.\n",
+    )
