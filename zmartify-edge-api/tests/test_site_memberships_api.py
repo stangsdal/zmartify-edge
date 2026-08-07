@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 from cryptography.fernet import Fernet
@@ -193,3 +194,9 @@ def test_encrypted_email_settings_do_not_return_password(monkeypatch, tmp_path: 
     assert "password" not in settings
     assert get_email_settings()["source"] == "settings"
     assert smtp_configuration()["password"] == "not-returned"
+
+
+def test_email_settings_timestamp_serializes_postgres_datetime():
+    from app.email_settings import _timestamp_string
+
+    assert _timestamp_string(datetime(2026, 8, 7, 12, 8, 46, tzinfo=timezone.utc)) == "2026-08-07T12:08:46+00:00"

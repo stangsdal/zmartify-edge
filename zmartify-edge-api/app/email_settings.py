@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -10,6 +11,10 @@ from app.db import get_connection
 
 class EmailSettingsError(AuthError):
     pass
+
+
+def _timestamp_string(value: str | datetime | None) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else value
 
 
 def _cipher() -> Fernet:
@@ -46,7 +51,7 @@ def get_email_settings() -> dict:
         "username": row["username"],
         "sender": row["sender"],
         "password_configured": bool(row["password_encrypted"]),
-        "updated_at": row["updated_at"],
+        "updated_at": _timestamp_string(row["updated_at"]),
     }
 
 
