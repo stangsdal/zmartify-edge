@@ -89,6 +89,7 @@ from app.router_v2_auth_users import create_auth_users_v2_router
 from app.router_v2_core import create_core_v2_router
 from app.router_v2_device_ota import create_device_ota_v2_router
 from app.router_v2_device_lifecycle import create_device_lifecycle_v2_router
+from app.router_v2_device_bootstrap import create_device_bootstrap_v2_router
 from app.router_v2_device_domain import create_device_domain_v2_router
 from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
@@ -191,6 +192,8 @@ setpoint_outcome_listener = create_setpoint_outcome_listener()
 
 def _extract_device_ingest_device_id(path: str) -> str | None:
     parts = path.strip("/").split("/")
+    if len(parts) >= 2 and parts[0] == "api" and parts[1] == "v2":
+        parts = parts[2:]
     if len(parts) >= 4 and parts[0] == "devices":
         if parts[2] == "ingest" and parts[3] == "twin":
             return parts[1]
@@ -260,6 +263,8 @@ for ionic_pwa_dist in ionic_pwa_dist_candidates:
 
 
 def _is_protected_path(path: str) -> bool:
+    if path == "/api/v2/device-bootstrap/config":
+        return False
     if path.startswith("/api/v2/devices/") and "/ota/download" in path:
         return False
     if path in _PROTECTED_EXACT_PATHS:
@@ -551,6 +556,7 @@ app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
 app.include_router(create_irrigation_v2_router(_require_roles))
 app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
 app.include_router(create_device_lifecycle_v2_router(_require_roles))
+app.include_router(create_device_bootstrap_v2_router(_require_roles))
 app.include_router(create_device_ota_v2_router(_require_roles))
 app.include_router(
     create_device_domain_v2_router(

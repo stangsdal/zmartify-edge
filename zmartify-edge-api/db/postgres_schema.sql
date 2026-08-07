@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS devices (
     FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS device_bootstrap_claims (
+    device_id TEXT PRIMARY KEY,
+    claim_token_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS mqtt_clients (
     id BIGSERIAL PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,

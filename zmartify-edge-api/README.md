@@ -12,6 +12,7 @@ This directory contains the initial backend scaffold for the Raspberry Pi edge m
 - Automatic device MQTT client provisioning on device registration
 - Phase D ACL generation from registry state with generation logging
 - Phase 1 foundation scaffolding for PostgreSQL/Timescale (`DATABASE_URL`, compose service, deps)
+- Device-initiated bootstrap staging and MQTT-triggered pull OTA
 
 ## Local run (dev)
 
@@ -120,6 +121,43 @@ API endpoints currently:
 - `POST /mqtt/clients/{id}/disable`
 - `POST /mqtt/clients/{id}/enable`
 - `DELETE /mqtt/clients/{id}`
+
+## Device Bootstrap And Field OTA
+
+The Edge service does not need inbound connectivity to a gateway's LAN address.
+For outbound bootstrap, an owner, admin, or installer stages the device's
+six-digit claim token with `POST /api/v2/devices/bootstrap/stage`. The gateway
+then calls the public `POST /api/v2/device-bootstrap/config` endpoint. A valid
+claim returns Edge URL, device-admin token, and MQTT credentials once; the stored
+claim token is SHA-256 hashed, expires after 10 minutes, and is deleted on use.
+
+For field OTA, stage a firmware binary with:
+
+```text
+POST /api/v2/devices/{device_id}/ota/stage?version={version}&force={false|true}
+```
+
+The response includes `sha256` and `size_bytes`, which must be checked against
+the local artifact. A dedicated management MQTT principal then publishes payload
+`1`, QoS 1, non-retained, to:
+
+```text
+homie/5/{device_id}/gateway/ota-check/set
+```
+
+The device authenticates its own poll and download requests using its
+device-admin token:
+
+```text
+GET /api/v2/devices/{device_id}/ota/poll?current_version={version}
+GET /api/v2/devices/{device_id}/ota/download?sha256={sha256}
+```
+
+Edge returns a download URL only when the staged version differs from the device
+version, unless `force=true`. Do not publish using device credentials or attempt
+to proxy a field OTA through a private `local_url`. Confirm the gateway's version
+and health after its self-initiated reboot, and retain Edge access logs as the
+transfer audit record.
 
 ## MQTT command execution mode
 

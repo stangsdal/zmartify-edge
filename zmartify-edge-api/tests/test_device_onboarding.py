@@ -114,6 +114,45 @@ def test_discover_and_claim_device(monkeypatch, tmp_path: Path):
     assert push.json()["state"] == "online"
 
 
+def test_outbound_bootstrap_claim_is_one_time(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    domain = client.post("/domains", headers=headers, json={"slug": "house", "name": "House"})
+    site = client.post(f"/domains/{domain.json()['id']}/sites", headers=headers, json={"slug": "main", "name": "Main"})
+
+    staged = client.post(
+        "/api/v2/devices/bootstrap/stage",
+        headers=headers,
+        json={
+            "device_id": "hvac-gateway-aabbccddeeff",
+            "claim_token": "123456",
+            "domain_id": domain.json()["id"],
+            "site_id": site.json()["id"],
+            "display_name": "Boiler Room Gateway",
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "firmware_version": "1.2.3",
+        },
+    )
+    assert staged.status_code == 201
+
+    config = client.post(
+        "/api/v2/device-bootstrap/config",
+        json={"device_id": "hvac-gateway-aabbccddeeff", "claim_token": "123456"},
+    )
+    assert config.status_code == 200
+    assert config.json()["edge_url"] == "https://pilot.zmartify.dk"
+    assert config.json()["mqtt_uri"] == "mqtts://pilot.zmartify.dk:8883"
+    assert config.json()["device_admin_token"]
+    assert config.json()["mqtt_password"]
+
+    replay = client.post(
+        "/api/v2/device-bootstrap/config",
+        json={"device_id": "hvac-gateway-aabbccddeeff", "claim_token": "123456"},
+    )
+    assert replay.status_code == 404
+
+
 def test_reclaim_existing_device_rotates_credentials(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
@@ -290,6 +329,7 @@ def test_device_ota_proxy(monkeypatch, tmp_path: Path):
     headers = {"Authorization": "Bearer emergency-token"}
 
     import main
+    import app.router_v2_device_ota as device_ota_router
 
     def fake_discover(_base_url: str) -> dict:
         return {
@@ -330,8 +370,8 @@ def test_device_ota_proxy(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(main, "discover_remote_device", fake_discover)
     monkeypatch.setattr(main, "push_remote_onboarding_config", fake_push)
     monkeypatch.setattr(main, "get_remote_onboarding_status", fake_status)
-    monkeypatch.setattr(main, "push_remote_firmware", fake_ota)
-    monkeypatch.setattr(main, "trigger_remote_reboot", fake_reboot)
+    monkeypatch.setattr(device_ota_router, "push_remote_firmware", fake_ota)
+    monkeypatch.setattr(device_ota_router, "trigger_remote_reboot", fake_reboot)
 
     domain = client.post("/domains", headers=headers, json={"slug": "house", "name": "House"})
     assert domain.status_code == 201
@@ -355,7 +395,7 @@ def test_device_ota_proxy(monkeypatch, tmp_path: Path):
     assert claim.status_code == 201
 
     ota = client.post(
-        "/devices/hvac-gateway-aabbccddeeff/ota?reboot=true",
+        "/api/v2/devices/hvac-gateway-aabbccddeeff/ota?reboot=true",
         headers={**headers, "Content-Type": "application/octet-stream"},
         content=b"fw-bytes",
     )
@@ -426,7 +466,7 @@ def test_device_ota_empty_payload(monkeypatch, tmp_path: Path):
     assert claim.status_code == 201
 
     ota = client.post(
-        "/devices/hvac-gateway-aabbccddeeff/ota",
+        "/api/v2/devices/hvac-gateway-aabbccddeeff/ota",
         headers={**headers, "Content-Type": "application/octet-stream"},
         content=b"",
     )
@@ -495,7 +535,7 @@ def test_device_ota_stage_poll_download(monkeypatch, tmp_path: Path):
     fw = b"new-fw-binary"
     sha = hashlib.sha256(fw).hexdigest()
     stage = client.post(
-        "/devices/hvac-gateway-aabbccddeeff/ota/stage?version=1.2.4",
+        "/api/v2/devices/hvac-gateway-aabbccddeeff/ota/stage?version=1.2.4",
         headers={**headers, "Content-Type": "application/octet-stream"},
         content=fw,
     )
@@ -503,7 +543,7 @@ def test_device_ota_stage_poll_download(monkeypatch, tmp_path: Path):
     assert stage.json()["sha256"] == sha
 
     poll = client.get(
-        "/devices/hvac-gateway-aabbccddeeff/ota/poll?current_version=1.2.3",
+        "/api/v2/devices/hvac-gateway-aabbccddeeff/ota/poll?current_version=1.2.3",
         headers=headers,
     )
     assert poll.status_code == 200
@@ -511,10 +551,10 @@ def test_device_ota_stage_poll_download(monkeypatch, tmp_path: Path):
     assert poll_body["update_available"] is True
     assert poll_body["version"] == "1.2.4"
     assert poll_body["sha256"] == sha
-    assert "/devices/hvac-gateway-aabbccddeeff/ota/download?sha256=" in poll_body["download_url"]
+    assert "/api/v2/devices/hvac-gateway-aabbccddeeff/ota/download?sha256=" in poll_body["download_url"]
 
     download = client.get(
-        f"/devices/hvac-gateway-aabbccddeeff/ota/download?sha256={sha}",
+        f"/api/v2/devices/hvac-gateway-aabbccddeeff/ota/download?sha256={sha}",
         headers=headers,
     )
     assert download.status_code == 200

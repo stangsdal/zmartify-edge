@@ -121,6 +121,18 @@ class DeviceDiscoverOut(BaseModel):
     status: dict
 
 
+class DeviceBootstrapStageIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    device_id: str = Field(min_length=1, max_length=128)
+    claim_token: str = Field(pattern=r"^[0-9]{6}$")
+    domain_id: int
+    site_id: int
+    display_name: str = Field(min_length=1, max_length=128)
+    mac: str | None = Field(default=None, max_length=32)
+    firmware_version: str | None = Field(default=None, max_length=64)
+
+
 class DeviceClaimIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
