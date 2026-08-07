@@ -5,8 +5,9 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import ROLE_ADMIN, ROLE_OWNER, ROLE_VIEWER, ROLE_INSTALLER
+from app.auth import AuthError, AuthenticatedUser, ROLE_ADMIN, ROLE_OWNER, ROLE_VIEWER, ROLE_INSTALLER
 from app.db import get_connection
+from app.permissions import accessible_site_ids, require_global_admin, require_site_permission
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -87,14 +88,51 @@ def _device_v2_payload(device: dict) -> dict:
 def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-core"])
 
+    def auth_user(request: Request) -> AuthenticatedUser:
+        user = getattr(request.state, "auth_user", None)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        return user
+
+    def require_platform_administrator(request: Request) -> None:
+        try:
+            require_global_admin(auth_user(request))
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    def require_site_read(site_id: int, request: Request) -> None:
+        try:
+            require_site_permission(auth_user(request), site_id, product_type=None, permission="read")
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    def require_site_configure(site_id: int, request: Request) -> None:
+        try:
+            require_site_permission(auth_user(request), site_id, product_type=None, permission="configure")
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    def readable_site_ids(request: Request) -> set[int] | None:
+        return accessible_site_ids(auth_user(request))
+
     @router.get("/domains")
     def v2_list_domains(request: Request) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        return [_domain_v2_payload(item) for item in list_domains()]
+        site_ids = readable_site_ids(request)
+        if site_ids is None:
+            return [_domain_v2_payload(item) for item in list_domains()]
+        if not site_ids:
+            return []
+        with get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT DISTINCT domain_id FROM sites WHERE id IN ({','.join('?' for _ in site_ids)})",
+                tuple(sorted(site_ids)),
+            ).fetchall()
+        domain_ids = {int(row["domain_id"]) for row in rows}
+        return [_domain_v2_payload(item) for item in list_domains() if int(item["id"]) in domain_ids]
 
     @router.post("/domains", status_code=status.HTTP_201_CREATED)
     def v2_create_domain(payload: DomainCreate, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_platform_administrator(request)
         try:
             return _domain_v2_payload(create_domain(payload.slug, payload.name))
         except RegistryConflictError as exc:
@@ -102,8 +140,16 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
 
     @router.get("/domains/{domain_ref}")
     def v2_get_domain(domain_ref: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         domain_id = _resolve_domain_id(domain_ref)
+        site_ids = readable_site_ids(request)
+        if site_ids is not None:
+            with get_connection() as conn:
+                row = conn.execute(
+                    f"SELECT 1 FROM sites WHERE domain_id = ? AND id IN ({','.join('?' for _ in site_ids) or 'NULL'})",
+                    (domain_id, *sorted(site_ids)),
+                ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="domain not found")
         try:
             return _domain_v2_payload(get_domain(domain_id))
         except RegistryNotFoundError as exc:
@@ -111,7 +157,7 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
 
     @router.post("/domains/{domain_ref}/rename")
     def v2_rename_domain(domain_ref: str, payload: DomainRename, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_platform_administrator(request)
         domain_id = _resolve_domain_id(domain_ref)
         try:
             return _domain_v2_payload(rename_domain(domain_id, payload.name))
@@ -120,7 +166,7 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
 
     @router.post("/domains/{domain_ref}/sites", status_code=status.HTTP_201_CREATED)
     def v2_create_site(domain_ref: str, payload: SiteCreate, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_platform_administrator(request)
         domain_id = _resolve_domain_id(domain_ref)
         try:
             return _site_v2_payload(create_site(domain_id, payload.slug, payload.name, payload.address))
@@ -131,17 +177,21 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
 
     @router.get("/domains/{domain_ref}/sites")
     def v2_list_sites(domain_ref: str, request: Request) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         domain_id = _resolve_domain_id(domain_ref)
         try:
-            return [_site_v2_payload(item) for item in list_sites(domain_id)]
+            site_ids = readable_site_ids(request)
+            return [
+                _site_v2_payload(item)
+                for item in list_sites(domain_id)
+                if site_ids is None or int(item["id"]) in site_ids
+            ]
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     @router.get("/sites/{site_ref}")
     def v2_get_site(site_ref: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         site_id = _resolve_site_id(site_ref)
+        require_site_read(site_id, request)
         try:
             return _site_v2_payload(get_site(site_id))
         except RegistryNotFoundError as exc:
@@ -149,12 +199,16 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
 
     @router.get("/devices")
     def v2_list_devices(request: Request) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        return [_device_v2_payload(item) for item in list_devices()]
+        site_ids = readable_site_ids(request)
+        return [
+            _device_v2_payload(item)
+            for item in list_devices()
+            if site_ids is None or (item.get("site_id") is not None and int(item["site_id"]) in site_ids)
+        ]
 
     @router.post("/devices", status_code=status.HTTP_201_CREATED)
     def v2_create_device(payload: DeviceCreate, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_platform_administrator(request)
         try:
             return _device_v2_payload(
                 create_device(
@@ -169,16 +223,21 @@ def create_core_v2_router(require_roles: Callable[[Request, set[str]], None]) ->
 
     @router.get("/devices/{device_ref}")
     def v2_get_device(device_ref: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         try:
-            return _device_v2_payload(get_device(device_ref))
+            device = get_device(device_ref)
+            site_id = device.get("site_id")
+            if site_id is None:
+                require_platform_administrator(request)
+            else:
+                require_site_read(int(site_id), request)
+            return _device_v2_payload(device)
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     @router.post("/devices/{device_ref}/assign-site")
     def v2_assign_device_site(device_ref: str, payload: DeviceAssignSiteRef, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
         site_id = _resolve_site_id(payload.site_ref)
+        require_site_configure(site_id, request)
         try:
             return _device_v2_payload(assign_device_site(device_ref, site_id))
         except RegistryNotFoundError as exc:

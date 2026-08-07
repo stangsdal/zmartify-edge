@@ -280,6 +280,7 @@ class ZoneMetadataIn(BaseModel):
 class ZoneOut(BaseModel):
     zone_uuid: str
     zone_id: int
+    zone_key: str
     name: str
     icon: str | None = None
     sort_order: int
@@ -552,6 +553,40 @@ class UserResetPasswordIn(BaseModel):
 
 class UserSiteAccessUpdateIn(BaseModel):
     site_ids: list[int] = Field(default_factory=list)
+
+
+class SiteMembershipCreateIn(BaseModel):
+    user_id: int
+    role: str = Field(pattern=r"^(owner|user|viewer)$")
+    status: str = Field(default="active", pattern=r"^(invited|active|disabled)$")
+    product_types: list[str] = Field(default_factory=list)
+
+
+class SiteMembershipUpdateIn(BaseModel):
+    role: str | None = Field(default=None, pattern=r"^(owner|user|viewer)$")
+    status: str | None = Field(default=None, pattern=r"^(invited|active|disabled)$")
+    product_types: list[str] | None = None
+
+
+class SiteMembershipOut(BaseModel):
+    id: int
+    uuid: str
+    user_id: int
+    username: str
+    display_name: str
+    email: str | None
+    role: str
+    status: str
+    product_types: list[str]
+    created_at: str
+    updated_at: str | None
+
+
+class SiteMembershipCandidateOut(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    email: str | None
 
 
 class UserOut(BaseModel):

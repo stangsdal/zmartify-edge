@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
 import { Redirect, Route, useLocation } from 'react-router-dom';
 import { IonTabs, IonRouterOutlet } from '@ionic/react';
-import { authApi } from './api/auth';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
 import { RoomsPage } from './pages/RoomsPage';
@@ -32,6 +30,7 @@ import { IrrigationZoneDetailPage } from './pages/IrrigationZoneDetailPage';
 import { InsightsWaterPage } from './pages/InsightsWaterPage';
 import { InsightsEnergyPage } from './pages/InsightsEnergyPage';
 import { MorePage } from './pages/MorePage';
+import { SiteMembersPage } from './pages/SiteMembersPage';
 import { OnboardingDiscoverPage } from './pages/OnboardingDiscoverPage';
 import { OnboardingClaimPage } from './pages/OnboardingClaimPage';
 import { OnboardingAssignSitePage } from './pages/OnboardingAssignSitePage';
@@ -40,18 +39,22 @@ import { SystemsPage } from './pages/SystemsPage';
 import { AutomationsPage } from './pages/AutomationsPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ResponsiveNavigation } from './components/ResponsiveNavigation';
+import { useAccess } from './auth/AccessContext';
 
 export function App() {
   const location = useLocation();
-  const [roles, setRoles] = useState<string[]>([]);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { context, isAdministrator, isAuthenticated, isLoading } = useAccess();
   const appBase = '/app';
   const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`];
   const isPublicRoute = publicRoutePrefixes.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
   );
-  const isAdmin = roles.includes('admin') || roles.includes('owner');
+  const isAdmin = isAdministrator;
+  const hasIrrigation = isAdministrator || context?.sites.some((site) => site.products.some((product) => product.type === 'irrigation' && product.allowed)) === true;
+  const hasHvac = isAdministrator || context?.sites.some((site) => site.products.some((product) => product.type === 'hvac' && product.allowed)) === true;
+  const canManageMembers = isAdministrator || context?.sites.some((site) => site.role === 'owner') === true;
+  const controlPath = hasIrrigation ? `${appBase}/control/irrigation/overview` : hasHvac ? `${appBase}/control/hvac/overview` : `${appBase}/home`;
+  const authChecked = !isLoading;
   const authLoadingView = <div style={{ padding: '16px' }}>Spinning up...</div>;
 
   const requireAuth = (view: JSX.Element) => {
@@ -77,50 +80,28 @@ export function App() {
     return view;
   };
 
-  useEffect(() => {
-    let canceled = false;
+  const requireProduct = (view: JSX.Element, allowed: boolean) => {
+    if (!authChecked) {
+      return authLoadingView;
+    }
+    if (!isAuthenticated) {
+      return <Redirect to={`${appBase}/login`} />;
+    }
+    if (!allowed) {
+      return <Redirect to={`${appBase}/home`} />;
+    }
+    return view;
+  };
 
-    const loadMe = async () => {
-      const token = localStorage.getItem('admin_api_token');
-      if (!token) {
-        setRoles([]);
-        setIsAuthenticated(false);
-        setAuthChecked(true);
-        return;
-      }
-
-      setAuthChecked(false);
-      try {
-        const me = await authApi.me();
-        if (!canceled) {
-          setRoles(me.roles || []);
-          setIsAuthenticated(true);
-          setAuthChecked(true);
-        }
-      } catch {
-        if (!canceled) {
-          localStorage.removeItem('admin_api_token');
-          setRoles([]);
-          setIsAuthenticated(false);
-          setAuthChecked(true);
-        }
-      }
-    };
-
-    loadMe();
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === 'admin_api_token') {
-        void loadMe();
-      }
-    };
-    window.addEventListener('storage', onStorage);
-
-    return () => {
-      canceled = true;
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
+  const requireCapability = (view: JSX.Element, allowed: boolean) => {
+    if (!authChecked) {
+      return authLoadingView;
+    }
+    if (!isAuthenticated) {
+      return <Redirect to={`${appBase}/login`} />;
+    }
+    return allowed ? view : <Redirect to={`${appBase}/home`} />;
+  };
 
   return (
     <>
@@ -141,12 +122,12 @@ export function App() {
           <Route
             exact
             path={`${appBase}/rooms`}
-              render={() => requireAuth(<RoomsPage />)}
+              render={() => requireProduct(<RoomsPage />, hasHvac)}
           />
           <Route
             exact
             path={`${appBase}/rooms/:zoneRef`}
-              render={() => requireAuth(<RoomDetailPage />)}
+              render={() => requireProduct(<RoomDetailPage />, hasHvac)}
           />
           <Route
             exact
@@ -186,7 +167,7 @@ export function App() {
           <Route
             exact
             path={`${appBase}/control`}
-              render={() => <Redirect to={`${appBase}/control/hvac/overview`} />}
+              render={() => <Redirect to={controlPath} />}
           />
           <Route
             exact
@@ -216,62 +197,62 @@ export function App() {
           <Route
             exact
             path={`${appBase}/control/hvac/overview`}
-              render={() => requireAuth(<RoomsPage />)}
+              render={() => requireProduct(<RoomsPage />, hasHvac)}
           />
           <Route
             exact
             path={`${appBase}/control/hvac/zones`}
-              render={() => requireAuth(<RoomsPage />)}
+              render={() => requireProduct(<RoomsPage />, hasHvac)}
           />
           <Route
             exact
             path={`${appBase}/control/hvac/zones/:zoneRef`}
-              render={() => requireAuth(<RoomDetailPage />)}
+              render={() => requireProduct(<RoomDetailPage />, hasHvac)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/overview`}
-              render={() => requireAuth(<IrrigationOverviewPage />)}
+              render={() => requireProduct(<IrrigationOverviewPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/zones`}
-              render={() => requireAuth(<IrrigationOverviewPage />)}
+              render={() => requireProduct(<IrrigationOverviewPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/zones/:zoneRef`}
-              render={() => requireAuth(<IrrigationZoneDetailPage />)}
+              render={() => requireProduct(<IrrigationZoneDetailPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/programs`}
-              render={() => requireAuth(<IrrigationProgramsPage />)}
+              render={() => requireProduct(<IrrigationProgramsPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/manual`}
-              render={() => requireAuth(<IrrigationManualPage />)}
+              render={() => requireProduct(<IrrigationManualPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/setup`}
-              render={() => requireAuth(<IrrigationSetupPage />)}
+              render={() => requireProduct(<IrrigationSetupPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/hydraulics`}
-              render={() => requireAuth(<IrrigationHydraulicsPage />)}
+              render={() => requireProduct(<IrrigationHydraulicsPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/weather`}
-              render={() => requireAuth(<IrrigationWeatherPage />)}
+              render={() => requireProduct(<IrrigationWeatherPage />, hasIrrigation)}
           />
           <Route
             exact
             path={`${appBase}/control/irrigation/power`}
-              render={() => requireAuth(<IrrigationHydraulicsPage />)}
+              render={() => requireProduct(<IrrigationHydraulicsPage />, hasIrrigation)}
           />
           <Route
             exact
@@ -292,6 +273,11 @@ export function App() {
             exact
             path={`${appBase}/more/notifications`}
               render={() => requireAuth(<NotificationsPage />)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/members`}
+              render={() => requireCapability(<SiteMembersPage />, canManageMembers)}
           />
           <Route
             exact
@@ -404,7 +390,7 @@ export function App() {
           <Route exact path={appBase} render={() => <Redirect to={`${appBase}/home`} />} />
       </IonRouterOutlet>
 
-      {!isPublicRoute && <ResponsiveNavigation appBase={appBase} isAdmin={isAdmin} />}
+      {!isPublicRoute && <ResponsiveNavigation appBase={appBase} isAdmin={isAdmin} controlPath={controlPath} />}
     </IonTabs>
     </>
   );

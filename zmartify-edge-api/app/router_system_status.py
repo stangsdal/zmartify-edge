@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import os
 import socket
-from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, audit_action
+from app.auth import AuthError, AuthenticatedUser, audit_action
 from app.db import get_connection, get_database_backend, get_database_url, get_db_path, get_runtime_database_backend
 from app.mqtt_acl import build_acl_preview_for_client, build_acl_status
+from app.permissions import require_global_admin
 from app.registry import RegistryOperationError, regenerate_acl_now
 
 
@@ -78,8 +78,17 @@ def _ready_payload() -> dict:
     return {"ok": all(check.get("ok") is True for check in checks.values()), "checks": checks}
 
 
-def create_system_status_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
+def create_system_status_router() -> APIRouter:
     router = APIRouter(tags=["system-status"])
+
+    def require_administrator(request: Request) -> None:
+        user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_global_admin(user)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     @router.get("/health")
     def health() -> dict:
@@ -114,14 +123,14 @@ def create_system_status_router(require_roles: Callable[[Request, set[str]], Non
 
     @router.get("/admin/acl/status")
     def acl_status(request: Request, limit: int = 10) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_administrator(request)
         acl_path = Path(os.getenv("ZMART_EDGE_MQTT_ACL_FILE", "/mosquitto/config/acl"))
         with get_connection() as conn:
             return build_acl_status(conn, acl_path=acl_path, limit=limit)
 
     @router.get("/admin/acl/preview/{client_id}")
     def acl_preview(client_id: int, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_administrator(request)
         with get_connection() as conn:
             try:
                 return build_acl_preview_for_client(conn, client_id)
@@ -130,7 +139,7 @@ def create_system_status_router(require_roles: Callable[[Request, set[str]], Non
 
     @router.post("/admin/acl/regenerate")
     def admin_regenerate_acl(request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_administrator(request)
         try:
             result = regenerate_acl_now()
             auth_user = request.state.auth_user

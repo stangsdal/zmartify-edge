@@ -48,6 +48,7 @@ export interface MobileSiteZonesDetail {
 export interface MobileZone {
   zone_uuid?: string;
   zone_id: number;
+  zone_key?: string;
   name: string;
   mode?: number | null;
   thermostat_mode?: number | null;

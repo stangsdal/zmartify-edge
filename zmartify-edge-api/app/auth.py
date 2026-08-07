@@ -20,6 +20,7 @@ ROLE_OWNER = "owner"
 ROLE_ADMIN = "admin"
 ROLE_INSTALLER = "installer"
 ROLE_VIEWER = "viewer"
+ROLE_ADMINISTRATOR = "administrator"
 
 _PASSWORD_HASHER = PasswordHasher()
 
@@ -98,7 +99,7 @@ def is_initialized() -> bool:
         return bool(row and row["c"] > 0)
 
 
-def ensure_bootstrap_owner() -> None:
+def ensure_bootstrap_administrator() -> None:
     with get_connection() as conn:
         row = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()
         if row and row["c"] > 0:
@@ -115,15 +116,15 @@ def ensure_bootstrap_owner() -> None:
         )
 
         roles = _role_ids(conn)
-        owner_role_id = roles.get(ROLE_OWNER)
-        if owner_role_id is None:
-            raise RuntimeError("owner role missing")
+        administrator_role_id = roles.get(ROLE_ADMINISTRATOR)
+        if administrator_role_id is None:
+            raise RuntimeError("administrator role missing")
 
         conn.execute(
             "INSERT INTO user_roles(user_id, role_id) VALUES (?, ?)",
-            (cur.lastrowid, owner_role_id),
+            (cur.lastrowid, administrator_role_id),
         )
-        _audit(conn, cur.lastrowid, "bootstrap_owner_user", "user", str(cur.lastrowid), {"username": "admin"})
+        _audit(conn, cur.lastrowid, "bootstrap_administrator_user", "user", str(cur.lastrowid), {"username": "admin"})
         conn.commit()
 
         if not os.getenv("ZMART_EDGE_BOOTSTRAP_OWNER_PASSWORD", "").strip():
@@ -132,6 +133,11 @@ def ensure_bootstrap_owner() -> None:
             password_path.parent.mkdir(parents=True, exist_ok=True)
             password_path.write_text(f"admin:{password}\n", encoding="utf-8")
             password_path.chmod(0o600)
+
+
+def ensure_bootstrap_owner() -> None:
+    """Compatibility alias for callers that predate the administrator role."""
+    ensure_bootstrap_administrator()
 
 def _login_limit_window_seconds() -> int:
     return int(os.getenv("ZMART_EDGE_LOGIN_WINDOW_SECONDS", "300"))

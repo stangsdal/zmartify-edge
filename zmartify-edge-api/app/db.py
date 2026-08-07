@@ -39,6 +39,7 @@ _LASTROWID_TABLES = {
     "registration_invites",
     "roles",
     "setpoint_history",
+    "site_memberships",
     "sites",
     "temperature_history",
     "users",
@@ -232,7 +233,7 @@ def initialize_postgres_database() -> None:
 
     with get_connection() as conn:
         conn.executescript(schema_sql)
-        for role in ("owner", "admin", "installer", "viewer"):
+        for role in ("owner", "admin", "installer", "viewer", "administrator"):
             conn.execute("INSERT OR IGNORE INTO roles(name) VALUES (?)", (role,))
         conn.execute("INSERT OR IGNORE INTO schema_migrations(filename) VALUES (?)", ("postgres_schema.sql",))
 

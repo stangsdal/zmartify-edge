@@ -1,5 +1,5 @@
-const CACHE_NAME = 'zmartify-admin-v2';
-const RUNTIME_CACHE = 'zmartify-admin-runtime-v2';
+const CACHE_NAME = 'zmartify-admin-v3';
+const RUNTIME_CACHE = 'zmartify-admin-runtime-v3';
 const CRITICAL_ASSETS = [
   '/',
   '/app/',

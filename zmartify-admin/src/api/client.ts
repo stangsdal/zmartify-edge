@@ -45,10 +45,12 @@ export class ApiClient {
 
   setAuthToken(token: string): void {
     localStorage.setItem('admin_api_token', token);
+    window.dispatchEvent(new Event('zmartify-auth-changed'));
   }
 
   clearAuthToken(): void {
     localStorage.removeItem('admin_api_token');
+    window.dispatchEvent(new Event('zmartify-auth-changed'));
   }
 
   getAuthToken(): string | null {

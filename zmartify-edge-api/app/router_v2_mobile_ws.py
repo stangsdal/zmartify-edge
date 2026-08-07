@@ -7,15 +7,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.auth import (
     AuthError,
-    ROLE_ADMIN,
-    ROLE_INSTALLER,
-    ROLE_OWNER,
-    ROLE_VIEWER,
     authenticate_bearer_token,
     authenticate_emergency_token,
-    require_any_role,
 )
 from app.domain_model import DomainModelError, get_device_zone, resolve_zone_ref
+from app.permissions import require_site_permission
 from app.registry import RegistryNotFoundError
 
 
@@ -27,7 +23,6 @@ class ZoneHubProtocol(Protocol):
 
 def create_mobile_ws_v2_router(
     resolve_device_site_pk_id: Callable[[str], int | None],
-    mobile_site_scope_ids_for_user: Callable[[Any], set[int] | None],
     zone_stream_hub: ZoneHubProtocol,
 ) -> APIRouter:
     router = APIRouter(tags=["api-v2-mobile-ws"])
@@ -49,22 +44,16 @@ def create_mobile_ws_v2_router(
                 return
 
         try:
-            require_any_role(auth_user, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        except AuthError:
-            await websocket.close(code=4403, reason="insufficient role permissions")
-            return
-
-        try:
             device_id, zone_id = resolve_zone_ref(zone_ref)
             site_pk_id = resolve_device_site_pk_id(device_id)
             if site_pk_id is None:
                 await websocket.close(code=4404, reason="device not found")
                 return
-            scoped_site_ids = mobile_site_scope_ids_for_user(auth_user)
-            if scoped_site_ids is not None and site_pk_id not in scoped_site_ids:
-                await websocket.close(code=4404, reason="site not found")
-                return
+            require_site_permission(auth_user, site_pk_id, product_type="hvac", permission="read")
             zone = get_device_zone(device_id, zone_id)
+        except AuthError:
+            await websocket.close(code=4403, reason="site access denied")
+            return
         except (RegistryNotFoundError, DomainModelError):
             await websocket.close(code=4404, reason="zone not found")
             return

@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import { InviteValidateResponse, LoginResponse, RegisterByInviteRequest, SetupStatus, User } from '../types/api';
+import type { AccessContextResponse } from '../auth/AccessContext';
 
 export const authApi = {
   setupStatus: (): Promise<SetupStatus> => apiClient.get('/setup/status'),
@@ -16,4 +17,6 @@ export const authApi = {
   logout: (): Promise<{ ok: boolean }> => apiClient.post('/auth/logout', {}),
 
   me: (): Promise<User> => apiClient.get('/auth/me'),
+
+  accessContext: (): Promise<AccessContextResponse> => apiClient.get('/api/v2/me/context'),
 };

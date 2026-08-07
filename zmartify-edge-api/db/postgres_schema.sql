@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS devices (
     firmware_version TEXT,
     site_id INTEGER,
     device_type TEXT NOT NULL DEFAULT 'hvac_gateway',
+    product_type TEXT NOT NULL DEFAULT 'unknown',
     integration_mode TEXT NOT NULL DEFAULT 'mqtt',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TEXT, local_url TEXT, device_admin_token TEXT, uuid TEXT,
@@ -101,6 +102,32 @@ CREATE TABLE IF NOT EXISTS user_roles (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS site_memberships (
+    id BIGSERIAL PRIMARY KEY,
+    uuid TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    invited_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, site_id),
+    CHECK (role IN ('owner', 'user', 'viewer')),
+    CHECK (status IN ('invited', 'active', 'disabled'))
+);
+
+CREATE TABLE IF NOT EXISTS site_membership_product_access (
+    membership_id INTEGER NOT NULL REFERENCES site_memberships(id) ON DELETE CASCADE,
+    product_type TEXT NOT NULL,
+    PRIMARY KEY(membership_id, product_type),
+    CHECK (product_type IN ('hvac', 'irrigation', 'weather', 'energy'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_memberships_user ON site_memberships(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_site_memberships_site ON site_memberships(site_id, status);
+CREATE INDEX IF NOT EXISTS idx_devices_product_type ON devices(product_type);
 
 CREATE TABLE IF NOT EXISTS api_tokens (
     id BIGSERIAL PRIMARY KEY,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -23,6 +24,15 @@ def _client(monkeypatch, tmp_path: Path):
     from main import app
 
     return TestClient(app)
+
+
+def _grant_site_membership(user_id: int, site_id: int, role: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4()), user_id, site_id, role),
+        )
+        conn.commit()
 
 
 def _seed_domain_site_device(client: TestClient, headers: dict[str, str], device_id: str) -> str:
@@ -111,6 +121,30 @@ def test_zone_metadata_and_mobile_shape(monkeypatch, tmp_path: Path):
     mobile_device = client.get("/mobile/devices/hvac-gateway-aabbcc", headers=headers)
     assert mobile_device.status_code == 200
     assert mobile_device.json()["zones"][0]["name"] == "Living Room"
+    assert mobile_device.json()["zones"][0]["zone_key"] == "zone-1"
+
+
+def test_mobile_site_zones_excludes_non_hvac_devices(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-zones01")
+    with get_connection() as conn:
+        site_id = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()["site_id"]
+        conn.execute(
+            """
+            INSERT INTO devices(uuid, device_id, display_name, device_type, integration_mode, site_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("irrigation-device-uuid", "zmartify-irrigation-zones01", "Irrigation", "irrigation_controller", "mqtt", site_id),
+        )
+        conn.commit()
+        site = conn.execute("SELECT uuid FROM sites WHERE id = ?", (site_id,)).fetchone()
+
+    response = client.get(f"/mobile/sites/{site['uuid']}/zones", headers=headers)
+
+    assert response.status_code == 200
+    assert [device["device_id"] for device in response.json()["devices"]] == [device_id]
 
 
 def test_mobile_setpoint_updates_twin_and_events(monkeypatch, tmp_path: Path):
@@ -409,7 +443,8 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     assert zone1.json()["current_temperature_c"] == 21.2
     assert zone1.json()["target_temperature_c"] == 22.0
     assert zone1.json()["demand"] is True
-    assert zone1.json()["name"] == "Living Room [1,2]"
+    assert zone1.json()["zone_key"] == "zone-1"
+    assert zone1.json()["name"] == "zone-1"
 
     channel1 = client.get(f"/devices/{device_id}/channels/1", headers=headers)
     assert channel1.status_code == 200
@@ -551,13 +586,7 @@ def test_mobile_viewer_site_scope_restricts_visible_properties(monkeypatch, tmp_
     )
     assert user.status_code == 201
 
-    set_scope = client.post(
-        f"/users/{user.json()['id']}/site-access",
-        headers=emergency,
-        json={"site_ids": [site_b_id]},
-    )
-    assert set_scope.status_code == 200
-    assert set_scope.json()["site_ids"] == [site_b_id]
+    _grant_site_membership(user.json()["id"], site_b_id, "viewer")
 
     login = client.post("/auth/login", json={"username": "peter", "password": "VeryStrongPass123!"})
     assert login.status_code == 200
@@ -611,7 +640,7 @@ def test_mobile_viewer_without_site_assignments_sees_no_properties(monkeypatch, 
     assert detail.status_code == 404
 
 
-def test_mobile_owner_without_site_assignments_sees_all_properties(monkeypatch, tmp_path: Path):
+def test_mobile_site_owner_sees_assigned_property(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     emergency = {"Authorization": "Bearer emergency-token"}
 
@@ -621,20 +650,22 @@ def test_mobile_owner_without_site_assignments_sees_all_properties(monkeypatch, 
 
     site = client.post(f"/domains/{domain_id}/sites", headers=emergency, json={"slug": "site-owner", "name": "Site Owner"})
     assert site.status_code == 201
+    site_id = site.json()["id"]
 
     user = client.post(
         "/users",
         headers=emergency,
         json={
-            "username": "owner-no-sites",
-            "display_name": "Owner No Sites",
+            "username": "site-owner",
+            "display_name": "Site Owner",
             "password": "VeryStrongPass123!",
-            "roles": ["owner"],
+            "roles": [],
         },
     )
     assert user.status_code == 201
+    _grant_site_membership(user.json()["id"], site_id, "owner")
 
-    login = client.post("/auth/login", json={"username": "owner-no-sites", "password": "VeryStrongPass123!"})
+    login = client.post("/auth/login", json={"username": "site-owner", "password": "VeryStrongPass123!"})
     assert login.status_code == 200
     bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -647,7 +678,7 @@ def test_mobile_owner_without_site_assignments_sees_all_properties(monkeypatch, 
     assert detail.json()["site_slug"] == "site-owner"
 
 
-def test_mobile_viewer_can_change_setpoint_within_scoped_site(monkeypatch, tmp_path: Path):
+def test_mobile_site_user_can_change_setpoint(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     emergency = {"Authorization": "Bearer emergency-token"}
 
@@ -678,8 +709,8 @@ def test_mobile_viewer_can_change_setpoint_within_scoped_site(monkeypatch, tmp_p
         "/users",
         headers=emergency,
         json={
-            "username": "viewer-setpoint",
-            "display_name": "Viewer Setpoint",
+            "username": "user-setpoint",
+            "display_name": "User Setpoint",
             "password": "VeryStrongPass123!",
             "roles": ["viewer"],
         },
@@ -687,10 +718,9 @@ def test_mobile_viewer_can_change_setpoint_within_scoped_site(monkeypatch, tmp_p
     assert user.status_code == 201
     user_id = user.json()["id"]
 
-    scoped = client.post(f"/users/{user_id}/site-access", headers=emergency, json={"site_ids": [site_id]})
-    assert scoped.status_code == 200
+    _grant_site_membership(user_id, site_id, "user")
 
-    login = client.post("/auth/login", json={"username": "viewer-setpoint", "password": "VeryStrongPass123!"})
+    login = client.post("/auth/login", json={"username": "user-setpoint", "password": "VeryStrongPass123!"})
     assert login.status_code == 200
     bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -701,6 +731,13 @@ def test_mobile_viewer_can_change_setpoint_within_scoped_site(monkeypatch, tmp_p
     setpoint = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=bearer, json={"target_temperature_c": 21.5})
     assert setpoint.status_code == 200
     assert setpoint.json()["zone"]["target_temperature_c"] == 21.5
+
+    with get_connection() as conn:
+        conn.execute("UPDATE site_memberships SET role = 'viewer' WHERE user_id = ? AND site_id = ?", (user_id, site_id))
+        conn.commit()
+
+    denied = client.post(f"/mobile/zones/{zone_ref}/setpoint", headers=bearer, json={"target_temperature_c": 22.0})
+    assert denied.status_code == 403
 
 
 def test_history_foundation_tables_populated(monkeypatch, tmp_path: Path):

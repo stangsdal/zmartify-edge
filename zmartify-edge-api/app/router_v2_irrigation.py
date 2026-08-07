@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.auth import AuthError
+from app.db import get_connection
 from app.domain_model import get_device_freshness
 from app.irrigation_domain import (
     complete_irrigation_run,
@@ -43,6 +45,7 @@ from app.irrigation_domain import (
     upsert_irrigation_zone,
 )
 from app.mqtt_commands import MqttCommandError, publish_irrigation_command
+from app.permissions import require_site_permission
 from app.registry import RegistryNotFoundError, get_device
 
 
@@ -399,8 +402,42 @@ def _supports_controller_local_program_run(device_id: str) -> bool:
     return _parse_firmware_version(device.get("firmware_version")) >= (5, 2, 0)
 
 
-def create_irrigation_v2_router(require_roles) -> APIRouter:
+def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
     router = APIRouter(tags=["api-v2-irrigation"])
+
+    def require_irrigation_permission(request: Request) -> None:
+        device_id = request.path_params.get("device_id")
+        site_ref = request.path_params.get("site_id")
+        if device_id:
+            site_id = resolve_device_site_pk_id(device_id)
+            if site_id is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device is not assigned to a site")
+        elif site_ref:
+            with get_connection() as conn:
+                site = conn.execute(
+                    "SELECT id FROM sites WHERE uuid = ? OR slug = ? OR CAST(id AS TEXT) = ?",
+                    (site_ref, site_ref, site_ref),
+                ).fetchone()
+            if site is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+            site_id = int(site["id"])
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+
+        auth_user = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        path = request.url.path
+        permission = "read" if request.method == "GET" else "configure"
+        if any(segment in path for segment in ("/commands", "/runs/", "/rain-delay", "/programs")):
+            permission = "operate"
+        try:
+            require_site_permission(auth_user, site_id, product_type="irrigation", permission=permission)  # type: ignore[arg-type]
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    def require_roles(request: Request, _legacy_roles: set[str]) -> None:
+        require_irrigation_permission(request)
 
     @router.get("/api/v2/sites/{site_id}/irrigation/overview")
     def v2_site_irrigation_overview(site_id: str, request: Request) -> dict:

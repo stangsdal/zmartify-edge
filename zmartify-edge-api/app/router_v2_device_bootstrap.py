@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, audit_action
+from app.auth import AuthError, AuthenticatedUser, audit_action
 from app.db import get_connection
+from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_permission
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -37,6 +38,7 @@ class DeviceBootstrapStageIn(BaseModel):
     display_name: str = Field(min_length=1, max_length=128)
     mac: str | None = Field(default=None, max_length=32)
     firmware_version: str | None = Field(default=None, max_length=64)
+    product_type: Literal["hvac", "irrigation", "weather", "energy"] = "hvac"
 
 
 class DeviceBootstrapPollIn(BaseModel):
@@ -50,12 +52,40 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def create_device_bootstrap_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
+def create_device_bootstrap_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-device-bootstrap"])
+
+    def require_target_site_configure(payload: DeviceBootstrapStageIn, request: Request) -> None:
+        auth_user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_site_permission(
+                auth_user,
+                payload.site_id,
+                product_type=payload.product_type,
+                permission="configure",
+            )
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    def require_existing_device_configure(device: dict, request: Request) -> None:
+        auth_user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        site_id = device.get("site_id")
+        product_type = str(device.get("product_type") or "")
+        try:
+            if site_id is None or product_type not in PRODUCT_TYPES:
+                require_global_admin(auth_user)
+            else:
+                require_site_permission(auth_user, int(site_id), product_type=product_type, permission="configure")  # type: ignore[arg-type]
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     @router.post("/devices/bootstrap/stage", status_code=status.HTTP_201_CREATED)
     def stage_device_bootstrap(payload: DeviceBootstrapStageIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_target_site_configure(payload, request)
         existing_device = False
         try:
             device = create_device(
@@ -63,11 +93,13 @@ def create_device_bootstrap_v2_router(require_roles: Callable[[Request, set[str]
                 display_name=payload.display_name,
                 mac=payload.mac,
                 firmware_version=payload.firmware_version,
+                product_type=payload.product_type,
             )
         except RegistryConflictError:
             existing_device = True
             try:
                 device = get_device(payload.device_id)
+                require_existing_device_configure(device, request)
             except RegistryNotFoundError as exc:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

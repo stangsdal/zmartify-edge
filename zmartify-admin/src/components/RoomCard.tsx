@@ -21,6 +21,8 @@ function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | '
 
 export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange }: RoomCardProps) {
   const state = zoneState(zone);
+  const zoneKey = zone.zone_key || `zone-${zone.zone_id}`;
+  const description = zone.name === zoneKey ? '' : zone.name;
   return (
     <motion.div
       whileHover={{ y: -2 }}
@@ -28,7 +30,8 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange }
     >
       <button type="button" onClick={onOpen} className="w-full text-left flex items-start justify-between">
         <div>
-          <p className="text-base font-semibold">{zone.name}</p>
+          <p className="text-base font-semibold">{zoneKey}</p>
+          {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
           <p className="text-xs text-muted mt-1">Target {zone.target_temperature_c?.toFixed(1) ?? '--'}°C</p>
         </div>
         <HealthBadge label={state.label} tone={state.tone} />

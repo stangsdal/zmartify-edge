@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -128,3 +129,43 @@ def test_api_v2_device_domain_flow(monkeypatch, tmp_path: Path):
 
     freshness = client.get(f"/api/v2/mobile/devices/{device_id}/freshness", headers=headers)
     assert freshness.status_code == 200
+
+
+def test_hvac_endpoints_require_site_product_permissions(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    administrator_headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, administrator_headers, suffix="permissions")
+
+    from app.auth import hash_password
+    from app.db import get_connection
+
+    with get_connection() as conn:
+        site_id = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()["site_id"]
+        user_id = conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            (str(uuid.uuid4()), "hvac-user", "HVAC User", hash_password("VeryStrongPass123!")),
+        ).lastrowid
+        membership_id = conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role) VALUES (?, ?, ?, 'user')",
+            (str(uuid.uuid4()), user_id, site_id),
+        ).lastrowid
+        conn.commit()
+
+    login = client.post("/auth/login", json={"username": "hvac-user", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    user_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    read = client.get(f"/api/v2/devices/{device_id}/zones", headers=user_headers)
+    assert read.status_code == 200
+    configure = client.post(f"/api/v2/devices/{device_id}/zones/1/metadata", headers=user_headers, json={"name": "Denied"})
+    assert configure.status_code == 403
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, 'irrigation')",
+            (membership_id,),
+        )
+        conn.commit()
+
+    denied = client.get(f"/api/v2/devices/{device_id}/zones", headers=user_headers)
+    assert denied.status_code == 403

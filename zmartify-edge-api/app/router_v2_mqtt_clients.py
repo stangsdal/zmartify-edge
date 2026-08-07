@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, ROLE_VIEWER, audit_action
+from app.auth import AuthError, AuthenticatedUser, audit_action
+from app.permissions import require_global_admin
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -19,12 +18,21 @@ from app.registry import (
 from app.schemas import MqttClientCreate, MqttClientOut, MqttCredentialOut
 
 
-def create_mqtt_clients_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
+def create_mqtt_clients_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-mqtt"])
+
+    def require_administrator(request: Request) -> None:
+        user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_global_admin(user)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     @router.post("/mqtt/clients", response_model=MqttCredentialOut, status_code=status.HTTP_201_CREATED)
     def v2_create_mqtt_client(payload: MqttClientCreate, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_administrator(request)
         try:
             created = create_mqtt_client(
                 client_type=payload.client_type,
@@ -54,12 +62,12 @@ def create_mqtt_clients_v2_router(require_roles: Callable[[Request, set[str]], N
 
     @router.get("/mqtt/clients", response_model=list[MqttClientOut])
     def v2_list_mqtt_clients(request: Request) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        require_administrator(request)
         return list_mqtt_clients()
 
     @router.get("/mqtt/clients/{client_id}", response_model=MqttClientOut)
     def v2_get_mqtt_client(client_id: int, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        require_administrator(request)
         try:
             return get_mqtt_client(client_id)
         except RegistryNotFoundError as exc:
@@ -67,7 +75,7 @@ def create_mqtt_clients_v2_router(require_roles: Callable[[Request, set[str]], N
 
     @router.post("/mqtt/clients/{client_id}/rotate-password", response_model=MqttCredentialOut)
     def v2_rotate_mqtt_password(client_id: int, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_administrator(request)
         try:
             rotated = rotate_mqtt_client_password(client_id)
             audit_action(
@@ -84,7 +92,7 @@ def create_mqtt_clients_v2_router(require_roles: Callable[[Request, set[str]], N
 
     @router.post("/mqtt/clients/{client_id}/disable", response_model=MqttClientOut)
     def v2_disable_mqtt_client(client_id: int, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_administrator(request)
         try:
             return set_mqtt_client_enabled(client_id, enabled=False)
         except RegistryNotFoundError as exc:
@@ -94,7 +102,7 @@ def create_mqtt_clients_v2_router(require_roles: Callable[[Request, set[str]], N
 
     @router.post("/mqtt/clients/{client_id}/enable", response_model=MqttClientOut)
     def v2_enable_mqtt_client(client_id: int, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_administrator(request)
         try:
             return set_mqtt_client_enabled(client_id, enabled=True)
         except RegistryNotFoundError as exc:
@@ -104,7 +112,7 @@ def create_mqtt_clients_v2_router(require_roles: Callable[[Request, set[str]], N
 
     @router.delete("/mqtt/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
     def v2_delete_mqtt_client(client_id: int, request: Request) -> Response:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
+        require_administrator(request)
         try:
             delete_mqtt_client(client_id)
         except RegistryNotFoundError as exc:

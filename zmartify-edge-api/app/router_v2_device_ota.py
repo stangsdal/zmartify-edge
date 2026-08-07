@@ -3,14 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, audit_action
+from app.auth import AuthError, AuthenticatedUser, audit_action
 from app.device_onboarding import DeviceOnboardingError, push_remote_firmware, trigger_remote_reboot
+from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_permission
 from app.registry import RegistryNotFoundError, get_device_onboarding_context
 from app.schemas import DeviceOtaOut, DeviceOtaPollOut, DeviceOtaStageOut
 
@@ -79,14 +79,33 @@ def _edge_public_base_url() -> str:
     return _REQUIRED_PUBLIC_EDGE_URL
 
 
-def create_device_ota_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
+def create_device_ota_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-device-ota"])
+
+    def require_device_configure(device_id: str, request: Request) -> dict:
+        try:
+            device = get_device_onboarding_context(device_id)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+        auth_user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        site_id = device.get("site_id")
+        product_type = str(device.get("product_type") or "")
+        try:
+            if site_id is None or product_type not in PRODUCT_TYPES:
+                require_global_admin(auth_user)
+            else:
+                require_site_permission(auth_user, int(site_id), product_type=product_type, permission="configure")  # type: ignore[arg-type]
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        return device
 
     @router.post("/devices/{device_id}/ota", response_model=DeviceOtaOut)
     async def v2_device_ota(device_id: str, request: Request, reboot: bool = False) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
         try:
-            device = get_device_onboarding_context(device_id)
+            device = require_device_configure(device_id, request)
             local_url = device.get("local_url")
             if not local_url:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
@@ -150,9 +169,8 @@ def create_device_ota_v2_router(require_roles: Callable[[Request, set[str]], Non
         force: bool = False,
         notes: str | None = None,
     ) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
         try:
-            _ = get_device_onboarding_context(device_id)
+            _ = require_device_configure(device_id, request)
             firmware_bytes = await request.body()
             if not firmware_bytes:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware payload is empty")

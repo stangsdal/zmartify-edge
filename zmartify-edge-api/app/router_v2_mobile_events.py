@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, ROLE_VIEWER, list_user_site_access
+from app.auth import AuthError, AuthenticatedUser
 from app.domain_model import (
     list_events,
     list_notifications_for_user,
@@ -12,7 +10,8 @@ from app.domain_model import (
     mark_notification_read,
 )
 from app.db import get_connection
-from app.registry import RegistryNotFoundError
+from app.permissions import PRODUCT_TYPES, accessible_site_ids, require_global_admin, require_site_permission
+from app.registry import RegistryNotFoundError, get_device
 from app.schemas import EventOut, NotificationOut
 
 
@@ -56,20 +55,32 @@ def _mobile_event_projection(event: dict) -> dict:
 
 def _mobile_site_scope_ids(request: Request) -> set[int] | None:
     auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None or auth_user.user_id is None:
-        return None
-    if ROLE_ADMIN in auth_user.roles:
-        return None
-    return set(list_user_site_access(auth_user.user_id))
+    return accessible_site_ids(auth_user) if auth_user is not None else set()
 
 
-def create_mobile_events_v2_router(
-    require_roles: Callable[[Request, set[str]], None],
-    *,
-    prefix: str = "/api/v2",
-    tags: list[str] | None = None,
-) -> APIRouter:
+def create_mobile_events_v2_router(*, prefix: str = "/api/v2", tags: list[str] | None = None) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags or ["api-v2-mobile-events"])
+
+    def auth_user(request: Request) -> AuthenticatedUser:
+        user = getattr(request.state, "auth_user", None)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        return user
+
+    def require_device_read(device_id: str, request: Request) -> None:
+        try:
+            device = get_device(device_id)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        site_id = device.get("site_id")
+        product_type = str(device.get("product_type") or "")
+        try:
+            if site_id is None or product_type not in PRODUCT_TYPES:
+                require_global_admin(auth_user(request))
+            else:
+                require_site_permission(auth_user(request), int(site_id), product_type=product_type, permission="read")
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     @router.get("/events", response_model=list[EventOut])
     def v2_events_list(
@@ -79,8 +90,13 @@ def create_mobile_events_v2_router(
         domain_id: int | None = None,
         site_id: int | None = None,
     ) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        return list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)
+        return list_events(
+            limit=limit,
+            event_type=event_type,
+            domain_id=domain_id,
+            site_id=site_id,
+            allowed_site_ids=_mobile_site_scope_ids(request),
+        )
 
     @router.get("/events/recent", response_model=list[EventOut])
     def v2_events_recent(
@@ -90,8 +106,13 @@ def create_mobile_events_v2_router(
         domain_id: int | None = None,
         site_id: int | None = None,
     ) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        return list_events(limit=limit, event_type=event_type, domain_id=domain_id, site_id=site_id)
+        return list_events(
+            limit=limit,
+            event_type=event_type,
+            domain_id=domain_id,
+            site_id=site_id,
+            allowed_site_ids=_mobile_site_scope_ids(request),
+        )
 
     @router.get("/events/device/{device_id}", response_model=list[EventOut])
     def v2_events_for_device(
@@ -100,7 +121,7 @@ def create_mobile_events_v2_router(
         limit: int = 100,
         event_type: str | None = None,
     ) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        require_device_read(device_id, request)
         try:
             return list_events(limit=limit, device_external_id=device_id, event_type=event_type)
         except RegistryNotFoundError as exc:
@@ -114,7 +135,6 @@ def create_mobile_events_v2_router(
         domain_id: str | None = None,
         site_id: str | None = None,
     ) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
         scoped_site_ids = _mobile_site_scope_ids(request)
         resolved_domain_id = _resolve_domain_filter_id(domain_id)
         resolved_site_id = _resolve_site_filter_id(site_id)
@@ -131,34 +151,29 @@ def create_mobile_events_v2_router(
 
     @router.get("/mobile/notifications", response_model=list[NotificationOut])
     def v2_mobile_notifications(request: Request, limit: int = 100, unread_only: bool = False) -> list[dict]:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        auth_user = getattr(request.state, "auth_user", None)
-        if auth_user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-        if auth_user.user_id is None:
+        user = auth_user(request)
+        if user.user_id is None:
             return []
-        notifications = list_notifications_for_user(auth_user.user_id, limit=limit)
+        notifications = list_notifications_for_user(user.user_id, limit=limit)
         if unread_only:
             return [item for item in notifications if not item["read"]]
         return notifications
 
     @router.post("/mobile/notifications/read-all")
     def v2_mobile_mark_all_notifications_read(request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        auth_user = getattr(request.state, "auth_user", None)
-        if auth_user is None or auth_user.user_id is None:
+        user = auth_user(request)
+        if user.user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-        updated_count = mark_all_notifications_read(user_id=auth_user.user_id)
+        updated_count = mark_all_notifications_read(user_id=user.user_id)
         return {"updated": updated_count}
 
     @router.post("/mobile/notifications/{notification_id}/read", response_model=NotificationOut)
     def v2_mobile_mark_notification_read(notification_id: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
-        auth_user = getattr(request.state, "auth_user", None)
-        if auth_user is None or auth_user.user_id is None:
+        user = auth_user(request)
+        if user.user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
         try:
-            return mark_notification_read(notification_id, user_id=auth_user.user_id, read=True)
+            return mark_notification_read(notification_id, user_id=user.user_id, read=True)
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

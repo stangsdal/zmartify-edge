@@ -18,10 +18,11 @@ from app.auth import (
     authenticate_bearer_token,
     authenticate_emergency_token,
     audit_action,
-    ensure_bootstrap_owner,
+    ensure_bootstrap_administrator,
     list_user_site_access,
     require_any_role,
 )
+from app.permissions import accessible_site_ids, require_site_permission
 from app.contracts import ContractValidationError, validate_mqtt_v2_command, validate_mqtt_v2_reported_state
 from app.db import get_connection, initialize_database
 from app.device_onboarding import (
@@ -245,8 +246,8 @@ for admin_ui_dist in admin_ui_dist_candidates:
 
 # Ionic PWA (Ionic React) at /app
 ionic_pwa_dist_candidates = [
-    Path("/app-dist"),
     Path("/zmartify-admin/dist"),
+    Path("/app-dist"),
     Path(__file__).resolve().parent / "zmartify-admin" / "dist",
     Path(__file__).resolve().parent.parent / "zmartify-admin" / "dist",
 ]
@@ -290,19 +291,11 @@ def _resolve_site_filter_id(site_ref: str | None) -> int | None:
 
 def _mobile_site_scope_ids(request: Request) -> set[int] | None:
     auth_user = getattr(request.state, "auth_user", None)
-    if auth_user is None or auth_user.user_id is None:
-        return None
-    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
-        return None
-    return set(list_user_site_access(auth_user.user_id))
+    return accessible_site_ids(auth_user) if auth_user is not None else set()
 
 
 def _mobile_site_scope_ids_for_user(auth_user) -> set[int] | None:
-    if auth_user is None or auth_user.user_id is None:
-        return None
-    if ROLE_OWNER in auth_user.roles or ROLE_ADMIN in auth_user.roles:
-        return None
-    return set(list_user_site_access(auth_user.user_id))
+    return accessible_site_ids(auth_user) if auth_user is not None else set()
 
 
 def _publish_zone_state_update(device_id: str, zone: dict) -> None:
@@ -461,6 +454,16 @@ def _enforce_mobile_site_scope(request: Request, site_pk_id: int) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
 
 
+def _require_site_product_permission(request: Request, site_id: int, product_type: str, permission: str) -> None:
+    auth_user = getattr(request.state, "auth_user", None)
+    if auth_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    try:
+        require_site_permission(auth_user, site_id, product_type=product_type, permission=permission)  # type: ignore[arg-type]
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
 def _resolve_device_site_pk_id(device_id: str) -> int | None:
     with get_connection() as conn:
         row = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
@@ -510,7 +513,7 @@ async def admin_token_middleware(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event() -> None:
     initialize_database()
-    ensure_bootstrap_owner()
+    ensure_bootstrap_administrator()
     zone_stream_hub.set_loop(asyncio.get_running_loop())
     realtime_topic_hub.set_loop(asyncio.get_running_loop())
     set_realtime_emit_hooks(
@@ -541,23 +544,23 @@ def _require_roles(request: Request, allowed_roles: set[str]) -> None:
 
 
 app.include_router(create_core_v2_router(_require_roles))
-app.include_router(create_system_status_router(_require_roles))
+app.include_router(create_system_status_router())
 app.include_router(create_mqtt_clients_router(_require_roles))
 app.include_router(create_auth_invites_router(_require_roles))
 app.include_router(create_legacy_auth_users_router(_require_roles))
 app.include_router(create_domains_sites_router(_require_roles))
-app.include_router(create_mobile_events_v2_router(_require_roles, prefix="", tags=["legacy-mobile-events"]))
-app.include_router(create_legacy_mobile_telemetry_router(_require_roles, _resolve_device_site_pk_id, _enforce_mobile_site_scope))
+app.include_router(create_mobile_events_v2_router(prefix="", tags=["legacy-mobile-events"]))
+app.include_router(create_legacy_mobile_telemetry_router(_resolve_device_site_pk_id))
 app.include_router(create_auth_users_v2_router(_require_roles))
-app.include_router(create_mqtt_clients_v2_router(_require_roles))
+app.include_router(create_mqtt_clients_v2_router())
 app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
-app.include_router(create_mobile_events_v2_router(_require_roles))
+app.include_router(create_mobile_events_v2_router())
 app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
-app.include_router(create_irrigation_v2_router(_require_roles))
-app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, _mobile_site_scope_ids_for_user, zone_stream_hub))
-app.include_router(create_device_lifecycle_v2_router(_require_roles))
-app.include_router(create_device_bootstrap_v2_router(_require_roles))
-app.include_router(create_device_ota_v2_router(_require_roles))
+app.include_router(create_irrigation_v2_router(_resolve_device_site_pk_id))
+app.include_router(create_mobile_ws_v2_router(_resolve_device_site_pk_id, zone_stream_hub))
+app.include_router(create_device_lifecycle_v2_router())
+app.include_router(create_device_bootstrap_v2_router())
+app.include_router(create_device_ota_v2_router())
 app.include_router(
     create_device_domain_v2_router(
         _require_roles,
@@ -1109,6 +1112,8 @@ def mobile_site_zones(site_id: str, request: Request) -> dict:
 
     devices_out = []
     for item in site.get("devices", []):
+        if item.get("device_type") != "hvac_gateway":
+            continue
         device_id = item.get("device_id")
         if not device_id:
             continue
@@ -1227,14 +1232,13 @@ def mobile_device_channels(device_id: str, request: Request) -> dict:
 
 @app.post("/mobile/zones/{zone_ref}/setpoint")
 def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         device_id, zone_id = resolve_zone_ref(zone_ref)
         context = get_device_onboarding_context(device_id)
         site_pk_id = context.get("site_id")
         if site_pk_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
-        _enforce_mobile_site_scope(request, int(site_pk_id))
+        _require_site_product_permission(request, int(site_pk_id), "hvac", "operate")
 
         requested_target_c = float(payload.target_temperature_c)
         command_id: str | None = None
@@ -1305,14 +1309,13 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
 
 @app.post("/mobile/zones/{zone_ref}/rename", response_model=ZoneOut)
 def mobile_rename_zone(zone_ref: str, payload: ZoneRenameIn, request: Request) -> dict:
-    _require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
     try:
         device_id, zone_id = resolve_zone_ref(zone_ref)
         context = get_device_onboarding_context(device_id)
         site_pk_id = context.get("site_id")
         if site_pk_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
-        _enforce_mobile_site_scope(request, int(site_pk_id))
+        _require_site_product_permission(request, int(site_pk_id), "hvac", "configure")
 
         if should_forward_setpoint_commands():
             try:

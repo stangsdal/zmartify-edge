@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import os
 import json
-from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.auth import ROLE_ADMIN, ROLE_INSTALLER, ROLE_OWNER, ROLE_VIEWER, audit_action
+from app.auth import AuthError, AuthenticatedUser, audit_action
 from app.db import get_connection
 from app.device_onboarding import (
     DeviceOnboardingError,
@@ -21,6 +20,7 @@ from app.device_onboarding import (
 )
 from app.domain_model import DomainModelError, upsert_device_state
 from app.mqtt_commands import MqttCommandError, publish_irrigation_command
+from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_permission
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -230,12 +230,41 @@ def _latest_mqtt_sd_card_status(device_id: str, local_url: str) -> dict | None:
     return _sd_card_status_payload(device_id, local_url, sd_card, source="mqtt_reported_state")
 
 
-def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
+def create_device_lifecycle_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-device-lifecycle"])
+
+    def auth_user(request: Request) -> AuthenticatedUser:
+        user = getattr(request.state, "auth_user", None)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        return user
+
+    def require_platform_administrator(request: Request) -> None:
+        try:
+            require_global_admin(auth_user(request))
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    def require_device_permission(device_id: str, request: Request, permission: str) -> dict:
+        try:
+            device = get_device(device_id)
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+        site_id = device.get("site_id")
+        product_type = str(device.get("product_type") or "")
+        if site_id is None or product_type not in PRODUCT_TYPES:
+            require_platform_administrator(request)
+            return device
+        try:
+            require_site_permission(auth_user(request), int(site_id), product_type=product_type, permission=permission)  # type: ignore[arg-type]
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        return device
 
     @router.post("/devices/discover", response_model=DeviceDiscoverOut)
     def v2_discover_device(payload: DeviceDiscoverIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_platform_administrator(request)
         try:
             discovered = discover_remote_device(payload.base_url)
             audit_action(
@@ -250,12 +279,18 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.post("/devices/claim", response_model=DeviceClaimOut, status_code=status.HTTP_201_CREATED)
     def v2_claim_device(payload: DeviceClaimIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
         try:
             discovered = discover_remote_device(payload.base_url)
             identity = discovered["identity"]
             device_id = identity["device_id"]
             display_name = payload.display_name or identity["device_id"]
+            product_type = str(identity.get("product_type") or "hvac").strip().lower()
+            if product_type not in PRODUCT_TYPES:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported device product type")
+            try:
+                require_site_permission(auth_user(request), payload.site_id, product_type=product_type, permission="configure")
+            except AuthError as exc:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
             try:
                 device = create_device(
@@ -263,12 +298,15 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
                     display_name=display_name,
                     mac=identity.get("mac"),
                     firmware_version=identity.get("firmware_version"),
+                    product_type=product_type,
                 )
                 is_reclaim = False
             except RegistryConflictError:
-                require_roles(request, {ROLE_OWNER, ROLE_ADMIN})
                 is_reclaim = True
                 device = get_device(device_id)
+                previous_site_id = device.get("site_id")
+                if previous_site_id is not None:
+                    require_device_permission(device_id, request, "configure")
 
             device = assign_device_site(device_id, payload.site_id)
             device = update_device_local_url(device_id, normalize_device_base_url(payload.base_url))
@@ -314,7 +352,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.post("/devices/{device_id}/push-config", response_model=DeviceOnboardingStatusOut)
     def v2_push_device_config(device_id: str, payload: DevicePushConfigIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_device_permission(device_id, request, "configure")
         try:
             device = get_device_onboarding_context(device_id)
             local_url = device.get("local_url")
@@ -332,7 +370,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.get("/devices/{device_id}/onboarding-status", response_model=DeviceOnboardingStatusOut)
     def v2_device_onboarding_status(device_id: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        require_device_permission(device_id, request, "read")
         try:
             local_url = _device_local_url(device_id)
             status_payload = get_remote_onboarding_status(local_url)
@@ -353,7 +391,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.get("/devices/{device_id}/controller-settings", response_model=DeviceControllerSettingsOut)
     def v2_get_device_controller_settings(device_id: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        require_device_permission(device_id, request, "read")
         try:
             local_url = _device_local_url(device_id)
             try:
@@ -368,7 +406,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.put("/devices/{device_id}/controller-settings", response_model=DeviceControllerSettingsOut)
     def v2_update_device_controller_settings(device_id: str, payload: DeviceControllerSettingsIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_device_permission(device_id, request, "configure")
         try:
             local_url = _device_local_url(device_id)
             update_payload = payload.model_dump(exclude_none=True)
@@ -391,7 +429,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.post("/devices/{device_id}/controller/mode", response_model=DeviceControllerModeOut)
     def v2_set_device_controller_mode(device_id: str, payload: DeviceControllerModeIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_device_permission(device_id, request, "operate")
         normalized_mode = _normalize_controller_mode(payload.mode)
         try:
             _ = _device_local_url(device_id)
@@ -425,7 +463,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.post("/devices/{device_id}/controller/reboot", response_model=DeviceControllerRebootOut)
     def v2_reboot_device_controller(device_id: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_device_permission(device_id, request, "configure")
         try:
             local_url = _device_local_url(device_id)
             token = _controller_http_admin_token(device_id)
@@ -454,7 +492,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.get("/devices/{device_id}/storage/sd-card", response_model=DeviceSdCardStatusOut)
     def v2_get_device_sd_card_status(device_id: str, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER, ROLE_VIEWER})
+        require_device_permission(device_id, request, "read")
         try:
             local_url = _device_local_url(device_id)
             try:
@@ -469,7 +507,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.post("/devices/{device_id}/storage/sd-card/initialize", response_model=DeviceSdCardStatusOut)
     def v2_initialize_device_sd_card(device_id: str, payload: DeviceSdCardInitializeIn, request: Request) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_device_permission(device_id, request, "configure")
         try:
             local_url = _device_local_url(device_id)
             result = publish_irrigation_command(
@@ -498,7 +536,7 @@ def create_device_lifecycle_v2_router(require_roles: Callable[[Request, set[str]
 
     @router.post("/devices/{device_id}/firmware/refresh")
     def v2_refresh_device_firmware(device_id: str, request: Request, base_url: str | None = None) -> dict:
-        require_roles(request, {ROLE_OWNER, ROLE_ADMIN, ROLE_INSTALLER})
+        require_device_permission(device_id, request, "configure")
         if not _allow_manual_firmware_refresh():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
         try:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -457,3 +458,79 @@ def test_api_v2_device_controller_mode_and_reboot(monkeypatch, tmp_path: Path):
     assert reboot.json()["reboot_triggered"] is True
     assert captured_reboot["base_url"] == "http://192.168.10.113"
     assert isinstance(captured_reboot["admin_token"], str)
+
+
+def test_api_v2_lifecycle_requires_the_claimed_product_access(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    administrator_headers = {"Authorization": "Bearer emergency-token"}
+    domain_id, site_id = _seed_domain_site(client, administrator_headers, suffix="product-access")
+
+    import app.router_v2_device_lifecycle as lifecycle
+
+    monkeypatch.setattr(
+        lifecycle,
+        "discover_remote_device",
+        lambda _base_url: {
+            "base_url": "http://192.168.10.113",
+            "identity": {
+                "device_id": "zmartify-irrigation-product-access01",
+                "product_type": "irrigation",
+                "mac": "AA:BB:CC:DD:EE:44",
+                "firmware_version": "v5.2.7",
+            },
+            "claim": {},
+            "status": {"state": "discoverable"},
+        },
+    )
+    monkeypatch.setattr(lifecycle, "push_remote_onboarding_config", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        lifecycle,
+        "get_remote_onboarding_status",
+        lambda _base_url: {
+            "state": "claimed",
+            "device_id": "zmartify-irrigation-product-access01",
+            "edge_url": "https://pilot.zmartify.dk",
+            "mqtt_configured": True,
+            "mqtt_connected": True,
+            "last_error": None,
+        },
+    )
+
+    claim = client.post(
+        "/api/v2/devices/claim",
+        headers=administrator_headers,
+        json={
+            "base_url": "http://192.168.10.113",
+            "claim_token": "claim-token",
+            "domain_id": domain_id,
+            "site_id": site_id,
+            "display_name": "Irrigation Product Access",
+        },
+    )
+    assert claim.status_code == 201
+
+    from app.auth import hash_password
+    from app.db import get_connection
+    from app.registry import get_device
+
+    assert get_device("zmartify-irrigation-product-access01")["product_type"] == "irrigation"
+    with get_connection() as conn:
+        user_id = conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            (str(uuid.uuid4()), "lifecycle-hvac-viewer", "Lifecycle HVAC Viewer", hash_password("VeryStrongPass123!")),
+        ).lastrowid
+        membership_id = conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role) VALUES (?, ?, ?, 'viewer')",
+            (str(uuid.uuid4()), user_id, site_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, 'hvac')",
+            (membership_id,),
+        )
+        conn.commit()
+
+    login = client.post("/auth/login", json={"username": "lifecycle-hvac-viewer", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+    viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    status_response = client.get("/api/v2/devices/zmartify-irrigation-product-access01/onboarding-status", headers=viewer_headers)
+    assert status_response.status_code == 403

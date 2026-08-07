@@ -38,7 +38,7 @@ export function RoomDetailPage() {
 
   const applyIncomingZoneState = (nextZone: MobileZone) => {
     setZone(nextZone);
-    setRenameValue(nextZone.name || '');
+    setRenameValue(nextZone.name === (nextZone.zone_key || `zone-${nextZone.zone_id}`) ? '' : nextZone.name || '');
     const nextTarget = nextZone.target_temperature_c ?? 21;
 
     if (nextZone.setpoint_pending || nextZone.setpoint_command_state === 'pending_device_feedback') {
@@ -244,9 +244,12 @@ export function RoomDetailPage() {
     }
   };
 
+  const zoneKey = zone?.zone_key || (zone ? `zone-${zone.zone_id}` : 'Room');
+  const zoneDescription = zone?.name && zone.name !== zoneKey ? zone.name : 'Thermostat Control';
+
   return (
     <IonPage>
-      <AppHeader title={zone?.name || 'Room'} subtitle="Thermostat Control" />
+      <AppHeader title={zoneKey} subtitle={zoneDescription} />
       <IonContent className="ion-padding">
         <div className="space-y-5 pb-8">
           <section className="rounded-3xl app-surface shadow-soft p-5">
@@ -291,7 +294,7 @@ export function RoomDetailPage() {
           </section>
 
           <section className="rounded-2xl app-surface shadow-soft p-4 space-y-3">
-            <p className="text-sm text-muted">Room Name</p>
+            <p className="text-sm text-muted">Descriptive Name</p>
             <div className="flex gap-2">
               <input
                 className="flex-1 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-sm"
@@ -300,7 +303,7 @@ export function RoomDetailPage() {
                   setRenameValue(event.target.value);
                   setRenameError('');
                 }}
-                placeholder="Enter room name"
+                placeholder="e.g. Living room"
                 maxLength={64}
               />
               <button

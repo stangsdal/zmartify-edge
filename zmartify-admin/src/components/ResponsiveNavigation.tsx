@@ -21,16 +21,17 @@ type NavItem = {
 interface ResponsiveNavigationProps {
   appBase: string;
   isAdmin?: boolean;
+  controlPath: string;
 }
 
 const isActive = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
-export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNavigationProps) {
+export function ResponsiveNavigation({ appBase, isAdmin = false, controlPath }: ResponsiveNavigationProps) {
   const location = useLocation();
 
   const mobileItems: NavItem[] = [
     { label: 'Home', path: `${appBase}/home`, icon: homeOutline },
-    { label: 'Control', path: `${appBase}/control/irrigation/overview`, icon: waterOutline },
+    { label: 'Control', path: controlPath, icon: waterOutline },
     { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
     { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
     { label: 'More', path: `${appBase}/more`, icon: settingsOutline },
@@ -51,7 +52,7 @@ export function ResponsiveNavigation({ appBase, isAdmin = false }: ResponsiveNav
       ]
     : [
         { label: 'Overview', path: `${appBase}/overview`, icon: homeOutline },
-        { label: 'Control', path: `${appBase}/control/irrigation/overview`, icon: waterOutline },
+        { label: 'Control', path: controlPath, icon: waterOutline },
         { label: 'Insights', path: `${appBase}/insights/water`, icon: analyticsOutline },
         { label: 'Alerts', path: `${appBase}/alerts`, icon: alertCircleOutline },
         { label: 'More', path: `${appBase}/more`, icon: settingsOutline },

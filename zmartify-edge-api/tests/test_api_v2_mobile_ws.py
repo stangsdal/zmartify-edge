@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
+from starlette.websockets import WebSocketDisconnect
 
 
 def _client(monkeypatch, tmp_path: Path) -> TestClient:
@@ -75,3 +78,38 @@ def test_api_v2_mobile_zone_websocket(monkeypatch, tmp_path: Path):
         ws.send_text("ping")
         pong = ws.receive_json()
         assert pong["type"] == "pong"
+
+
+def test_api_v2_mobile_zone_websocket_requires_hvac_product_access(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    zone_ref = _seed_zone_ref(client, {"Authorization": "Bearer emergency-token"}, suffix="product-access")
+
+    from app.auth import hash_password
+    from app.db import get_connection
+
+    with get_connection() as conn:
+        user_id = conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            (str(uuid.uuid4()), "ws-irrigation-viewer", "WS Irrigation Viewer", hash_password("VeryStrongPass123!")),
+        ).lastrowid
+        site_id = conn.execute(
+            "SELECT d.site_id FROM zone_metadata z JOIN devices d ON d.id = z.device_id WHERE z.uuid = ?",
+            (zone_ref,),
+        ).fetchone()["site_id"]
+        membership_id = conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role) VALUES (?, ?, ?, 'viewer')",
+            (str(uuid.uuid4()), user_id, site_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, 'irrigation')",
+            (membership_id,),
+        )
+        conn.commit()
+
+    login = client.post("/auth/login", json={"username": "ws-irrigation-viewer", "password": "VeryStrongPass123!"})
+    assert login.status_code == 200
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect(f"/api/v2/mobile/ws/zones/{zone_ref}?token={login.json()['access_token']}"):
+            pass
+    assert exc_info.value.code == 4403

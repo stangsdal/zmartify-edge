@@ -50,7 +50,8 @@ export function RoomsPage() {
   };
 
   const handleRename = async (room: RoomWithRef) => {
-    const nextName = window.prompt('New room name', room.name);
+    const zoneKey = room.zone_key || `zone-${room.zone_id}`;
+    const nextName = window.prompt('Descriptive room name', room.name === zoneKey ? '' : room.name);
     if (!nextName) return;
     const trimmed = nextName.trim();
     if (!trimmed || trimmed === room.name) return;
@@ -180,7 +181,7 @@ export function RoomsPage() {
   }, []);
 
   const sortedRooms = useMemo(() => {
-    return [...rooms].sort((a, b) => a.name.localeCompare(b.name));
+    return [...rooms].sort((a, b) => a.zone_id - b.zone_id);
   }, [rooms]);
 
   const avgTemp = useMemo(() => {

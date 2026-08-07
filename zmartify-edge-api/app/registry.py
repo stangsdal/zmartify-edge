@@ -15,6 +15,8 @@ from app.mqtt_users import (
     reload_broker,
 )
 
+_PRODUCT_TYPES = frozenset({"hvac", "irrigation", "weather", "energy"})
+
 
 class RegistryNotFoundError(ValueError):
     """Raised when a requested registry resource does not exist."""
@@ -186,7 +188,7 @@ def _sync_device_to_core_v2(conn: sqlite3.Connection, device: dict[str, Any]) ->
             device.get("device_id"),
             device.get("display_name"),
             core_site_id,
-            device.get("device_type") or "hvac",
+            device.get("product_type") or "hvac",
             None,
             device.get("firmware_version"),
             device.get("integration_mode") or "mqtt",
@@ -337,20 +339,24 @@ def create_device(
     display_name: str,
     mac: str | None,
     firmware_version: str | None,
+    product_type: str = "hvac",
 ) -> dict[str, Any]:
+    normalized_product_type = product_type.strip().lower()
+    if normalized_product_type not in _PRODUCT_TYPES:
+        raise RegistryOperationError("unsupported device product type")
     try:
         with get_connection() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO devices(uuid, device_id, display_name, mac, firmware_version)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO devices(uuid, device_id, display_name, mac, firmware_version, product_type)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (_new_uuid(), device_id, display_name, mac, firmware_version),
+                (_new_uuid(), device_id, display_name, mac, firmware_version, normalized_product_type),
             )
             row = conn.execute(
                 """
                 SELECT id, uuid, device_id, display_name, mac, firmware_version, site_id, local_url,
-                       device_type, integration_mode, created_at, last_seen_at
+                       device_type, product_type, integration_mode, created_at, last_seen_at
                 FROM devices
                 WHERE id = ?
                 """,
@@ -372,7 +378,7 @@ def list_devices() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
                  SELECT id, uuid, device_id, display_name, mac, firmware_version, site_id, local_url,
-                   device_type, integration_mode, created_at, last_seen_at
+                     device_type, product_type, integration_mode, created_at, last_seen_at
             FROM devices
             ORDER BY id
             """
@@ -385,7 +391,7 @@ def get_device(device_id: str) -> dict[str, Any]:
         row = conn.execute(
             """
                  SELECT id, uuid, device_id, display_name, mac, firmware_version, site_id, local_url,
-                   device_type, integration_mode, created_at, last_seen_at
+                     device_type, product_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
             """,
@@ -411,7 +417,7 @@ def assign_device_site(device_id: str, site_id: int) -> dict[str, Any]:
         row = conn.execute(
             """
                  SELECT id, uuid, device_id, display_name, mac, firmware_version, site_id, local_url,
-                   device_type, integration_mode, created_at, last_seen_at
+                     device_type, product_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
             """,
@@ -440,7 +446,7 @@ def rename_device(device_id: str, display_name: str) -> dict[str, Any]:
         row = conn.execute(
             """
                  SELECT id, uuid, device_id, display_name, mac, firmware_version, site_id, local_url,
-                   device_type, integration_mode, created_at, last_seen_at
+                     device_type, product_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
             """,
@@ -475,7 +481,7 @@ def update_device_local_url(device_id: str, local_url: str) -> dict[str, Any]:
         row = conn.execute(
             """
             SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
-                   device_type, integration_mode, created_at, last_seen_at
+                     device_type, product_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
             """,
@@ -495,7 +501,7 @@ def update_device_firmware_version(device_id: str, firmware_version: str | None)
         row = conn.execute(
             """
             SELECT id, device_id, display_name, mac, firmware_version, site_id, local_url,
-                   device_type, integration_mode, created_at, last_seen_at
+                     device_type, product_type, integration_mode, created_at, last_seen_at
             FROM devices
             WHERE device_id = ?
             """,
@@ -562,7 +568,7 @@ def get_device_onboarding_context(device_id: str) -> dict[str, Any]:
         row = conn.execute(
             """
             SELECT d.id, d.device_id, d.display_name, d.mac, d.firmware_version, d.site_id, d.local_url,
-                   d.device_type, d.integration_mode, d.created_at, d.last_seen_at,
+                     d.device_type, d.product_type, d.integration_mode, d.created_at, d.last_seen_at,
                    s.domain_id
             FROM devices d
             LEFT JOIN sites s ON s.id = d.site_id

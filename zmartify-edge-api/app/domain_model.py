@@ -589,6 +589,7 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
             {
                 "zone_uuid": row["zone_uuid"],
                 "zone_id": row["zone_id"],
+                "zone_key": f"zone-{row['zone_id']}",
                 "name": row["name"],
                 "icon": row["icon"],
                 "sort_order": row["sort_order"],
@@ -1087,11 +1088,6 @@ def ingest_device_twin_snapshot(
         zone_active = zone.get("active")
         if zone_demand is None and zone_active is not None:
             zone_demand = bool(zone_active)
-        zone_name = zone.get("name")
-        if zone_name is not None:
-            normalized_name = str(zone_name).strip()
-            if normalized_name:
-                set_zone_metadata(device_external_id, zone_id, name=normalized_name)
         upsert_zone_state(
             device_external_id,
             zone_id,

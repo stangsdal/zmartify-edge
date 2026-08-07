@@ -30,6 +30,20 @@ def test_setup_status_and_login_flow(monkeypatch, tmp_path: Path):
     bad = client.post("/auth/login", json={"username": "admin", "password": "wrong-password-123"})
     assert bad.status_code == 401
 
+    from app.db import get_connection
+
+    with get_connection() as conn:
+        roles = conn.execute(
+            """
+            SELECT r.name
+            FROM user_roles ur
+            JOIN users u ON u.id = ur.user_id
+            JOIN roles r ON r.id = ur.role_id
+            WHERE u.username = 'admin'
+            """
+        ).fetchall()
+    assert [row["name"] for row in roles] == ["administrator"]
+
 
 def test_user_crud_with_owner(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("ZMART_EDGE_ENABLE_EMERGENCY_TOKEN", "1")

@@ -15,6 +15,7 @@ import '@ionic/react/css/display.css';
 import './main.css';
 import './mobile-ui.css';
 import App from './App';
+import { AccessProvider } from './auth/AccessContext';
 
 setupIonicReact();
 
@@ -30,7 +31,7 @@ if (storedTheme === 'dark') {
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    const swVersion = '20260624-3';
+    const swVersion = '20260807-1';
     const swUrl = `/app/sw.js?v=${swVersion}`;
     fetch(swUrl, { cache: 'no-store' })
       .then((res) => {
@@ -65,7 +66,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <IonApp>
       <IonReactRouter>
-        <App />
+        <AccessProvider>
+          <App />
+        </AccessProvider>
       </IonReactRouter>
     </IonApp>
   </React.StrictMode>

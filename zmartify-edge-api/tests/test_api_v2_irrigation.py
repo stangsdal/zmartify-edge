@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -57,6 +58,57 @@ def _mark_device_commandable(device_id: str) -> None:
     from app.domain_model import upsert_device_state
 
     upsert_device_state(device_id, online=True, mqtt_connected=True, source="test")
+
+
+def test_irrigation_endpoints_require_product_and_operation_permissions(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+
+    from app.auth import hash_password
+    from app.db import get_connection
+
+    with get_connection() as conn:
+        site_id = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()["site_id"]
+        user_id = conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            (str(uuid.uuid4()), "irrigation-user", "Irrigation User", hash_password("VeryStrongPass123!")),
+        ).lastrowid
+        viewer_id = conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            (str(uuid.uuid4()), "irrigation-viewer", "Irrigation Viewer", hash_password("VeryStrongPass123!")),
+        ).lastrowid
+        user_membership_id = conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role) VALUES (?, ?, ?, 'user')",
+            (str(uuid.uuid4()), user_id, site_id),
+        ).lastrowid
+        viewer_membership_id = conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role) VALUES (?, ?, ?, 'viewer')",
+            (str(uuid.uuid4()), viewer_id, site_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, 'irrigation')",
+            (viewer_membership_id,),
+        )
+        conn.commit()
+
+    user_login = client.post("/auth/login", json={"username": "irrigation-user", "password": "VeryStrongPass123!"})
+    assert user_login.status_code == 200
+    user_headers = {"Authorization": f"Bearer {user_login.json()['access_token']}"}
+    assert client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=user_headers).status_code == 200
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO site_membership_product_access(membership_id, product_type) VALUES (?, 'hvac')",
+            (user_membership_id,),
+        )
+        conn.commit()
+
+    assert client.get(f"/api/v2/devices/{device_id}/irrigation/zones", headers=user_headers).status_code == 403
+
+    viewer_login = client.post("/auth/login", json={"username": "irrigation-viewer", "password": "VeryStrongPass123!"})
+    assert viewer_login.status_code == 200
+    viewer_headers = {"Authorization": f"Bearer {viewer_login.json()['access_token']}"}
+    assert client.post(f"/api/v2/devices/{device_id}/irrigation/rain-delay", headers=viewer_headers, json={"delay_hours": 24}).status_code == 403
 
 
 def test_irrigation_v2_zone_and_program_flow(monkeypatch, tmp_path: Path):
