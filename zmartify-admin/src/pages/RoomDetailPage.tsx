@@ -27,6 +27,7 @@ export function RoomDetailPage() {
   const lastAppliedRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const pendingCommandRef = useRef<{ id: string | null; target: number } | null>(null);
 
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -37,9 +38,22 @@ export function RoomDetailPage() {
   }, [saving]);
 
   const applyIncomingZoneState = (nextZone: MobileZone) => {
-    setZone(nextZone);
+    const pendingCommand = pendingCommandRef.current;
+    const commandMatches =
+      pendingCommand !== null &&
+      (pendingCommand.id === null || pendingCommand.id === nextZone.setpoint_command_id);
+    const awaitingReportedTarget = commandMatches && nextZone.setpoint_pending;
+    const nextZoneForDisplay = awaitingReportedTarget
+      ? { ...nextZone, target_temperature_c: pendingCommand.target }
+      : nextZone;
+
+    if (commandMatches && !nextZone.setpoint_pending) {
+      pendingCommandRef.current = null;
+    }
+
+    setZone(nextZoneForDisplay);
     setRenameValue(nextZone.name === (nextZone.zone_key || `zone-${nextZone.zone_id}`) ? '' : nextZone.name || '');
-    const nextTarget = nextZone.target_temperature_c ?? 21;
+    const nextTarget = nextZoneForDisplay.target_temperature_c ?? 21;
 
     if (nextZone.setpoint_pending || nextZone.setpoint_command_state === 'pending_device_feedback') {
       setSetpointState('pending');
@@ -59,7 +73,7 @@ export function RoomDetailPage() {
         nextZone.setpoint_pending && typeof nextZone.setpoint_requested_target_c === 'number'
           ? nextZone.setpoint_requested_target_c
           : null;
-      const dialTarget = pendingRequested ?? nextTarget;
+      const dialTarget = awaitingReportedTarget ? pendingCommand.target : pendingRequested ?? nextTarget;
       setTarget(dialTarget);
       lastAppliedRef.current = dialTarget;
     }
@@ -174,6 +188,7 @@ export function RoomDetailPage() {
           const result: MobileSetpointResponse = await mobileApi.setZoneSetpoint(resolvedRef, target);
           const pending = Boolean(result.pending || result.command_state === 'pending_device_feedback');
           lastAppliedRef.current = target;
+          pendingCommandRef.current = pending ? { id: result.command_id ?? null, target } : null;
           setZone((prev) =>
             prev
               ? {
@@ -215,7 +230,7 @@ export function RoomDetailPage() {
     if (dirty) return 'Will apply in a moment';
     if (setpointState === 'pending') return 'Waiting for device confirmation...';
     if (setpointState === 'failed') return 'Setpoint failed';
-    if (setpointState === 'confirmed') return 'Setpoint confirmed';
+    if (setpointState === 'confirmed') return 'Controller confirmed setpoint';
     return 'Setpoint saved';
   }, [dirty, saving, setpointState]);
 
