@@ -1,4 +1,5 @@
-import { IonButton, IonContent, IonPage, IonToggle } from '@ionic/react';
+import { IonButton, IonContent, IonIcon, IonPage, IonToggle } from '@ionic/react';
+import { arrowDownOutline, arrowUpOutline } from 'ionicons/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
@@ -486,6 +487,32 @@ export function IrrigationProgramsPage() {
         zoneDraft.enabled && zoneDraft.runGroup === runGroup
           ? { ...zoneDraft, durationSeconds }
           : zoneDraft,
+      ]));
+      return { ...prev, [key]: nextDraft };
+    });
+  };
+
+  const moveWateringGroup = (row: DeviceProgram, runGroup: number, direction: -1 | 1) => {
+    const key = programKey(row);
+    setProgramZoneDrafts((prev) => {
+      const currentDraft = prev[key] || {};
+      const orderedGroups = [...new Set(
+        Object.values(currentDraft)
+          .filter((item) => item.enabled)
+          .map((item) => item.runGroup),
+      )].sort((left, right) => left - right);
+      const currentIndex = orderedGroups.indexOf(runGroup);
+      const targetGroup = orderedGroups[currentIndex + direction];
+      if (currentIndex < 0 || targetGroup == null) {
+        return prev;
+      }
+      const nextDraft = Object.fromEntries(Object.entries(currentDraft).map(([zoneId, zoneDraft]) => [
+        zoneId,
+        zoneDraft.runGroup === runGroup
+          ? { ...zoneDraft, runGroup: targetGroup }
+          : zoneDraft.runGroup === targetGroup
+            ? { ...zoneDraft, runGroup }
+            : zoneDraft,
       ]));
       return { ...prev, [key]: nextDraft };
     });
@@ -1007,8 +1034,31 @@ export function IrrigationProgramsPage() {
                       return (
                         <div key={group.runGroup} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-semibold">Group {index + 1} · Water together</p>
+                            <div>
+                              <p className="text-sm font-semibold">Group {index + 1} · Water together</p>
+                              <p className="text-xs text-muted mt-1">Runs {index === 0 ? 'first' : `after group ${index}`}</p>
+                            </div>
                             <div className="flex flex-wrap items-end gap-2">
+                              <IonButton
+                                size="small"
+                                fill="clear"
+                                title="Move group earlier"
+                                aria-label="Move group earlier"
+                                disabled={busyKey === `zones:${key}` || index === 0}
+                                onClick={() => moveWateringGroup(row, group.runGroup, -1)}
+                              >
+                                <IonIcon slot="icon-only" icon={arrowUpOutline} />
+                              </IonButton>
+                              <IonButton
+                                size="small"
+                                fill="clear"
+                                title="Move group later"
+                                aria-label="Move group later"
+                                disabled={busyKey === `zones:${key}` || index === orderedWateringGroups.length - 1}
+                                onClick={() => moveWateringGroup(row, group.runGroup, 1)}
+                              >
+                                <IonIcon slot="icon-only" icon={arrowDownOutline} />
+                              </IonButton>
                               <label className="block text-xs text-muted">
                                 Runtime minutes
                                 <input
