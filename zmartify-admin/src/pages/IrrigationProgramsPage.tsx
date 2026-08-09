@@ -1,5 +1,5 @@
 import { IonButton, IonContent, IonIcon, IonPage, IonToggle } from '@ionic/react';
-import { arrowDownOutline, arrowUpOutline } from 'ionicons/icons';
+import { arrowBackOutline, arrowDownOutline, arrowUpOutline, trashOutline } from 'ionicons/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
@@ -821,6 +821,18 @@ export function IrrigationProgramsPage() {
       <AppHeader title="Programs" subtitle="Schedule design and runtime planning" />
       <IonContent className="ion-padding">
         <div className="space-y-4 pb-20 lg:pb-8">
+          {selectedSite ? (
+            <div>
+              <IonButton
+                fill="clear"
+                title="Back to irrigation overview"
+                aria-label="Back to irrigation overview"
+                routerLink={`/app/sites/${encodeURIComponent(selectedSite)}/irrigation`}
+              >
+                <IonIcon slot="icon-only" icon={arrowBackOutline} />
+              </IonButton>
+            </div>
+          ) : null}
           <SiteSelector
             label="Site"
             options={sites.map((site) => ({ site_id: site.site_id, site_name: site.site_name }))}
@@ -1092,11 +1104,20 @@ export function IrrigationProgramsPage() {
                               </IonButton>
                             </div>
                           </div>
-                          <div className="mt-2 grid gap-2 md:grid-cols-3">
+                          <div className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white px-2">
                             {group.zones.map((zone) => (
-                              <div key={zone.zone_id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                                <p className="text-sm font-semibold">{zone.name || zone.local_ref}</p>
-                                <IonButton size="small" fill="clear" color="medium" onClick={() => updateProgramZoneDraft(row, zone, { enabled: false })}>Remove zone</IonButton>
+                              <div key={zone.zone_id} className="flex min-w-0 items-center justify-between gap-2 py-1">
+                                <p className="truncate text-sm font-semibold">{zone.name || zone.local_ref}</p>
+                                <IonButton
+                                  size="small"
+                                  fill="clear"
+                                  color="medium"
+                                  title={`Remove ${zone.name || zone.local_ref}`}
+                                  aria-label={`Remove ${zone.name || zone.local_ref}`}
+                                  onClick={() => updateProgramZoneDraft(row, zone, { enabled: false })}
+                                >
+                                  <IonIcon slot="icon-only" icon={trashOutline} />
+                                </IonButton>
                               </div>
                             ))}
                           </div>
