@@ -593,6 +593,7 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
     ) -> dict:
         require_irrigation_permission(request, "operate")
         try:
+            _ensure_irrigation_schedule_editable(device_id)
             zones = replace_program_zones(device_id, program_id, [zone.model_dump() for zone in payload.zones])
             _sync_irrigation_programs_to_controller(device_id)
             return {"device_id": device_id, "program_id": program_id, "zones": zones}
@@ -600,6 +601,8 @@ def create_irrigation_v2_router(resolve_device_site_pk_id) -> APIRouter:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except MqttCommandError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     @router.get("/api/v2/devices/{device_id}/irrigation/programs/{program_id}/schedules")
     def v2_list_irrigation_program_schedules(device_id: str, program_id: str, request: Request) -> dict:

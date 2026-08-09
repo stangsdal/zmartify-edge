@@ -758,6 +758,42 @@ def test_schedule_update_is_rejected_while_controller_run_is_active(monkeypatch,
     assert published_commands == []
 
 
+def test_program_zone_update_is_rejected_while_controller_run_is_active(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    device_id = _seed_device(client)
+    headers = _auth_headers()
+
+    from app import router_v2_irrigation
+    from app.irrigation_domain import create_irrigation_program, create_program_run
+
+    published_commands: list[dict] = []
+
+    def _fake_publish_irrigation_command(
+        device_id_arg: str,
+        command_type: str,
+        target_ref: str | None,
+        parameters: dict | None = None,
+        command_id: str | None = None,
+    ) -> dict:
+        published_commands.append({"command_type": command_type, "parameters": parameters or {}})
+        return {"command_id": command_id or "cmd-test", "status": "published"}
+
+    monkeypatch.setattr(router_v2_irrigation, "publish_irrigation_command", _fake_publish_irrigation_command)
+    program = create_irrigation_program(device_id, name="Morning Cycle", enabled=True, seasonal_adjustment=1.0, weather_mode="automatic")
+    _mark_device_commandable(device_id)
+    create_program_run(device_id, str(program["program_id"]), trigger_type="scheduled")
+
+    response = client.put(
+        f"/api/v2/devices/{device_id}/irrigation/programs/{program['program_id']}/zones",
+        headers=headers,
+        json={"zones": []},
+    )
+
+    assert response.status_code == 409
+    assert "controller is running" in response.json()["detail"]
+    assert published_commands == []
+
+
 def test_schedule_update_succeeds_when_runtime_reports_idle_and_run_row_is_stale(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     device_id = _seed_device(client)
