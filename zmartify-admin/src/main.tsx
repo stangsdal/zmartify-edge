@@ -31,7 +31,7 @@ if (storedTheme === 'dark') {
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    const swVersion = '20260807-1';
+    const swVersion = '20260809-1';
     const swUrl = `/app/sw.js?v=${swVersion}`;
     fetch(swUrl, { cache: 'no-store' })
       .then((res) => {
