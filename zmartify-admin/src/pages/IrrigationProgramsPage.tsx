@@ -1,4 +1,18 @@
-import { IonAlert, IonButton, IonContent, IonIcon, IonPage, IonToggle } from '@ionic/react';
+import {
+  IonButton,
+  IonContent,
+  IonHeader,
+  IonIcon,
+  IonItem,
+  IonLabel,
+  IonModal,
+  IonPage,
+  IonRadio,
+  IonRadioGroup,
+  IonTitle,
+  IonToggle,
+  IonToolbar,
+} from '@ionic/react';
 import { arrowBackOutline, arrowDownOutline, arrowUpOutline, trashOutline } from 'ionicons/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppHeader } from '../components/AppHeader';
@@ -167,6 +181,7 @@ export function IrrigationProgramsPage() {
   const [newProgramName, setNewProgramName] = useState('');
   const [programZoneDrafts, setProgramZoneDrafts] = useState<Record<string, ProgramZoneDraft>>({});
   const [groupZonePicker, setGroupZonePicker] = useState<GroupZonePicker | null>(null);
+  const [selectedGroupZoneId, setSelectedGroupZoneId] = useState('');
   const [groupRuntimeDrafts, setGroupRuntimeDrafts] = useState<Record<string, string>>({});
   const [programZoneServerDrafts, setProgramZoneServerDrafts] = useState<Record<string, ProgramZoneDraft>>({});
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, ScheduleDraft>>({});
@@ -1047,7 +1062,7 @@ export function IrrigationProgramsPage() {
                   <div className="mt-3 grid gap-3">
                     {orderedWateringGroups.map((group, index) => {
                       const groupKey = `${key}:${group.runGroup}`;
-                      const availableZones = row.availableZones.filter((zone) => !zoneDraft[zone.zone_id]?.enabled);
+                      const availableZones = row.availableZones.filter((zone) => zoneDraft[zone.zone_id]?.runGroup !== group.runGroup || !zoneDraft[zone.zone_id]?.enabled);
                       const groupRuntimeMinutes = Math.max(1, Math.round((zoneDraft[group.zones[0]?.zone_id]?.durationSeconds || 600) / 60));
                       return (
                         <div key={group.runGroup} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1061,12 +1076,15 @@ export function IrrigationProgramsPage() {
                                 size="small"
                                 fill="outline"
                                 disabled={busyKey === `zones:${key}` || group.zones.length >= 3 || availableZones.length === 0}
-                                onClick={() => setGroupZonePicker({
-                                  row,
-                                  groupNumber: index + 1,
-                                  runGroup: group.runGroup,
-                                  availableZones,
-                                })}
+                                onClick={() => {
+                                  setSelectedGroupZoneId('');
+                                  setGroupZonePicker({
+                                    row,
+                                    groupNumber: index + 1,
+                                    runGroup: group.runGroup,
+                                    availableZones,
+                                  });
+                                }}
                               >
                                 Add zone
                               </IonButton>
@@ -1413,29 +1431,45 @@ export function IrrigationProgramsPage() {
           ) : null}
         </div>
       </IonContent>
-      <IonAlert
+      <IonModal
         isOpen={groupZonePicker !== null}
-        header={groupZonePicker ? `Add zone to Group ${groupZonePicker.groupNumber}` : 'Add zone'}
-        inputs={(groupZonePicker?.availableZones || []).map((zone) => ({
-          type: 'radio',
-          label: zone.name || zone.local_ref,
-          value: zone.zone_id,
-        }))}
-        buttons={[
-          { text: 'Cancel', role: 'cancel' },
-          {
-            text: 'Add',
-            handler: (zoneId: string | number) => {
-              const picker = groupZonePicker;
-              const zone = picker?.row.availableZones.find((item) => item.zone_id === String(zoneId));
-              if (picker && zone) {
-                updateProgramZoneDraft(picker.row, zone, { enabled: true, durationSeconds: 600, runGroup: picker.runGroup });
-              }
-            },
-          },
-        ]}
-        onDidDismiss={() => setGroupZonePicker(null)}
-      />
+        onDidDismiss={() => {
+          setGroupZonePicker(null);
+          setSelectedGroupZoneId('');
+        }}
+      >
+        <IonHeader>
+          <IonToolbar>
+            <IonTitle>Add zone to Group {groupZonePicker?.groupNumber}</IonTitle>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent className="ion-padding">
+          <IonRadioGroup value={selectedGroupZoneId} onIonChange={(event) => setSelectedGroupZoneId(String(event.detail.value || ''))}>
+            {(groupZonePicker?.availableZones || []).map((zone) => (
+              <IonItem key={zone.zone_id} button detail={false}>
+                <IonLabel>{zone.name || zone.local_ref}</IonLabel>
+                <IonRadio slot="end" value={zone.zone_id} />
+              </IonItem>
+            ))}
+          </IonRadioGroup>
+          <div className="mt-4 flex justify-end gap-2">
+            <IonButton fill="outline" onClick={() => setGroupZonePicker(null)}>Cancel</IonButton>
+            <IonButton
+              disabled={!selectedGroupZoneId}
+              onClick={() => {
+                const picker = groupZonePicker;
+                const zone = picker?.row.availableZones.find((item) => item.zone_id === selectedGroupZoneId);
+                if (picker && zone) {
+                  updateProgramZoneDraft(picker.row, zone, { enabled: true, durationSeconds: 600, runGroup: picker.runGroup });
+                }
+                setGroupZonePicker(null);
+              }}
+            >
+              Add
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonModal>
     </IonPage>
   );
 }
