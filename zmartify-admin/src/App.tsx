@@ -364,6 +364,11 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/home/irrigation/programs`}
+              render={() => <Redirect to={`${selectedSiteBase}/irrigation/programs`} />}
+          />
+          <Route
+            exact
             path={`${appBase}/control/irrigation/manual`}
               render={() => <Redirect to={`${selectedSiteBase}/irrigation/manual`} />}
           />
