@@ -303,9 +303,11 @@ def ingest_mqtt_v2_setpoint_outcome(device_id: str, zone_id: int, payload: dict[
         device_id,
         int(zone_id),
         result=normalized["result"],
+        command_id=normalized["command_id"],
         detail=normalized["detail"],
         requested_target_c=normalized["requested_target_c"],
         confirmed_target_c=normalized["confirmed_target_c"],
+        confirmation_scope=normalized["confirmation_scope"],
         payload={"source": "mqtt_v2_setpoint_outcome_ingest", "raw": normalized["raw"]},
     )
 
@@ -336,6 +338,9 @@ def parse_mqtt_v2_setpoint_outcome_payload(payload: dict[str, Any]) -> dict[str,
         else None
     )
     detail = str(outcome["detail"]) if outcome.get("detail") is not None else None
+    confirmation_scope = str(outcome.get("confirmation_scope") or "active").strip().lower()
+    if confirmation_scope not in {"active", "profile"}:
+        raise ContractValidationError("confirmation_scope must be active or profile")
 
     return {
         "command_id": str(outcome["command_id"]),
@@ -343,6 +348,7 @@ def parse_mqtt_v2_setpoint_outcome_payload(payload: dict[str, Any]) -> dict[str,
         "detail": detail,
         "requested_target_c": requested_target_c,
         "confirmed_target_c": confirmed_target_c,
+        "confirmation_scope": confirmation_scope,
         "raw": outcome,
     }
 

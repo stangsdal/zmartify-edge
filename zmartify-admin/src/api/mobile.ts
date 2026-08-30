@@ -52,6 +52,7 @@ export interface MobileZone {
   name: string;
   mode?: number | string | null;
   thermostat_mode?: number | string | null;
+  setpoint_mode?: number | null;
   humidity?: number | null;
   window_open?: boolean | null;
   current_temperature_c?: number;
@@ -73,6 +74,7 @@ export interface MobileSetpointResponse {
   device_id: string;
   zone_id: number;
   target_temperature_c: number;
+  setpoint_mode?: number | null;
   pending: boolean;
   command_state: string;
   command_id?: string | null;
@@ -476,9 +478,10 @@ export const mobileApi = {
   getIrrigationWeather: (deviceId: string): Promise<IrrigationWeatherState> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/irrigation/weather`),
 
-  setZoneSetpoint: (zoneRef: string, targetTemperatureC: number): Promise<MobileSetpointResponse> =>
+  setZoneSetpoint: (zoneRef: string, targetTemperatureC: number, setpointMode?: number): Promise<MobileSetpointResponse> =>
     apiClient.post(`/mobile/zones/${zoneRef}/setpoint`, {
       target_temperature_c: targetTemperatureC,
+      ...(setpointMode == null ? {} : { setpoint_mode: setpointMode }),
     }),
 
   renameDeviceZone: (deviceId: string, zoneId: number, name: string): Promise<MobileZone> =>

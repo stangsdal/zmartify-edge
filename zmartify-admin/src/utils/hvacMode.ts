@@ -7,6 +7,18 @@ const MODE_BY_NUMBER: Record<number, HvacZoneMode> = {
   3: 'KOMFORT',
 };
 
+export const SETPOINT_MODE_BY_NAME: Record<HvacZoneMode, number> = {
+  MANUAL: 0,
+  KOMFORT: 1,
+  ECO: 2,
+  STANDBY: 4,
+};
+
+export function displaySetpointMode(mode: number | null | undefined): HvacZoneMode {
+  const entry = Object.entries(SETPOINT_MODE_BY_NAME).find(([, value]) => value === mode);
+  return (entry?.[0] as HvacZoneMode | undefined) ?? 'MANUAL';
+}
+
 export function displayHvacMode(mode: number | string | null | undefined, heating = false): HvacZoneMode {
   if (typeof mode === 'number' && MODE_BY_NUMBER[mode]) return MODE_BY_NUMBER[mode];
 
@@ -18,4 +30,3 @@ export function displayHvacMode(mode: number | string | null | undefined, heatin
 
   return heating ? 'KOMFORT' : 'MANUAL';
 }
-

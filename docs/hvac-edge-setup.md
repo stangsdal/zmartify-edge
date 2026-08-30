@@ -127,6 +127,12 @@ The broker accepts internal MQTT on the Docker network and public TLS MQTT on
 8883. Do not expose PostgreSQL or port 1883 on the host. The application
 generates the broker ACL from the device/site registry.
 
+Device onboarding is outbound-only. An unclaimed gateway polls the public
+bootstrap endpoint over HTTPS and then opens its own TLS MQTT connection to
+`mqtt.zmartify.dk:8883`; the Edge must never call into a gateway's private LAN.
+The customer-facing QR flow stages the device claim against a selected site
+before the gateway is powered on or connected to local Wi-Fi.
+
 Example firewall baseline:
 
 ```bash

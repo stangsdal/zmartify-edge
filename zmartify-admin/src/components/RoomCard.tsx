@@ -27,7 +27,7 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
   const state = zoneState(zone);
   const zoneKey = zone.zone_key || `zone-${zone.zone_id}`;
   const displayName = zone.name && zone.name !== zoneKey ? zone.name : zoneKey;
-  const mode = displayHvacMode(zone.thermostat_mode ?? zone.mode, Boolean(zone.demand ?? zone.active));
+  const mode = displayHvacMode(zone.setpoint_mode ?? zone.thermostat_mode ?? zone.mode, Boolean(zone.demand ?? zone.active));
   return (
     <motion.div
       whileHover={{ y: -2 }}

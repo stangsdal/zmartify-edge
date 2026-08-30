@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -23,8 +24,8 @@ from app.registry import (
     rotate_mqtt_client_password,
 )
 
-_EDGE_URL = "https://pilot.zmartify.dk"
-_MQTT_URI = "mqtts://pilot.zmartify.dk:8883"
+_EDGE_URL = (os.getenv("ZMART_EDGE_PUBLIC_API_BASE") or "https://api.zmartify.dk").strip().rstrip("/")
+_MQTT_URI = (os.getenv("ZMART_EDGE_PUBLIC_MQTT_URI") or "mqtts://mqtt.zmartify.dk:8883").strip()
 _CLAIM_LIFETIME_S = 600
 
 

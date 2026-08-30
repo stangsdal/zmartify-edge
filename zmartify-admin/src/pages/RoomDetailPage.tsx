@@ -6,7 +6,7 @@ import { ThermostatDial } from '../components/ThermostatDial';
 import { apiClient } from '../api/client';
 import { mobileApi, MobileSetpointResponse, MobileZone } from '../api/mobile';
 import { freshnessFromAgeMs } from '../utils/freshness';
-import { displayHvacMode, HvacZoneMode } from '../utils/hvacMode';
+import { displaySetpointMode, HvacZoneMode, SETPOINT_MODE_BY_NAME } from '../utils/hvacMode';
 
 interface RouteParams {
   zoneRef: string;
@@ -26,6 +26,7 @@ export function RoomDetailPage() {
   const [renameError, setRenameError] = useState('');
   const [streamState, setStreamState] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const [thermostatTheme, setThermostatTheme] = useState<'classical' | 'gunmalmg'>('classical');
+  const [selectedMode, setSelectedMode] = useState<HvacZoneMode>('MANUAL');
   const lastAppliedRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -187,7 +188,11 @@ export function RoomDetailPage() {
         setSaving(true);
         setSaveError('');
         try {
-          const result: MobileSetpointResponse = await mobileApi.setZoneSetpoint(resolvedRef, target);
+          const result: MobileSetpointResponse = await mobileApi.setZoneSetpoint(
+            resolvedRef,
+            target,
+            selectedMode === 'MANUAL' ? undefined : SETPOINT_MODE_BY_NAME[selectedMode],
+          );
           const pending = Boolean(result.pending || result.command_state === 'pending_device_feedback');
           lastAppliedRef.current = target;
           pendingCommandRef.current = pending ? { id: result.command_id ?? null, target } : null;
@@ -197,6 +202,7 @@ export function RoomDetailPage() {
                   ...prev,
                   target_temperature_c: pending ? prev.target_temperature_c : target,
                   setpoint_pending: pending,
+                  setpoint_mode: selectedMode === 'MANUAL' ? null : SETPOINT_MODE_BY_NAME[selectedMode],
                   setpoint_command_state: result.command_state,
                   setpoint_command_id: result.command_id ?? null,
                   setpoint_requested_target_c: target,
@@ -218,7 +224,13 @@ export function RoomDetailPage() {
     }, 1200);
 
     return () => window.clearTimeout(timer);
-  }, [dirty, resolvedRef, target, zone]);
+  }, [dirty, resolvedRef, selectedMode, target, zone]);
+
+  useEffect(() => {
+    if (zone && !dirty) {
+      setSelectedMode(displaySetpointMode(zone.setpoint_mode));
+    }
+  }, [dirty, zone?.setpoint_mode]);
 
   const handleTargetChange = (nextTarget: number) => {
     setTarget(nextTarget);
@@ -263,7 +275,6 @@ export function RoomDetailPage() {
 
   const zoneKey = zone?.zone_key || (zone ? `zone-${zone.zone_id}` : 'Room');
   const displayName = zone?.name && zone.name !== zoneKey ? zone.name : zoneKey;
-  const activeMode = displayHvacMode(zone?.thermostat_mode ?? zone?.mode, Boolean(zone?.demand ?? zone?.active));
   const supportedModes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'STANDBY'];
 
   return (
@@ -331,9 +342,15 @@ export function RoomDetailPage() {
             </p>
             <div className="thermostat-mode-list" aria-label="Supported thermostat modes">
               {supportedModes.map((mode) => (
-                <span key={mode} className={`thermostat-mode ${mode === activeMode ? `thermostat-mode--${mode.toLowerCase()}` : 'thermostat-mode--inactive'}`}>
+                <button
+                  key={mode}
+                  type="button"
+                  className={`thermostat-mode ${mode === selectedMode ? `thermostat-mode--${mode.toLowerCase()}` : 'thermostat-mode--inactive'}`}
+                  onClick={() => { setSelectedMode(mode); setDirty(true); setSaveError(''); setSetpointState('idle'); }}
+                  disabled={saving}
+                >
                   {mode}
-                </span>
+                </button>
               ))}
             </div>
             {saveError && <p className="text-center text-sm mt-2 text-rose-600">{saveError}</p>}

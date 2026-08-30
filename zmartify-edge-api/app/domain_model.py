@@ -217,6 +217,7 @@ def _zone_setpoint_command_state(
         outcome = outcome_by_command.get(command_id)
         if outcome:
             result = str(outcome.get("result") or "").strip().lower()
+            confirmation_scope = str(outcome.get("confirmation_scope") or "active").strip().lower()
             detail = outcome.get("detail")
             if result == "accepted":
                 return {
@@ -228,6 +229,15 @@ def _zone_setpoint_command_state(
                     "setpoint_command_age_ms": age_ms,
                 }
             if result == "confirmed":
+                if confirmation_scope == "profile":
+                    return {
+                        "setpoint_command_state": "confirmed",
+                        "setpoint_pending": False,
+                        "setpoint_command_id": command_id,
+                        "setpoint_requested_target_c": requested_target_c,
+                        "setpoint_failure_reason": None,
+                        "setpoint_command_age_ms": age_ms,
+                    }
                 if (
                     current_target_c is not None
                     and requested_target_c is not None
@@ -296,6 +306,7 @@ def ingest_setpoint_command_outcome(
     requested_target_c: float | None = None,
     confirmed_target_c: float | None = None,
     payload: dict[str, Any] | None = None,
+    confirmation_scope: str = "active",
 ) -> dict[str, Any]:
     normalized_result = str(result or "").strip().lower()
     with get_connection() as conn:
@@ -325,6 +336,7 @@ def ingest_setpoint_command_outcome(
         "command_id": matched_command_id,
         "requested_target_temperature_c": requested_target_c,
         "confirmed_target_temperature_c": confirmed_target_c,
+        "confirmation_scope": confirmation_scope,
         "payload": payload or {},
     }
 
@@ -339,7 +351,7 @@ def ingest_setpoint_command_outcome(
 
     # Only a confirmed outcome proves the controller applied the requested
     # target. An accepted outcome merely acknowledges the queued write.
-    if normalized_result == "confirmed" and confirmed_target_c is not None:
+    if normalized_result == "confirmed" and confirmed_target_c is not None and confirmation_scope != "profile":
         zone = upsert_zone_state(
             device_external_id,
             int(zone_id),

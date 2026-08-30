@@ -1251,6 +1251,7 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
                             "device_id": device_id,
                             "zone_id": zone_id,
                             "target_temperature_c": requested_target_c,
+                            **({"setpoint_mode": payload.setpoint_mode} if payload.setpoint_mode is not None else {}),
                         },
                         "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                     }
@@ -1265,12 +1266,22 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
                         "device_id": device_id,
                         "zone_id": zone_id,
                         "target_temperature_c": requested_target_c,
+                        "setpoint_mode": payload.setpoint_mode,
                         "source": "mobile_api",
                         "command_state": "pending_device_feedback",
                         "command_id": command_id,
                     },
                 )
-                publish_setpoint_command(device_id, zone_id, requested_target_c, command_id=command_id)
+                if payload.setpoint_mode is None:
+                    publish_setpoint_command(device_id, zone_id, requested_target_c, command_id=command_id)
+                else:
+                    publish_setpoint_command(
+                        device_id,
+                        zone_id,
+                        requested_target_c,
+                        setpoint_mode=payload.setpoint_mode,
+                        command_id=command_id,
+                    )
                 command_state = "pending_device_feedback"
             except MqttCommandError as exc:
                 raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setpoint publish failed: {exc}") from exc
@@ -1296,6 +1307,7 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
                     "device_id": device_id,
                     "zone_id": zone_id,
                     "target_temperature_c": requested_target_c,
+                    "setpoint_mode": payload.setpoint_mode,
                     "source": "mobile_api",
                     "command_state": command_state,
                     "command_id": command_id,
@@ -1305,6 +1317,7 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
             "device_id": device_id,
             "zone_id": zone_id,
             "target_temperature_c": requested_target_c,
+            "setpoint_mode": payload.setpoint_mode,
             "pending": command_state == "pending_device_feedback",
             "command_state": command_state,
             "command_id": command_id,

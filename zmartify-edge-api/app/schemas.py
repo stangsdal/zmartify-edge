@@ -399,6 +399,9 @@ class DeviceFreshnessOut(BaseModel):
 
 class MobileSetpointIn(BaseModel):
     target_temperature_c: float
+    # Firmware setpoint profiles: manual=0, comfort=1, eco=2, holiday=3,
+    # standby=4, party=5. Omitted means the active profile.
+    setpoint_mode: int | None = Field(default=None, ge=0, le=5)
 
 
 class EventOut(BaseModel):

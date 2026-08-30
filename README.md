@@ -180,6 +180,8 @@ Base URL examples:
 - GET /mobile/devices/{device_id}/zones
 - GET /mobile/devices/{device_id}/channels
 - POST /mobile/zones/{zone_ref}/setpoint
+  - body: {"target_temperature_c": 21.5} updates the active firmware profile
+  - optional `setpoint_mode`: 0 manual, 1 comfort, 2 eco, 3 holiday, 4 standby, 5 party
 - POST /mobile/zones/{zone_ref}/rename
 - GET /mobile/zones/{zone_ref}/history
 - GET /mobile/devices/{device_id}/history

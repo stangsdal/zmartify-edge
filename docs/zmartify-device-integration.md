@@ -1,7 +1,7 @@
 # Zmartify Device Integration Guide
 
-This guide covers how an ESP32-based device connects to the Zmartify Edge server,
-gets claimed, receives MQTT credentials, and receives OTA updates.
+This guide covers how an ESP32-based device connects outbound to the Zmartify
+Edge server, gets claimed, receives MQTT credentials, and receives OTA updates.
 
 ## 1. Required server settings
 
@@ -34,13 +34,41 @@ The backend exposes these endpoints for device setup:
 - `POST /devices/{device_id}/push-config`
 - `GET /devices/{device_id}/onboarding-status`
 
-Recommended sequence:
+The Edge server must not connect into the device's private LAN. The preferred
+production sequence is:
 
 1. Create the domain and site in the admin API.
-2. Discover the device using its local base URL.
-3. Claim the device with the domain, site, and optional claim token.
-4. Push configuration to the device.
-5. Verify onboarding status until MQTT is connected.
+2. Scan the device QR code in the Zmartify app and authenticate an existing
+   user or create a user account.
+3. Prepare/stage the device claim for the selected site.
+4. Connect the device to local Wi-Fi. The unclaimed device generates a short-
+   lived claim token and polls the public bootstrap endpoint over HTTPS.
+5. The Edge returns the device-admin token and MQTT credentials; the device
+   connects outbound to `mqtt.zmartify.dk:8883` and starts telemetry.
+6. Verify the device is online in the app.
+
+Local `/identity`, `/claim-token`, and `/onboarding/status` calls are bench and
+diagnostic tools only. They are not required for a customer installation.
+
+The current legacy admin screen still exposes local discovery/claim and must
+not be used as the production QR flow until it is replaced by the staged QR
+flow described above.
+
+Before treating onboarding as ready, verify that the customer's network allows
+the gateway's outbound DNS and HTTPS traffic to `api.zmartify.dk` (TCP 443)
+and outbound TLS MQTT traffic to `mqtt.zmartify.dk` (TCP 8883). No inbound NAT,
+port forward, or Edge-to-device route is required. A gateway can therefore be
+reachable from a technician's local workstation while still being unable to
+complete onboarding if its own VLAN has no Internet egress or blocks these
+destinations.
+
+The current AHC9000 firmware generates its short-lived claim token locally;
+the existing device QR material is not yet a cryptographic device-pairing
+secret. The temporary bench procedure can stage that token after local
+diagnostics, but a production QR flow should be completed by provisioning a
+factory pairing secret (or an equivalent authenticated enrollment mechanism)
+and having the device present it to the public bootstrap endpoint. A QR code
+containing only the device ID must not be treated as proof of device ownership.
 
 Example discovery request:
 

@@ -268,13 +268,17 @@ def publish_setpoint_command(
     zone_id: int,
     target_temperature_c: float,
     *,
+    setpoint_mode: int | None = None,
     command_id: str | None = None,
 ) -> None:
     legacy_payload = f"{float(target_temperature_c):.1f}"
+    parameters = {"target_temperature_c": float(target_temperature_c)}
+    if setpoint_mode is not None:
+        parameters["setpoint_mode"] = int(setpoint_mode)
     v2_payload = _build_v2_command_payload(
         command_type="hvac.zone.setpoint",
         target_ref=f"zone:{int(zone_id)}",
-        parameters={"target_temperature_c": float(target_temperature_c)},
+        parameters=parameters,
         command_id=command_id,
     )
     for topic in command_topics_for_setpoint(device_id, int(zone_id)):

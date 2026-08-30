@@ -11,6 +11,7 @@
     "detail": { "type": ["string", "null"] },
     "requested_target_temperature_c": { "type": ["number", "null"] },
     "confirmed_target_temperature_c": { "type": ["number", "null"] },
+    "confirmation_scope": { "type": "string", "enum": ["active", "profile"] },
     "source_timestamp": {
       "type": "string",
       "format": "date-time",

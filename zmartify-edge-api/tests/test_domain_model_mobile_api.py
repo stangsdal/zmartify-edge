@@ -318,6 +318,51 @@ def test_accepted_setpoint_outcome_keeps_optimistic_target_until_twin_confirmati
     assert confirmed["setpoint_command_state"] == "confirmed"
 
 
+def test_profile_setpoint_outcome_confirms_without_replacing_active_target(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT", "1")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-profile01")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
+
+    client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={"source": "firmware_periodic", "zones": [{"zone_id": 1, "target_temperature_c": 21.0}]},
+    )
+
+    import main
+
+    monkeypatch.setattr(main, "publish_setpoint_command", lambda *_args, **_kwargs: None)
+    pending = client.post(
+        f"/mobile/zones/{zone_ref}/setpoint",
+        headers=headers,
+        json={"target_temperature_c": 19.0, "setpoint_mode": 2},
+    )
+    assert pending.status_code == 200
+    command_id = pending.json()["command_id"]
+
+    confirmed = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/hvac/zones/1/setpoint-outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "command_id": command_id,
+            "result": "confirmed",
+            "source_timestamp": "2026-08-25T19:00:00Z",
+            "requested_target_temperature_c": 19.0,
+            "confirmed_target_temperature_c": 21.0,
+            "confirmation_scope": "profile",
+        },
+    )
+    assert confirmed.status_code == 200
+
+    zone = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert zone["target_temperature_c"] == 21.0
+    assert zone["setpoint_pending"] is False
+    assert zone["setpoint_command_state"] == "confirmed"
+
+
 def test_mobile_setpoint_records_pending_command_before_publish(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT", "1")
     client = _client(monkeypatch, tmp_path)
