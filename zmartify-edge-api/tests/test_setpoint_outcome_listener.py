@@ -160,6 +160,7 @@ def test_on_message_ingests_v2_setpoint_outcome(monkeypatch):
     assert args[0] == "device-a"
     assert args[1] == 3
     assert kwargs["result"] == "confirmed"
+    assert kwargs["command_id"] == "cmd-123"
     assert kwargs["requested_target_c"] == 21.5
     assert kwargs["confirmed_target_c"] == 21.0
     assert kwargs["payload"]["source"] == "mqtt_v2_setpoint_outcome"

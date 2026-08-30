@@ -196,7 +196,7 @@ def test_mobile_setpoint_forwarded_stays_pending_until_feedback(monkeypatch, tmp
     device_id = _seed_domain_site_device(client, headers, "hvac-gateway-pend01")
     zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
 
-    # Seed current device twin so there is a known applied target to preserve.
+    # Seed the controller's currently applied target.
     ingest = client.post(
         f"/devices/{device_id}/ingest/twin",
         headers=headers,
@@ -224,7 +224,7 @@ def test_mobile_setpoint_forwarded_stays_pending_until_feedback(monkeypatch, tmp
     assert isinstance(setpoint.json()["command_id"], str)
     assert setpoint.json()["command_id"].startswith("sp-")
     assert setpoint.json()["target_temperature_c"] == 22.5
-    assert setpoint.json()["zone"]["target_temperature_c"] == 21.0
+    assert setpoint.json()["zone"]["target_temperature_c"] == 22.5
     command_id = setpoint.json()["command_id"]
 
     feedback_ingest = client.post(
@@ -248,6 +248,106 @@ def test_mobile_setpoint_forwarded_stays_pending_until_feedback(monkeypatch, tmp
     feedback_events = [evt for evt in events.json() if evt["event_type"] == "zone_setpoint_feedback_received"]
     assert len(feedback_events) >= 1
     assert any(evt["payload"].get("command_id") == command_id for evt in feedback_events)
+
+
+def test_accepted_setpoint_outcome_keeps_optimistic_target_until_twin_confirmation(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT", "1")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-accepted01")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
+
+    client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={"source": "firmware_periodic", "zones": [{"zone_id": 1, "target_temperature_c": 10.5}]},
+    )
+
+    import main
+
+    monkeypatch.setattr(main, "publish_setpoint_command", lambda *_args, **_kwargs: None)
+    pending = client.post(
+        f"/mobile/zones/{zone_ref}/setpoint",
+        headers=headers,
+        json={"target_temperature_c": 21.0},
+    )
+    assert pending.status_code == 200
+    command_id = pending.json()["command_id"]
+
+    accepted = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/hvac/zones/1/setpoint-outcome",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "command_id": command_id,
+            "result": "accepted",
+            "source_timestamp": "2026-08-25T19:00:00Z",
+            "requested_target_temperature_c": 21.0,
+            "confirmed_target_temperature_c": 10.5,
+        },
+    )
+    assert accepted.status_code == 200
+
+    awaiting_twin = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert awaiting_twin["target_temperature_c"] == 21.0
+    assert awaiting_twin["setpoint_pending"] is True
+    assert awaiting_twin["setpoint_command_state"] == "pending_device_feedback"
+
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE event_log SET created_at = ? WHERE event_type = 'zone_setpoint_changed' AND zone_id = 1",
+            ("2020-01-01T00:00:00+00:00",),
+        )
+        conn.commit()
+
+    accepted_past_timeout = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert accepted_past_timeout["target_temperature_c"] == 21.0
+    assert accepted_past_timeout["setpoint_pending"] is True
+    assert accepted_past_timeout["setpoint_command_state"] == "pending_device_feedback"
+
+    confirmed_twin = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={"source": "firmware_periodic", "zones": [{"zone_id": 1, "target_temperature_c": 21.0}]},
+    )
+    assert confirmed_twin.status_code == 200
+
+    confirmed = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert confirmed["target_temperature_c"] == 21.0
+    assert confirmed["setpoint_pending"] is False
+    assert confirmed["setpoint_command_state"] == "confirmed"
+
+
+def test_mobile_setpoint_records_pending_command_before_publish(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT", "1")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-race01")
+    zone_ref = client.get(f"/devices/{device_id}/zones", headers=headers).json()[0]["zone_uuid"]
+
+    import main
+
+    published_command_ids = []
+
+    def _publish(_device_id, _zone_id, _target_temperature_c, *, command_id):
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM event_log WHERE event_type = 'zone_setpoint_changed' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        assert row is not None
+        assert f'"command_id":"{command_id}"' in row["payload_json"]
+        published_command_ids.append(command_id)
+
+    monkeypatch.setattr(main, "publish_setpoint_command", _publish)
+
+    response = client.post(
+        f"/mobile/zones/{zone_ref}/setpoint",
+        headers=headers,
+        json={"target_temperature_c": 22.5},
+    )
+
+    assert response.status_code == 200
+    assert published_command_ids == [response.json()["command_id"]]
 
 
 def test_contract_enforce_rejects_invalid_twin_timestamp(monkeypatch, tmp_path: Path):

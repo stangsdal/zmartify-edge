@@ -46,7 +46,7 @@ export function LoginPage() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [baseUrl, setBaseUrl] = useState(
-    () => localStorage.getItem('api_base_url') || 'https://pilot.zmartify.dk'
+    () => localStorage.getItem('api_base_url') || import.meta.env.VITE_API_BASE_URL || window.location.origin
   );
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState<'info' | 'error'>('info');
@@ -58,7 +58,7 @@ export function LoginPage() {
   const [siteInviteState, setSiteInviteState] = useState<SiteInvitationValidateResponse | null>(null);
   const [isInviteLoading, setIsInviteLoading] = useState(false);
   const history = useHistory();
-  const inviteOriginBaseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://pilot.zmartify.dk';
+  const inviteOriginBaseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://app.zmartify.dk';
 
   const navigateToHome = () => {
     history.replace(`${appBase}/home`);
@@ -283,7 +283,7 @@ export function LoginPage() {
             <IonInput
               value={baseUrl}
               onIonChange={(e) => setBaseUrl(e.detail.value || '')}
-              placeholder="https://pilot.zmartify.dk"
+              placeholder="https://api.zmartify.dk"
             />
 
             {!!inviteToken && (

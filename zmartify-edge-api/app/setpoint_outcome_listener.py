@@ -109,6 +109,7 @@ class SetpointOutcomeMqttListener:
             device_id,
             zone_id,
             result=normalized["result"],
+            command_id=normalized["command_id"],
             detail=normalized["detail"],
             requested_target_c=normalized["requested_target_c"],
             confirmed_target_c=normalized["confirmed_target_c"],

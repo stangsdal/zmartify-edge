@@ -74,12 +74,13 @@ def outcome_subscription_topics(device_id: str) -> list[str]:
     v2 = f"{_v2_base()}/devices/{safe_device}/events/hvac/zones/+/setpoint-outcome"
     v2_irrigation = f"{_v2_base()}/devices/{safe_device}/events/irrigation/outcome"
     v2_state = f"{_v2_base()}/devices/{safe_device}/state/reported"
+    v2_hvac_state = f"{_v2_base()}/devices/{safe_device}/state/hvac"
 
     style = _topic_style()
     if style == "v2":
-        return [v2, v2_irrigation, v2_state]
+        return [v2, v2_irrigation, v2_state, v2_hvac_state]
     if style == "dual":
-        return [legacy, v2, v2_irrigation, v2_state]
+        return [legacy, v2, v2_irrigation, v2_state, v2_hvac_state]
     return [legacy]
 
 
@@ -100,6 +101,8 @@ def parse_v2_device_event_topic(topic: str) -> tuple[str, str] | None:
     if remainder == "events/irrigation/outcome":
         return device_id, "irrigation_outcome"
     if remainder == "state/reported":
+        return device_id, "reported_state"
+    if remainder == "state/hvac":
         return device_id, "reported_state"
     return None
 

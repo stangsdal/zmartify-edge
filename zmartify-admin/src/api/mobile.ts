@@ -50,8 +50,8 @@ export interface MobileZone {
   zone_id: number;
   zone_key?: string;
   name: string;
-  mode?: number | null;
-  thermostat_mode?: number | null;
+  mode?: number | string | null;
+  thermostat_mode?: number | string | null;
   humidity?: number | null;
   window_open?: boolean | null;
   current_temperature_c?: number;

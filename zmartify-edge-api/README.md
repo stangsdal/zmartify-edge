@@ -1,18 +1,20 @@
-# zmartify-edge-api (Phases A-D implemented)
+# zmartify-edge-api
 
 This directory contains the initial backend scaffold for the Raspberry Pi edge milestone.
 
 ## What is implemented
 
 - FastAPI app entrypoint (`main.py`)
-- Startup-time SQLite migration runner
+- Startup-time database initialization and migrations
 - Migration `001_init.sql` with registry schema
 - Phase B registry CRUD endpoints for domains, sites, and devices
 - Phase C MQTT client lifecycle endpoints (create/list/get/rotate/enable/disable/delete)
 - Automatic device MQTT client provisioning on device registration
 - Phase D ACL generation from registry state with generation logging
-- Phase 1 foundation scaffolding for PostgreSQL/Timescale (`DATABASE_URL`, compose service, deps)
+- PostgreSQL/TimescaleDB runtime (`DATABASE_URL`)
 - Device-initiated bootstrap staging and MQTT-triggered pull OTA
+- Nilan Comfort 302 / CTS602 read-only state ingestion and site-authorized
+  read model at `GET /api/v2/devices/{device_id}/hvac/nilan`
 
 ## Local run (dev)
 
@@ -24,14 +26,15 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8080
 ```
 
-## Database configuration (transition mode)
+## Database configuration
 
-Current runtime remains SQLite for compatibility with the existing backend data-access layer.
+The clean v2 deployment uses PostgreSQL/TimescaleDB as its runtime database.
+SQLite is retained only as a local development fallback and is not part of the
+Raspberry Pi deployment contract.
 
 Environment variables:
 
-- `DATABASE_URL` (new): migration target wiring, used for backend metadata and upcoming SQLAlchemy/Alembic work.
-- `ZMART_EDGE_DB_PATH` (current active runtime): SQLite file path.
+- `DATABASE_URL`: PostgreSQL connection string.
 - `ZMART_EDGE_CONTRACT_VALIDATION_MODE`: `off`, `warn` (default), or `enforce`.
 
 Recommended rollout:
@@ -44,14 +47,14 @@ Example:
 
 ```bash
 export DATABASE_URL=postgresql://zmartify:<secret>@postgres-timescale:5432/zmartify
-export ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
 ```
 
-Health endpoint now reports both `db_backend` and `database_url_scheme` for rollout visibility.
+Health endpoint reports the active database backend and migration state.
 
-## Alembic baseline (Phase 1 start)
+## Migrations
 
-This repository now includes an Alembic scaffold and baseline revision:
+The repository contains the clean-install SQL migration set and an Alembic
+scaffold for the PostgreSQL schema:
 
 - `alembic.ini`
 - `alembic/env.py`
@@ -64,8 +67,6 @@ Run baseline migrate command:
 alembic upgrade head
 ```
 
-Note: the active runtime data path still uses SQLite access functions while SQLAlchemy/Alembic migration is introduced incrementally.
-
 ## Staging contract enforcement
 
 For staging environments, run compose with the staging override to force strict contract checks:
@@ -74,17 +75,7 @@ For staging environments, run compose with the staging override to force strict 
 docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --build
 ```
 
-This sets `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` for both API service variants.
-
-## Core v2 dual-write bridge (transitional)
-
-Registry write paths now perform a best-effort sync into `core_*_v2` tables when those tables exist:
-
-- domain create/rename -> `core_domains_v2`
-- site create -> `core_sites_v2`
-- device create/assign-site/rename/firmware-update -> `core_devices_v2`
-
-This bridge is intentionally non-breaking while legacy sqlite tables remain active source-of-truth.
+This sets `ZMART_EDGE_CONTRACT_VALIDATION_MODE=enforce` for the single API service.
 
 ## Compose run
 

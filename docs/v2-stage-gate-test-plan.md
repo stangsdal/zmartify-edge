@@ -5,20 +5,20 @@ Validation is done by resetting to an empty runtime and performing complete re-o
 
 ## Preconditions
 
-- Build artifacts available for `admin-ui` and `zmartify-admin`.
+- Build artifact available for `zmartify-admin` (the single deployed frontend).
 - Python environment configured for `zmartify-edge-api`.
 - Docker Engine + Compose v2 available.
 - Optional live HVAC controller reachable for contract smoke tests.
 
 ## Stage Gates
 
-### Phase 0 - Freeze and Document v1
+### Phase 0 - Clean v2 runtime and contract
 
 Checks:
 
 - Export OpenAPI from running API: `GET /openapi.json`.
 - Capture current MQTT topic map and onboarding/OTA notes.
-- Keep sqlite backup only for reference (no data migration usage).
+- Confirm the deployment starts with empty PostgreSQL/TimescaleDB volumes.
 
 Exit artifact:
 
@@ -29,6 +29,7 @@ Exit artifact:
 Checks:
 
 - `docker compose -f docker-compose.yml -f docker-compose.staging.yml config` succeeds.
+- Only one API service is present; `http-redirect` handles port 80 without running a second API.
 - Alembic migrations run on empty DB:
   - `alembic upgrade head`
 - Health endpoint available after compose up.
@@ -43,7 +44,7 @@ Checks (greenfield API flow):
 
 - Create domain, site, device from empty runtime.
 - Assign device to site.
-- Verify dual-write rows exist in `core_*_v2` tables.
+- Verify canonical domain/site/device rows and site memberships are created.
 - Verify auth/admin routes still function.
 
 Exit artifact:

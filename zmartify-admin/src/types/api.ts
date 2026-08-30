@@ -102,6 +102,29 @@ export interface DeviceFreshness {
   }>;
 }
 
+export interface NilanHvacState {
+  device_id: string;
+  available: boolean;
+  source_timestamp?: string | null;
+  online?: boolean | null;
+  controller_online?: boolean | null;
+  freshness_age_ms?: number | null;
+  run?: boolean | null;
+  ventilation_level?: number | null;
+  actual_inlet_level?: number | null;
+  actual_exhaust_level?: number | null;
+  room_temperature_c?: number | null;
+  inlet_temperature_c?: number | null;
+  outlet_temperature_c?: number | null;
+  extract_temperature_c?: number | null;
+  humidity_pct?: number | null;
+  co2_ppm?: number | null;
+  filter_days_remaining?: number | null;
+  status?: string | null;
+  poll_requests?: number | null;
+  poll_responses?: number | null;
+}
+
 export interface DeviceControllerSettings {
   device_id: string;
   local_url: string;

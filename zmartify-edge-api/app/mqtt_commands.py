@@ -157,10 +157,16 @@ def _is_v2_command_topic(topic: str) -> bool:
     return "/commands/" in str(topic)
 
 
-def _build_v2_command_payload(*, command_type: str, target_ref: str | None, parameters: dict) -> str:
+def _build_v2_command_payload(
+    *,
+    command_type: str,
+    target_ref: str | None,
+    parameters: dict,
+    command_id: str | None = None,
+) -> str:
     payload = {
         "schema_version": "2.0",
-        "command_id": f"cmd-{uuid.uuid4().hex[:16]}",
+        "command_id": str(command_id or f"cmd-{uuid.uuid4().hex[:16]}"),
         "command_type": command_type,
         "target_ref": target_ref,
         "parameters": parameters,
@@ -257,12 +263,19 @@ def publish_irrigation_command(
     return {"command_id": command_id, "status": "published", "topic": topic}
 
 
-def publish_setpoint_command(device_id: str, zone_id: int, target_temperature_c: float) -> None:
+def publish_setpoint_command(
+    device_id: str,
+    zone_id: int,
+    target_temperature_c: float,
+    *,
+    command_id: str | None = None,
+) -> None:
     legacy_payload = f"{float(target_temperature_c):.1f}"
     v2_payload = _build_v2_command_payload(
         command_type="hvac.zone.setpoint",
         target_ref=f"zone:{int(zone_id)}",
         parameters={"target_temperature_c": float(target_temperature_c)},
+        command_id=command_id,
     )
     for topic in command_topics_for_setpoint(device_id, int(zone_id)):
         _publish_to_topic(device_id, topic, v2_payload if _is_v2_command_topic(topic) else legacy_payload)

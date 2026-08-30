@@ -77,6 +77,8 @@ export function App() {
   const location = useLocation();
   const { context, isAdministrator, isAuthenticated, isLoading, selectedSiteId, siteSelectionVersion } = useAccess();
   const appBase = '/app';
+  const isAdminHost = typeof window !== 'undefined' && window.location.hostname === 'admin.zmartify.dk';
+  const defaultAuthenticatedPath = isAdminHost ? `${appBase}/dashboard` : `${appBase}/home`;
   const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`];
   const isPublicRoute = publicRoutePrefixes.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
@@ -544,8 +546,8 @@ export function App() {
               render={() => requireAuth(<NotificationsPage />)}
           />
 
-          <Route exact path="/" render={() => <Redirect to={`${appBase}/home`} />} />
-          <Route exact path={appBase} render={() => <Redirect to={`${appBase}/home`} />} />
+          <Route exact path="/" render={() => <Redirect to={defaultAuthenticatedPath} />} />
+          <Route exact path={appBase} render={() => <Redirect to={defaultAuthenticatedPath} />} />
       </IonRouterOutlet>
 
       {!isPublicRoute && <ResponsiveNavigation appBase={appBase} />}

@@ -1,6 +1,15 @@
 
 # Zmartify Edge – Site-Scoped Roles, Product Access and Navigation Simplification
 
+**Status:** Approved implementation baseline
+**Deployment:** one Ionic React frontend with `app.zmartify.dk` and `admin.zmartify.dk` entry points
+**Data model:** clean v2 install; no historical-data compatibility required
+
+The two hostnames are presentation entry points to one application, not two
+security domains. The backend remains the enforcement point for site and
+product access. Only `administrator` is global; `owner`, `user` and `viewer`
+are site-scoped roles.
+
 ## Objective
 
 Redesign and implement the authorization and navigation model in:

@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import (
@@ -86,6 +86,7 @@ from app.router_v2_device_ota import create_device_ota_v2_router
 from app.router_v2_device_lifecycle import create_device_lifecycle_v2_router
 from app.router_v2_device_bootstrap import create_device_bootstrap_v2_router
 from app.router_v2_device_domain import create_device_domain_v2_router
+from app.router_v2_nilan import create_nilan_v2_router
 from app.router_v2_mobile_events import create_mobile_events_v2_router
 from app.router_v2_mobile_ws import create_mobile_ws_v2_router
 from app.router_v2_mqtt_clients import create_mqtt_clients_v2_router
@@ -125,8 +126,8 @@ from app.schemas import (
 
 app = FastAPI(title="Zmartify Edge API", version="0.1.0")
 
-_REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
-_REQUIRED_PUBLIC_MQTT_URI = "mqtts://pilot.zmartify.dk:8883"
+_DEFAULT_PUBLIC_EDGE_URL = "https://api.zmartify.dk"
+_DEFAULT_PUBLIC_MQTT_URI = "mqtts://mqtt.zmartify.dk:8883"
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events", "/api")
 _PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
@@ -221,24 +222,8 @@ def _create_spa_handler(dist_path: Path):
     return handler
 
 
-# Admin UI (React) at /ui
-admin_ui_dist_candidates = [
-    Path("/admin-ui/dist"),
-    Path(__file__).resolve().parent / "admin-ui" / "dist",
-    Path(__file__).resolve().parent.parent / "admin-ui" / "dist",
-]
-for admin_ui_dist in admin_ui_dist_candidates:
-    if admin_ui_dist.exists():
-        assets_dir = admin_ui_dist / "assets"
-        if assets_dir.exists():
-            app.mount("/ui/assets", StaticFiles(directory=assets_dir), name="admin-ui-assets")
-
-        app.add_api_route("/ui", _create_spa_handler(admin_ui_dist), methods=["GET"])
-        app.add_api_route("/ui/", _create_spa_handler(admin_ui_dist), methods=["GET"])
-        app.add_api_route("/ui/{path:path}", _create_spa_handler(admin_ui_dist), methods=["GET"])
-        break
-
-# Ionic PWA (Ionic React) at /app
+# The Ionic app is the only deployed frontend. It serves both the user and
+# administrator entry points; authorization remains enforced by the API.
 ionic_pwa_dist_candidates = [
     Path("/zmartify-admin/dist"),
     Path("/app-dist"),
@@ -255,6 +240,14 @@ for ionic_pwa_dist in ionic_pwa_dist_candidates:
         app.add_api_route("/app/", _create_spa_handler(ionic_pwa_dist), methods=["GET"])
         app.add_api_route("/app/{path:path}", _create_spa_handler(ionic_pwa_dist), methods=["GET"])
         break
+
+
+@app.get("/", include_in_schema=False)
+def frontend_entrypoint(request: Request) -> RedirectResponse:
+    """Give each public hostname a useful default without duplicating apps."""
+    host = (request.headers.get("host") or "").split(":", 1)[0].lower()
+    target = "/app/dashboard" if host == "admin.zmartify.dk" else "/app/home"
+    return RedirectResponse(target, status_code=307)
 
 
 def _is_protected_path(path: str) -> bool:
@@ -559,6 +552,7 @@ app.include_router(create_legacy_mobile_telemetry_router(_resolve_device_site_pk
 app.include_router(create_auth_users_v2_router(_require_roles))
 app.include_router(create_mqtt_clients_v2_router())
 app.include_router(create_mqtt_ingest_v2_router(_require_roles, _publish_zone_state_update))
+app.include_router(create_nilan_v2_router(_resolve_device_site_pk_id))
 app.include_router(create_mobile_events_v2_router())
 app.include_router(create_realtime_ws_v2_router(realtime_topic_hub))
 app.include_router(create_irrigation_v2_router(_resolve_device_site_pk_id))
@@ -578,18 +572,14 @@ app.include_router(
 
 def _edge_public_base_url(request: Request) -> str:
     _ = request
-    configured = os.getenv("ZMART_EDGE_PUBLIC_API_BASE", "").strip()
-    if configured.rstrip("/") == _REQUIRED_PUBLIC_EDGE_URL:
-        return _REQUIRED_PUBLIC_EDGE_URL
-    return _REQUIRED_PUBLIC_EDGE_URL
+    configured = os.getenv("ZMART_EDGE_PUBLIC_API_BASE", _DEFAULT_PUBLIC_EDGE_URL).strip()
+    return configured.rstrip("/") or _DEFAULT_PUBLIC_EDGE_URL
 
 
 def _edge_public_mqtt_uri(request: Request) -> str:
     _ = request
-    configured = os.getenv("ZMART_EDGE_PUBLIC_MQTT_URI", "").strip()
-    if configured == _REQUIRED_PUBLIC_MQTT_URI:
-        return _REQUIRED_PUBLIC_MQTT_URI
-    return _REQUIRED_PUBLIC_MQTT_URI
+    configured = os.getenv("ZMART_EDGE_PUBLIC_MQTT_URI", _DEFAULT_PUBLIC_MQTT_URI).strip()
+    return configured or _DEFAULT_PUBLIC_MQTT_URI
 
 
 def _build_device_push_payload(request: Request, device_id: str, claim_token: str | None) -> dict:
@@ -1265,7 +1255,22 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
                         "requested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                     }
                 )
-                publish_setpoint_command(device_id, zone_id, requested_target_c)
+                log_event(
+                    "zone_setpoint_changed",
+                    domain_id=context.get("domain_id"),
+                    site_id=context.get("site_id"),
+                    device_pk_id=context["id"],
+                    zone_id=zone_id,
+                    payload={
+                        "device_id": device_id,
+                        "zone_id": zone_id,
+                        "target_temperature_c": requested_target_c,
+                        "source": "mobile_api",
+                        "command_state": "pending_device_feedback",
+                        "command_id": command_id,
+                    },
+                )
+                publish_setpoint_command(device_id, zone_id, requested_target_c, command_id=command_id)
                 command_state = "pending_device_feedback"
             except MqttCommandError as exc:
                 raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setpoint publish failed: {exc}") from exc
@@ -1280,21 +1285,22 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
                 source="mobile_api",
             )
             _publish_zone_state_update(device_id, zone)
-        log_event(
-            "zone_setpoint_changed",
-            domain_id=context.get("domain_id"),
-            site_id=context.get("site_id"),
-            device_pk_id=context["id"],
-            zone_id=zone_id,
-            payload={
-                "device_id": device_id,
-                "zone_id": zone_id,
-                "target_temperature_c": requested_target_c,
-                "source": "mobile_api",
-                "command_state": command_state,
-                "command_id": command_id,
-            },
-        )
+        if command_state != "pending_device_feedback":
+            log_event(
+                "zone_setpoint_changed",
+                domain_id=context.get("domain_id"),
+                site_id=context.get("site_id"),
+                device_pk_id=context["id"],
+                zone_id=zone_id,
+                payload={
+                    "device_id": device_id,
+                    "zone_id": zone_id,
+                    "target_temperature_c": requested_target_c,
+                    "source": "mobile_api",
+                    "command_state": command_state,
+                    "command_id": command_id,
+                },
+            )
         return {
             "device_id": device_id,
             "zone_id": zone_id,
@@ -1343,5 +1349,3 @@ def mobile_rename_zone(zone_ref: str, payload: ZoneRenameIn, request: Request) -
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-

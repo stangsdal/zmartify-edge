@@ -1,366 +1,183 @@
-# Zmartify Edge Raspberry Pi 4 Setup Guide
+# Zmartify Edge - Raspberry Pi clean v2 installation
 
-This guide is now maintained in the `zmartify-edge` repository.
+This is the canonical installation guide for the new Edge runtime. It assumes
+an empty deployment and does not restore historical SQLite or PostgreSQL data.
 
-- Repository scope: edge control plane (API, admin UI, broker, deployment)
-- Firmware (ESP32) remains in the separate `hvac-gateway` repository
-- Recommended local clone path: `~/zmartify-edge`
+## Target
 
-## Production Public Endpoints (Confirmed)
+Use a Raspberry Pi 4 or 5 with 4 GB RAM or more, 64-bit Raspberry Pi OS Lite,
+Ethernet and preferably an SSD. Configure a fixed DHCP reservation and the
+hostname `zmartify-edge`.
 
-Use these public endpoints for deployed environments:
+Public DNS records should point to the Pi (or its reverse proxy):
 
-- Edge API base URL: `https://pilot.zmartify.dk`
-- MQTT broker URI (TLS): `mqtts://mqtt.pilot.zmartify.dk:8883`
-
-For device onboarding payloads, ensure backend env vars are set accordingly:
-
-```bash
-ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
+```text
+app.zmartify.dk    user application
+admin.zmartify.dk  system administration
+api.zmartify.dk    API and web assets
+mqtt.zmartify.dk   MQTT over TLS
 ```
 
-Note: local IP examples elsewhere in this guide are for LAN diagnostics and direct ESP32 access only.
+The TLS certificate must cover all four names. Certbot stores the source
+certificate under `/etc/letsencrypt/live/app.zmartify.dk/`; a deploy hook copies
+the active certificate into the project’s `acme/` mount with restricted
+permissions. Standalone renewal briefly stops the HTTP redirect container so
+Certbot can bind port 80. A wildcard certificate for `*.zmartify.dk` is also
+suitable.
 
-## 1. Recommended Hardware
-
-Use:
-
-* Raspberry Pi 4, 4 GB or 8 GB RAM
-* Raspberry Pi OS Lite 64-bit
-* Ethernet connection preferred
-* Good quality power supply
-* 32 GB+ SD card or SSD
-
-Use 64-bit Raspberry Pi OS if possible. Docker’s official Raspberry Pi OS docs note that 32-bit support is more limited going forward.
-
----
-
-## 2. Prepare Raspberry Pi OS
-
-Update system:
+## Operating-system preparation
 
 ```bash
 sudo apt update
-sudo apt upgrade -y
-sudo reboot
-```
-
-Install useful tools:
-
-```bash
-sudo apt install -y git curl vim jq ufw
-```
-
-Set hostname:
-
-```bash
+sudo apt full-upgrade -y
+sudo apt install -y git curl jq ufw ca-certificates
 sudo raspi-config
 ```
 
-Suggested hostname:
+Enable SSH, set the hostname, select the correct timezone, and reboot. Keep
+the Pi on Ethernet. SSH is a management-plane service and must be allowed only
+from the trusted management networks `192.168.1.0/24` and `192.168.14.0/24`.
+Do not allow SSH from `192.168.20.0/24`; that subnet contains other DMZ
+servers. TCP ports 80, 443 and 8883 are handled separately below.
 
-```text
-hvac-edge
-```
-
----
-
-## 3. Install Docker
-
-Use Docker’s official install path for Raspberry Pi OS.
-
-Quick development install:
+## Docker and checkout
 
 ```bash
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-```
-
-Allow your user to run Docker:
-
-```bash
-sudo usermod -aG docker $USER
+curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+sudo sh /tmp/get-docker.sh
+sudo usermod -aG docker "$USER"
 sudo reboot
 ```
 
-Verify:
+After reboot:
 
 ```bash
-docker version
-docker compose version
+git clone https://github.com/stangsdal/zmartify-edge.git ~/zmartify-edge
+cd ~/zmartify-edge
+cp .env.example .env
+mkdir -p mosquitto/config mosquitto/data mosquitto/log zmartify-admin/dist
 ```
 
----
+Edit `.env` and replace every `replace-with-...` value. Do not commit `.env`.
 
-## 4. Create Project Folder
+## Build and start
 
-Use `~/hvac-edge` as the runtime/deploy folder on the Raspberry Pi for compatibility with existing service scripts.
-You can still keep the source repository cloned as `~/zmartify-edge` on your development machine.
+Build the one active frontend:
 
 ```bash
-mkdir -p ~/hvac-edge
-cd ~/hvac-edge
+cd zmartify-admin
+npm ci
+npm run build
+cd ..
 ```
 
-Create folders:
+Validate the merged Compose configuration, then start the clean runtime:
 
 ```bash
-mkdir -p mosquitto/config
-mkdir -p mosquitto/data
-mkdir -p mosquitto/log
-mkdir -p zmartify-edge-api
-mkdir -p caddy
+docker compose config >/tmp/zmartify-edge-compose.yml
+docker compose up -d --build
 ```
 
----
+The runtime contains one API process, PostgreSQL/TimescaleDB, Mosquitto, a
+backup sidecar, and an HTTP-to-HTTPS redirect. There is no second API process
+and no deployed legacy `admin-ui` bundle.
 
-## 5. Create Mosquitto Config
-
-The official Mosquitto Docker image supports mounting custom config at `/mosquitto/config`.
-
-Create:
-
-```bash
-nano mosquitto/config/mosquitto.conf
-```
-
-Paste:
-
-```conf
-persistence true
-persistence_location /mosquitto/data/
-
-log_dest file /mosquitto/log/mosquitto.log
-log_dest stdout
-
-allow_anonymous false
-password_file /mosquitto/config/passwd
-acl_file /mosquitto/config/acl
-
-listener 1883
-protocol mqtt
-
-# Future:
-# listener 8883
-# protocol mqtt
-# cafile /mosquitto/config/ca.crt
-# certfile /mosquitto/config/server.crt
-# keyfile /mosquitto/config/server.key
-```
-
----
-
-## 6. Create MQTT Users
-
-Create password file using the Mosquitto container:
-
-```bash
-docker run --rm -it \
-  -v "$PWD/mosquitto/config:/mosquitto/config" \
-  eclipse-mosquitto \
-  mosquitto_passwd -c /mosquitto/config/passwd esp32_hvac
-```
-
-Add Home Assistant user:
-
-```bash
-docker run --rm -it \
-  -v "$PWD/mosquitto/config:/mosquitto/config" \
-  eclipse-mosquitto \
-  mosquitto_passwd /mosquitto/config/passwd homeassistant_house
-```
-
-Add admin user:
-
-```bash
-docker run --rm -it \
-  -v "$PWD/mosquitto/config:/mosquitto/config" \
-  eclipse-mosquitto \
-  mosquitto_passwd /mosquitto/config/passwd admin
-```
-
----
-
-## 7. Create MQTT ACL File
-
-Create:
-
-```bash
-nano mosquitto/config/acl
-```
-
-Paste initial lab ACL:
-
-```conf
-user esp32_hvac
-topic readwrite homie/5/+/#
-
-user homeassistant_house
-topic read homie/5/#
-topic write homie/5/+/+/target-temperature/set
-
-user admin
-topic readwrite #
-```
-
-> **Note:** Mosquitto ACL wildcards must be standalone level components per the MQTT spec. `hvac-gateway-+` is invalid; use `+` per level. Later, replace with per-device and per-domain ACLs once dynamic security is enabled.
-
----
-
-## 8. Create Docker Compose File
-
-Create:
-
-```bash
-nano docker-compose.yml
-```
-
-Paste:
-
-```yaml
-services:
-  mosquitto:
-    image: eclipse-mosquitto:latest
-    container_name: hvac-mosquitto
-    restart: unless-stopped
-    ports:
-      - "8883:1883"
-    volumes:
-      - ./mosquitto/config:/mosquitto/config
-      - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
-
-  zmartify-edge-api:
-    image: python:3.12-slim
-    container_name: zmartify-edge-api
-    restart: unless-stopped
-    working_dir: /app
-    command: sh -c "pip install fastapi uvicorn paho-mqtt && uvicorn main:app --host 0.0.0.0 --port 8080"
-    ports:
-      - "443:8080"
-    volumes:
-      - ./zmartify-edge-api:/app
-    environment:
-      - MQTT_HOST=mosquitto
-      - MQTT_PORT=1883
-    depends_on:
-      - mosquitto
-```
-
----
-
-## 9. Create Minimal Edge API
-
-Create:
-
-```bash
-nano zmartify-edge-api/main.py
-```
-
-Paste:
-
-```python
-from fastapi import FastAPI
-import os
-
-app = FastAPI(title="HVAC Edge API")
-
-@app.get("/health")
-def health():
-    return {
-        "ok": True,
-        "service": "zmartify-edge-api",
-        "mqtt_host": os.getenv("MQTT_HOST", "mosquitto")
-    }
-
-@app.get("/mqtt/status")
-def mqtt_status():
-    return {
-        "configured": True,
-        "host": os.getenv("MQTT_HOST", "mosquitto"),
-        "port": int(os.getenv("MQTT_PORT", "1883"))
-    }
-```
-
----
-
-## 10. Start Backend
-
-```bash
-docker compose up -d
-```
-
-Check containers:
+## First checks
 
 ```bash
 docker compose ps
+curl -k https://127.0.0.1/health
+curl -k https://127.0.0.1/health/ready
+curl -k https://127.0.0.1/registry/status
+docker compose logs --tail=100 zmartify-edge-api
 ```
 
-View logs:
+Verify externally after DNS and certificate installation:
 
 ```bash
-docker compose logs -f mosquitto
+curl -I https://app.zmartify.dk/
+curl -I https://admin.zmartify.dk/
+curl https://api.zmartify.dk/health
 ```
 
-Check API:
+The web clients use their current HTTPS host for API calls by default, so no
+browser CORS configuration is required. `api.zmartify.dk` is the canonical
+machine-facing API hostname.
+
+The first administrator is created by the application bootstrap flow. Use
+`admin.zmartify.dk` for system setup, then create sites and invite site users.
+Normal users should use `app.zmartify.dk` and can only see sites and products
+allowed by their active site memberships.
+
+Install the certificate hooks on the Pi:
 
 ```bash
-curl http://localhost:8080/health
+sudo install -m 0755 scripts/deploy_certbot_cert.sh \
+  /etc/letsencrypt/renewal-hooks/deploy/zmartify-edge.sh
+sudo install -m 0755 scripts/certbot-pre-stop-http-redirect.sh \
+  /etc/letsencrypt/renewal-hooks/pre/zmartify-edge-stop-http.sh
+sudo install -m 0755 scripts/certbot-post-start-http-redirect.sh \
+  /etc/letsencrypt/renewal-hooks/post/zmartify-edge-start-http.sh
+sudo certbot renew --dry-run
 ```
 
-From another machine:
+## MQTT and firewall
+
+The broker accepts internal MQTT on the Docker network and public TLS MQTT on
+8883. Do not expose PostgreSQL or port 1883 on the host. The application
+generates the broker ACL from the device/site registry.
+
+Example firewall baseline:
 
 ```bash
-curl http://<raspberry-pi-ip>:8080/health
+sudo ufw default deny incoming
+sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp
+sudo ufw allow from 192.168.14.0/24 to any port 22 proto tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 8883/tcp
+sudo ufw enable
 ```
 
----
+There must be no SSH allow rule for `192.168.20.0/24`. UFW rule order is not
+the design control here; the intended policy is that incoming traffic is denied
+by default and only the two listed management subnets are allowed to TCP/22.
+If an older broader SSH rule exists, remove it before enabling the baseline.
 
-## 11. Test MQTT Broker
-
-Subscribe:
+Raspberry Pi Connect is separate from this inbound SSH policy. It normally
+uses connections initiated by the Pi to Raspberry Pi Connect services rather
+than requiring port 22 to be reachable from the DMZ. Preserve outbound access
+for HTTPS/WebSocket on TCP 443 and, where required by the network, the
+documented STUN/TURN ports. Validate on the Pi with:
 
 ```bash
-docker exec -it hvac-mosquitto mosquitto_sub \
-  -h localhost \
-  -u admin \
-  -P '<admin-password>' \
-  -t 'homie/5/#' \
-  -v
+rpi-connect doctor
 ```
 
-Publish test message in another terminal:
+If Raspberry Pi Connect is used as a recovery path, test it independently; do
+not widen the SSH rule to the DMZ subnet just to support Connect.
+
+## Backups and operations
+
+The `edge-db-backup` service writes PostgreSQL dumps to its Docker volume.
+Run and inspect a restore drill regularly:
 
 ```bash
-docker exec -it hvac-mosquitto mosquitto_pub \
-  -h localhost \
-  -u admin \
-  -P '<admin-password>' \
-  -t 'homie/5/test-device/$state' \
-  -m 'ready' \
-  -r
+docker compose run --rm --entrypoint bash edge-db-backup \
+  /usr/local/bin/backup_edge_db.sh backup --backend postgres --out /backups --keep 14
+docker compose run --rm --entrypoint bash edge-db-backup \
+  /usr/local/bin/backup_edge_db.sh restore-drill --backend postgres --out /backups
 ```
 
-Expected subscriber output:
+Useful commands:
 
-```text
-homie/5/test-device/$state ready
+```bash
+docker compose logs --tail=200 zmartify-edge-api
+docker compose logs --tail=200 mosquitto
+docker compose restart zmartify-edge-api
+docker compose up -d --build zmartify-edge-api
 ```
 
----
-
-## 12. Device Integration Guide
-
-Device onboarding, MQTT topic conventions, and OTA procedures now live in [docs/zmartify-device-integration.md](docs/zmartify-device-integration.md).
-
-That guide is the source of truth for firmware developers building IoT devices
-against this server.
-
----
-
-## 13. Legacy Notes
-
-This file is preserved as a broader deployment reference for Raspberry Pi and
-broker setup. For new device firmware work, use the integration guide above so
-the onboarding flow stays aligned with the current API.
+For a clean reinstall, stop the stack and replace the deployment directory
+only after confirming that no data is needed. This guide does not prescribe
+deleting volumes; that is an explicit operator decision.

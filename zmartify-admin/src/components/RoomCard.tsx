@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion';
-import { IonButton } from '@ionic/react';
+import { IonButton, IonIcon } from '@ionic/react';
+import { ellipsisVerticalOutline } from 'ionicons/icons';
 import { HealthBadge } from './HealthBadge';
 import { TemperatureBadge } from './TemperatureBadge';
 import { MobileZone } from '../api/mobile';
+import { displayHvacMode } from '../utils/hvacMode';
 
 interface RoomCardProps {
   zone: MobileZone;
@@ -24,21 +26,39 @@ function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | '
 export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, canOperate, canConfigure }: RoomCardProps) {
   const state = zoneState(zone);
   const zoneKey = zone.zone_key || `zone-${zone.zone_id}`;
-  const description = zone.name === zoneKey ? '' : zone.name;
+  const displayName = zone.name && zone.name !== zoneKey ? zone.name : zoneKey;
+  const mode = displayHvacMode(zone.thermostat_mode ?? zone.mode, Boolean(zone.demand ?? zone.active));
   return (
     <motion.div
       whileHover={{ y: -2 }}
       className="w-full text-left rounded-2xl p-4 app-surface shadow-soft border border-slate-100 min-h-[120px]"
     >
-      <button type="button" onClick={onOpen} className="w-full text-left flex items-start justify-between">
+      <div className="w-full text-left flex items-start justify-between gap-3">
         <div>
-          <p className="text-base font-semibold">{zoneKey}</p>
-          {description ? <p className="text-sm text-muted mt-1">{description}</p> : null}
+          <p className="text-base font-semibold">{displayName}</p>
           <p className="text-xs text-muted mt-1">Target {zone.target_temperature_c?.toFixed(1) ?? '--'}°C</p>
         </div>
-        <HealthBadge label={state.label} tone={state.tone} />
+        <div className="flex items-center gap-2">
+          <HealthBadge label={state.label} tone={state.tone} />
+          <details className="relative" onClick={(event) => event.stopPropagation()}>
+            <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-muted hover:bg-slate-100" aria-label={`More options for ${displayName}`}>
+              <IonIcon icon={ellipsisVerticalOutline} aria-hidden="true" />
+            </summary>
+            <div className="absolute right-0 top-12 z-10 min-w-[150px] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+              <button type="button" className="menu-action" onClick={onOpen}>Open thermostat</button>
+              <button type="button" className="menu-action" onClick={onHistory}>History</button>
+              {canConfigure ? <button type="button" className="menu-action" onClick={onRename}>Rename zone</button> : null}
+            </div>
+          </details>
+        </div>
+      </div>
+      <button type="button" onClick={onOpen} className="mt-3 w-full text-left">
+        <div className="flex items-center justify-between gap-3">
+          <TemperatureBadge value={zone.current_temperature_c} />
+          <span className={`thermostat-mode thermostat-mode--${mode.toLowerCase()}`}>{mode}</span>
+        </div>
       </button>
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-3 flex items-center justify-end gap-3">
         <div className="flex items-center gap-1">
           {canOperate ? <IonButton
             size="small"
@@ -48,9 +68,6 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
           >
             −
           </IonButton> : null}
-          <button type="button" onClick={onOpen}>
-            <TemperatureBadge value={zone.current_temperature_c} />
-          </button>
           {canOperate ? <IonButton
             size="small"
             fill="clear"
@@ -60,14 +77,6 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
             +
           </IonButton> : null}
         </div>
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        {canConfigure ? <IonButton size="small" fill="outline" onClick={(e) => { e.stopPropagation(); onRename(); }}>
-          Rename
-        </IonButton> : null}
-        <IonButton size="small" fill="outline" onClick={(e) => { e.stopPropagation(); onHistory(); }}>
-          History
-        </IonButton>
       </div>
     </motion.div>
   );

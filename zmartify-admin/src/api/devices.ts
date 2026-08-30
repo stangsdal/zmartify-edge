@@ -8,6 +8,7 @@ import {
   DeviceControllerSettingsUpdate,
   DeviceDiscovery,
   DeviceFreshness,
+  NilanHvacState,
   DeviceSdCardStatus,
 } from '../types/api';
 
@@ -18,6 +19,9 @@ export const deviceApi = {
 
   getFreshness: (deviceId: string): Promise<DeviceFreshness> =>
     apiClient.get(`/mobile/devices/${deviceId}/freshness`),
+
+  getNilanState: (deviceId: string): Promise<NilanHvacState> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/hvac/nilan`),
   
   create: (
     deviceId: string,

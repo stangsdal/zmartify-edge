@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { displayHvacMode } from '../utils/hvacMode';
 
 interface ThermostatDialProps {
   value: number;
@@ -11,7 +12,8 @@ interface ThermostatDialProps {
   roomName?: string;
   statusLabel?: string;
   heating?: boolean;
-  thermostatMode?: number | null;
+  thermostatMode?: number | string | null;
+  theme?: 'classical' | 'gunmalmg';
   min?: number;
   max?: number;
   step?: number;
@@ -25,6 +27,7 @@ export function ThermostatDial({
   statusLabel,
   heating = false,
   thermostatMode = null,
+  theme = 'classical',
   min = 5,
   max = 35,
   step = 0.5,
@@ -57,18 +60,7 @@ export function ThermostatDial({
   const secondaryColor = heating ? '#ffb08f' : 'rgba(255,255,255,0.65)';
   const deltaColor = clampedSetpoint >= clampedMeasuredTemp ? '#FF6A2B' : '#67FBFF';
   const markerTemps = [5, 10, 15, 20, 25, 30, 35];
-  const modeMap: Record<number, string> = {
-    0: 'MANUAL',
-    1: 'STANDBY',
-    2: 'ECO',
-    3: 'COMFORT',
-  };
-  const modeLabel =
-    typeof thermostatMode === 'number' && thermostatMode in modeMap
-      ? modeMap[thermostatMode]
-      : heating
-        ? 'COMFORT'
-        : 'MANUAL';
+  const modeLabel = displayHvacMode(thermostatMode, heating);
 
   const tempToAngle = (temp: number): number => {
     const normalized = (temp - 20) / 15;
@@ -84,6 +76,45 @@ export function ThermostatDial({
   const fullScalePath = describeArc(scaleStartAngle, scaleEndAngle);
   const bandPath = describeArc(bandStartAngle, bandEndAngle);
   const showBand = Math.abs(bandEndTemp - bandStartTemp) > 0.05;
+
+  if (theme === 'gunmalmg') {
+    return (
+      <div className="thermostat-card thermostat-card--gunmalmg">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="thermostat-card__eyebrow">{roomName || 'Thermostat'}</p>
+            <p className="thermostat-card__status">{heating ? 'Heating' : statusLabel || 'Idle'}</p>
+          </div>
+          <span className={`thermostat-mode thermostat-mode--${modeLabel.toLowerCase()}`}>{modeLabel}</span>
+        </div>
+        <div className="mt-6 flex items-end justify-between gap-4">
+          <div>
+            <p className="thermostat-card__temperature">
+              {currentTemperature == null ? '--' : currentTemperature.toFixed(1)}<span>°C</span>
+            </p>
+            <p className="thermostat-card__target">Target {value.toFixed(1)}°C</p>
+          </div>
+          <div className="thermostat-card__signal" aria-label={heating ? 'Heating on' : 'Heating off'}>
+            <span className={heating ? 'is-active' : ''} />
+            {heating ? 'ON' : 'OFF'}
+          </div>
+        </div>
+        <div className="thermostat-slider mt-6">
+          <div className="thermostat-slider__track" />
+          <div className="thermostat-slider__fill" style={{ width: `${clampedRatio * 100}%` }} />
+          <input
+            aria-label="Temperature dial"
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative mx-auto w-full max-w-[360px] overflow-hidden rounded-[2rem] border border-white/10 hero-glow bg-[radial-gradient(circle_at_top,rgba(103,251,255,0.16),transparent_38%),linear-gradient(180deg,rgba(21,28,44,0.92),rgba(21,28,44,0.78))] p-5 text-white shadow-2xl">
@@ -154,7 +185,7 @@ export function ThermostatDial({
             {value.toFixed(1)}°C
           </p>
           <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em]" style={{ color: deltaColor }}>
-            Mode {modeLabel}
+            {modeLabel}
           </p>
         </div>
       </div>

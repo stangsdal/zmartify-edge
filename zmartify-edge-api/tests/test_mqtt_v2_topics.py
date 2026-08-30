@@ -20,9 +20,19 @@ def test_dual_topic_mode(monkeypatch):
     setpoint_topics = command_topics_for_setpoint("dev-1", 2)
     assert "homie/5/dev-1/zone-2/target-temperature/set" in setpoint_topics
     assert "zmartify/v2/devices/dev-1/commands/hvac/zones/2/setpoint" in setpoint_topics
+    assert "zmartify/v2/devices/dev-1/state/hvac" in outcome_subscription_topics("dev-1")
 
 
 def test_parse_setpoint_outcome_topics_for_both_styles():
     assert parse_setpoint_outcome_topic("homie/5/dev-1/zone-2/last-setpoint-command") == ("dev-1", 2)
     assert parse_setpoint_outcome_topic("zmartify/v2/devices/dev-1/events/hvac/zones/2/setpoint-outcome") == ("dev-1", 2)
     assert parse_setpoint_outcome_topic("invalid") is None
+
+
+def test_parse_nilan_hvac_state_topic():
+    from app.mqtt_v2_topics import parse_v2_device_event_topic
+
+    assert parse_v2_device_event_topic("zmartify/v2/devices/zmartify-hvac-nilan-aabbcc/state/hvac") == (
+        "zmartify-hvac-nilan-aabbcc",
+        "reported_state",
+    )

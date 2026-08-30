@@ -13,7 +13,7 @@ import {
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { deviceApi } from '../api/devices';
-import { Device, DeviceControllerSettings, DeviceSdCardStatus } from '../types/api';
+import { Device, DeviceControllerSettings, DeviceSdCardStatus, NilanHvacState } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
 import { ZoneCard } from '../components/ZoneCard';
 import { AppHeader } from '../components/AppHeader';
@@ -26,6 +26,66 @@ const isIrrigationDevice = (device: Device): boolean => {
     .toLowerCase();
   return haystack.includes('irrigation');
 };
+
+const isNilanDevice = (device: Device): boolean => {
+  const haystack = [device.device_id, device.display_name, device.device_type, device.integration_mode]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes('nilan') || haystack.includes('cts602') || haystack.includes('comfort-302');
+};
+
+function NilanStatePanel({ deviceId }: { deviceId: string }) {
+  const [state, setState] = useState<NilanHvacState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const fetchState = async () => {
+    try {
+      setLoading(true);
+      setState(await deviceApi.getNilanState(deviceId));
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchState();
+  }, [deviceId]);
+
+  const value = (v: number | null | undefined, suffix = '') => v == null ? 'Ikke tilgængelig' : `${v}${suffix}`;
+
+  if (loading) return <div className="mt-2"><IonSpinner name="crescent" /> <span>Henter Nilan-status...</span></div>;
+  if (error) return <p className="text-sm text-rose-600 mt-2">Nilan-status: {error}</p>;
+  if (!state?.available) return <p className="text-sm text-muted mt-2">Ingen Nilan-telemetri modtaget endnu.</p>;
+
+  return (
+    <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <strong>Nilan Comfort 302</strong>
+        <IonButton size="small" fill="outline" onClick={() => { void fetchState(); }}>Opdatér</IonButton>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+        <div><span className="text-muted">Status</span><br /><strong>{state.status || 'Ukendt'}</strong></div>
+        <div><span className="text-muted">Ventilation</span><br /><strong>{value(state.ventilation_level, ' / 4')}</strong></div>
+        <div><span className="text-muted">Indblæsning</span><br /><strong>{value(state.actual_inlet_level, '%')}</strong></div>
+        <div><span className="text-muted">Udsugning</span><br /><strong>{value(state.actual_exhaust_level, '%')}</strong></div>
+        <div><span className="text-muted">Rumtemperatur</span><br /><strong>{value(state.room_temperature_c, ' °C')}</strong></div>
+        <div><span className="text-muted">Indblæsningstemp.</span><br /><strong>{value(state.inlet_temperature_c, ' °C')}</strong></div>
+        <div><span className="text-muted">Udsugningstemp.</span><br /><strong>{value(state.extract_temperature_c, ' °C')}</strong></div>
+        <div><span className="text-muted">Luftfugtighed</span><br /><strong>{value(state.humidity_pct, '%')}</strong></div>
+        <div><span className="text-muted">CO₂</span><br /><strong>{value(state.co2_ppm, ' ppm')}</strong></div>
+        <div><span className="text-muted">Controller</span><br /><strong>{state.controller_online ? 'Online' : 'Offline'}</strong></div>
+        <div><span className="text-muted">Data</span><br /><strong>{state.freshness_age_ms == null ? 'Ukendt' : `${Math.floor(state.freshness_age_ms / 1000)} sek. gammel`}</strong></div>
+        <div><span className="text-muted">Filter</span><br /><strong>{value(state.filter_days_remaining, ' dage')}</strong></div>
+      </div>
+      <p className="mt-3 text-xs text-muted">Read-only commissioning telemetry. Driftskontroller aktiveres ikke i denne fase.</p>
+    </div>
+  );
+}
 
 function DeviceZonesPanel({ deviceId }: { deviceId: string }) {
   const { zoneState, loading, error, updateZoneSetpoint, refetch } = useDeviceZones(deviceId);
@@ -344,7 +404,7 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
         </IonItem>
         <IonItem>
           <IonLabel position="stacked">MQTT URI</IonLabel>
-          <IonInput value={mqttBrokerUri} onIonChange={(e) => setMqttBrokerUri(e.detail.value || '')} placeholder="mqtts://pilot.zmartify.dk:8883" />
+          <IonInput value={mqttBrokerUri} onIonChange={(e) => setMqttBrokerUri(e.detail.value || '')} placeholder="mqtts://mqtt.zmartify.dk:8883" />
         </IonItem>
         <IonItem>
           <IonLabel position="stacked">MQTT port</IonLabel>
@@ -614,15 +674,17 @@ export function DevicesPage() {
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <IonButton
-                        size="small"
-                        fill="outline"
-                        onClick={() =>
-                          setExpandedDeviceId(expandedDeviceId === device.device_id ? null : device.device_id)
-                        }
-                      >
-                        {expandedDeviceId === device.device_id ? 'Hide zones' : 'Zones'}
-                      </IonButton>
+                      {!isNilanDevice(device) ? (
+                        <IonButton
+                          size="small"
+                          fill="outline"
+                          onClick={() =>
+                            setExpandedDeviceId(expandedDeviceId === device.device_id ? null : device.device_id)
+                          }
+                        >
+                          {expandedDeviceId === device.device_id ? 'Hide zones' : 'Zones'}
+                        </IonButton>
+                      ) : null}
                       <IonButton
                         size="small"
                         fill="outline"
@@ -643,6 +705,9 @@ export function DevicesPage() {
                       </IonButton>
                     </div>
                   </div>
+                  {isNilanDevice(device) ? (
+                    <NilanStatePanel deviceId={device.device_id} />
+                  ) : null}
                   {expandedDeviceId === device.device_id ? (
                     <div className="mt-3 rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
                       {isIrrigationDevice(device) ? (

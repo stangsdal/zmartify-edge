@@ -168,7 +168,7 @@ def _zone_setpoint_command_state(
         command_id = payload.get("command_id")
         if not command_id:
             continue
-        feedback_by_command[str(command_id)] = payload
+        feedback_by_command.setdefault(str(command_id), payload)
 
     outcome_rows = conn.execute(
         """
@@ -192,7 +192,7 @@ def _zone_setpoint_command_state(
         command_id = payload.get("command_id")
         if not command_id:
             continue
-        outcome_by_command[str(command_id)] = payload
+        outcome_by_command.setdefault(str(command_id), payload)
 
     timeout_ms = _setpoint_command_timeout_ms()
     for candidate in pending_events:
@@ -218,7 +218,16 @@ def _zone_setpoint_command_state(
         if outcome:
             result = str(outcome.get("result") or "").strip().lower()
             detail = outcome.get("detail")
-            if result in {"confirmed", "accepted"}:
+            if result == "accepted":
+                return {
+                    "setpoint_command_state": "pending_device_feedback",
+                    "setpoint_pending": True,
+                    "setpoint_command_id": command_id,
+                    "setpoint_requested_target_c": requested_target_c,
+                    "setpoint_failure_reason": None,
+                    "setpoint_command_age_ms": age_ms,
+                }
+            if result == "confirmed":
                 if (
                     current_target_c is not None
                     and requested_target_c is not None
@@ -282,6 +291,7 @@ def ingest_setpoint_command_outcome(
     zone_id: int,
     *,
     result: str,
+    command_id: str | None = None,
     detail: str | None = None,
     requested_target_c: float | None = None,
     confirmed_target_c: float | None = None,
@@ -297,22 +307,22 @@ def ingest_setpoint_command_outcome(
             zone_id=int(zone_id),
         )
 
-        command_id: str | None = None
-        if requested_target_c is not None:
+        matched_command_id = str(command_id).strip() if command_id is not None else None
+        if not matched_command_id and requested_target_c is not None:
             for candidate in pending_events:
                 requested = candidate.get("requested_target_temperature_c")
                 if _floats_close(requested, requested_target_c):
-                    command_id = candidate["command_id"]
+                    matched_command_id = candidate["command_id"]
                     break
-        if command_id is None and pending_events:
-            command_id = pending_events[0]["command_id"]
+        if not matched_command_id and pending_events:
+            matched_command_id = pending_events[0]["command_id"]
 
     event_payload: dict[str, Any] = {
         "device_id": device_external_id,
         "zone_id": int(zone_id),
         "result": normalized_result,
         "detail": detail,
-        "command_id": command_id,
+        "command_id": matched_command_id,
         "requested_target_temperature_c": requested_target_c,
         "confirmed_target_temperature_c": confirmed_target_c,
         "payload": payload or {},
@@ -327,9 +337,9 @@ def ingest_setpoint_command_outcome(
         payload=event_payload,
     )
 
-    # If device confirms the effective target, keep edge zone_state aligned even
-    # when periodic twin ingest is delayed/stale.
-    if normalized_result in {"confirmed", "accepted"} and confirmed_target_c is not None:
+    # Only a confirmed outcome proves the controller applied the requested
+    # target. An accepted outcome merely acknowledges the queued write.
+    if normalized_result == "confirmed" and confirmed_target_c is not None:
         zone = upsert_zone_state(
             device_external_id,
             int(zone_id),
@@ -345,7 +355,7 @@ def ingest_setpoint_command_outcome(
             payload={
                 "device_id": device_external_id,
                 "zone_id": int(zone_id),
-                "command_id": command_id,
+                "command_id": matched_command_id,
                 "previous_target_temperature_c": None,
                 "confirmed_target_temperature_c": float(confirmed_target_c),
                 "source": "mqtt_setpoint_outcome",
@@ -364,13 +374,13 @@ def ingest_setpoint_command_outcome(
             payload={
                 "device_id": device_external_id,
                 "zone_id": int(zone_id),
-                "command_id": command_id,
+                "command_id": matched_command_id,
                 "reason": detail or normalized_result or "failed",
             },
         )
 
     return {
-        "command_id": command_id,
+        "command_id": matched_command_id,
         "event": outcome_event,
     }
 
@@ -551,7 +561,7 @@ def ensure_default_channels(device_external_id: str, channel_count: int = 16) ->
         conn.commit()
 
 
-def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
+def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = True) -> list[dict[str, Any]]:
     ensure_default_zones(device_external_id)
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
@@ -585,6 +595,13 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
     zones: list[dict[str, Any]] = []
     for row in rows:
         zone_state = command_states.get(int(row["zone_id"]), {})
+        requested_target_c = zone_state.get("setpoint_requested_target_c")
+        pending = bool(zone_state.get("setpoint_pending", False))
+        displayed_target_c = (
+            requested_target_c
+            if optimistic_setpoint and pending and requested_target_c is not None
+            else row["target_temperature"]
+        )
         zones.append(
             {
                 "zone_uuid": row["zone_uuid"],
@@ -596,7 +613,7 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
                 "floor": row["floor"],
                 "area_m2": row["area_m2"],
                 "current_temperature_c": row["current_temperature"],
-                "target_temperature_c": row["target_temperature"],
+                "target_temperature_c": displayed_target_c,
                 "demand": None if row["demand"] is None else bool(row["demand"]),
                 "active": None if row["active"] is None else bool(row["active"]),
                 "fault": row["fault"],
@@ -605,7 +622,7 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
                 "freshness_age_ms": _age_ms(row["updated_at"], now),
                 "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
                 "setpoint_command_state": zone_state.get("setpoint_command_state", "confirmed"),
-                "setpoint_pending": bool(zone_state.get("setpoint_pending", False)),
+                "setpoint_pending": pending,
                 "setpoint_command_id": zone_state.get("setpoint_command_id"),
                 "setpoint_requested_target_c": zone_state.get("setpoint_requested_target_c"),
                 "setpoint_failure_reason": zone_state.get("setpoint_failure_reason"),
@@ -615,9 +632,14 @@ def list_device_zones(device_external_id: str) -> list[dict[str, Any]]:
     return zones
 
 
-def get_device_zone(device_external_id: str, zone_id: int) -> dict[str, Any]:
+def get_device_zone(
+    device_external_id: str,
+    zone_id: int,
+    *,
+    optimistic_setpoint: bool = True,
+) -> dict[str, Any]:
     ensure_default_zones(device_external_id, zone_count=max(3, int(zone_id)))
-    zones = list_device_zones(device_external_id)
+    zones = list_device_zones(device_external_id, optimistic_setpoint=optimistic_setpoint)
     for zone in zones:
         if int(zone["zone_id"]) == int(zone_id):
             return zone
@@ -1082,7 +1104,7 @@ def ingest_device_twin_snapshot(
     for zone in zones or []:
         zone_id = int(zone["zone_id"])
         reported_target_c = zone.get("target_temperature_c")
-        previous_zone = get_device_zone(device_external_id, zone_id)
+        previous_zone = get_device_zone(device_external_id, zone_id, optimistic_setpoint=False)
         previous_target_c = previous_zone.get("target_temperature_c")
         zone_demand = zone.get("demand")
         zone_active = zone.get("active")

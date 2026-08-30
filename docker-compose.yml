@@ -3,12 +3,10 @@ services:
     image: timescale/timescaledb:2.28.2-pg17
     container_name: zmartify-postgres-timescale
     restart: unless-stopped
-    ports:
-      - "5432:5432"
     environment:
       - POSTGRES_DB=zmartify
       - POSTGRES_USER=zmartify
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-zmartify-dev-change-me}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -38,7 +36,6 @@ services:
     volumes:
       - hvac-edge-data:/data
       - ./mosquitto/config:/mosquitto/config
-      - ./admin-ui/dist:/admin-ui/dist:ro
       - ./zmartify-admin/dist:/zmartify-admin/dist:ro
       - ./contracts:/contracts:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -48,15 +45,14 @@ services:
       - -c
       - >-
         exec uvicorn main:app --host 0.0.0.0 --port 8443
-        --ssl-certfile /letsencrypt/live/pilot.zmartify.dk/fullchain.pem
-        --ssl-keyfile /letsencrypt/live/pilot.zmartify.dk/privkey.pem
+        --ssl-certfile /letsencrypt/live/${ZMARTIFY_TLS_DOMAIN:-app.zmartify.dk}/fullchain.pem
+        --ssl-keyfile /letsencrypt/live/${ZMARTIFY_TLS_DOMAIN:-app.zmartify.dk}/privkey.pem
     environment:
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
-      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres-timescale:5432/zmartify}
       - ZMART_EDGE_CONTRACT_VALIDATION_MODE=${ZMART_EDGE_CONTRACT_VALIDATION_MODE:-warn}
       - ZMART_EDGE_MQTT_TOPIC_STYLE=${ZMART_EDGE_MQTT_TOPIC_STYLE:-v2}
-      - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
       - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
       - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
       - ZMART_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
@@ -65,57 +61,23 @@ services:
       - ZMART_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
       - ZMART_EDGE_DRY_RUN_ACL_WRITE=0
       - ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
-      - ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-      - ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://pilot.zmartify.dk:8883
-      - ZMART_EDGE_SETTINGS_ENCRYPTION_KEY=${ZMART_EDGE_SETTINGS_ENCRYPTION_KEY:-}
+      - ZMART_EDGE_PUBLIC_API_BASE=${ZMART_EDGE_PUBLIC_API_BASE:-https://api.zmartify.dk}
+      - ZMART_EDGE_PUBLIC_MQTT_URI=${ZMART_EDGE_PUBLIC_MQTT_URI:-mqtts://mqtt.zmartify.dk:8883}
+      - ZMART_EDGE_SETTINGS_ENCRYPTION_KEY=${ZMART_EDGE_SETTINGS_ENCRYPTION_KEY:?ZMART_EDGE_SETTINGS_ENCRYPTION_KEY must be set in .env}
       - ZMART_EDGE_ENABLE_EMERGENCY_TOKEN=${ZMART_EDGE_ENABLE_EMERGENCY_TOKEN:-0}
-      - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
+      - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:?ADMIN_API_TOKEN must be set in .env}
     depends_on:
       - mosquitto
       - postgres-timescale
 
-  zmartify-edge-api-http:
-    build:
-      context: ./zmartify-edge-api
-      dockerfile: Dockerfile
-    image: zmartify-edge-api:local
-    container_name: zmartify-edge-api-http
+  http-redirect:
+    image: caddy:2-alpine
+    container_name: zmartify-http-redirect
     restart: unless-stopped
-    working_dir: /app
     ports:
-      - "80:8080"
+      - "80:80"
     volumes:
-      - hvac-edge-data:/data
-      - ./mosquitto/config:/mosquitto/config
-      - ./admin-ui/dist:/admin-ui/dist:ro
-      - ./zmartify-admin/dist:/zmartify-admin/dist:ro
-      - ./contracts:/contracts:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - MQTT_HOST=mosquitto
-      - MQTT_PORT=1883
-      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
-      - ZMART_EDGE_CONTRACT_VALIDATION_MODE=${ZMART_EDGE_CONTRACT_VALIDATION_MODE:-warn}
-      - ZMART_EDGE_MQTT_TOPIC_STYLE=${ZMART_EDGE_MQTT_TOPIC_STYLE:-v2}
-      - ZMART_EDGE_DB_PATH=/data/hvac-edge.sqlite
-      - ZMART_EDGE_APPLY_MQTT_COMMANDS=1
-      - ZMART_EDGE_MQTT_ACL_FILE=/mosquitto/config/acl
-      - ZMART_EDGE_MQTT_PASSWD_FILE=/mosquitto/config/passwd
-      - ZMART_EDGE_MOSQUITTO_PASSWD_BIN=mosquitto_passwd
-      - ZMART_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
-      - ZMART_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
-      - ZMART_EDGE_DRY_RUN_ACL_WRITE=0
-      - ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
-      # Listener runs only in the primary HTTPS service to avoid duplicate outcome ingestion.
-      - ZMART_EDGE_ENABLE_SETPOINT_OUTCOME_LISTENER=0
-      - ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-      - ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://pilot.zmartify.dk:8883
-      - ZMART_EDGE_SETTINGS_ENCRYPTION_KEY=${ZMART_EDGE_SETTINGS_ENCRYPTION_KEY:-}
-      - ZMART_EDGE_ENABLE_EMERGENCY_TOKEN=${ZMART_EDGE_ENABLE_EMERGENCY_TOKEN:-0}
-      - ADMIN_API_TOKEN=${ADMIN_API_TOKEN:-change-me-admin-token}
-    depends_on:
-      - mosquitto
-      - postgres-timescale
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
   edge-db-backup:
     image: postgres:17
@@ -125,7 +87,7 @@ services:
       - edge-backups:/backups
       - ./scripts/backup_edge_db.sh:/usr/local/bin/backup_edge_db.sh:ro
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:-zmartify-dev-change-me}@postgres-timescale:5432/zmartify}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://zmartify:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres-timescale:5432/zmartify}
       - BACKUP_INTERVAL_SECONDS=${ZMART_EDGE_BACKUP_INTERVAL_SECONDS:-86400}
       - BACKUP_KEEP=${ZMART_EDGE_BACKUP_KEEP:-14}
     entrypoint:

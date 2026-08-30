@@ -4,7 +4,7 @@ Edge control-plane repository for Zmartify HVAC.
 
 This repository contains:
 - Public Edge API (FastAPI)
-- Admin and mobile web apps
+- Responsive user and system administration web app
 - PostgreSQL/TimescaleDB runtime storage
 - MQTT broker configuration
 - Docker Compose deployment setup
@@ -13,7 +13,7 @@ This repository contains:
 
 - zmartify-edge-api/: FastAPI backend (public API, onboarding, ACL, registry, mobile APIs)
 - zmartify-admin/: Ionic admin/mobile UI
-- admin-ui/: operational admin UI
+- Caddyfile: HTTP-to-HTTPS redirect
 - mosquitto/: broker config and runtime paths
 - scripts/backup_edge_db.sh: PostgreSQL backup and restore-drill helper
 - docs/: operations and setup guides
@@ -38,14 +38,13 @@ cd zmartify-edge
 2. Ensure required directories exist.
 
 ```bash
-mkdir -p mosquitto/config mosquitto/data mosquitto/log acme admin-ui/dist zmartify-admin/dist
+mkdir -p mosquitto/config mosquitto/data mosquitto/log acme zmartify-admin/dist
 ```
 
 3. Build frontend artifacts (if not already present).
 
 ```bash
-cd admin-ui && npm ci && npm run build
-cd ../zmartify-admin && npm ci && npm run build
+cd zmartify-admin && npm ci && npm run build
 cd ..
 ```
 
@@ -78,8 +77,9 @@ Configured in docker-compose.yml for zmartify-edge-api:
 - ZMART_EDGE_MQTT_RELOAD_CMD=docker kill -s HUP hvac-mosquitto
 - ZMART_EDGE_MQTT_RESTART_CMD=docker restart hvac-mosquitto
 - ZMART_EDGE_FORWARD_SETPOINT_TO_MQTT=1
-- ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-- ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
+- ZMART_EDGE_PUBLIC_API_BASE=https://api.zmartify.dk
+- ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.zmartify.dk:8883
+- ZMARTIFY_TLS_DOMAIN=zmartify.dk (certificate directory under ./acme)
 - ADMIN_API_TOKEN=<token>
 
 Optional:
@@ -92,7 +92,9 @@ Optional:
 ## API Overview
 
 Base URL examples:
-- Production: https://pilot.zmartify.dk
+- User app: https://app.zmartify.dk
+- System administration: https://admin.zmartify.dk
+- API: https://api.zmartify.dk
 - Local HTTP container: http://localhost:8080
 - Local HTTPS container: https://localhost
 
@@ -259,7 +261,7 @@ docker compose up -d --build zmartify-edge-api
 
 ```bash
 docker compose run --rm zmartify-edge-api alembic upgrade head
-docker compose up -d --force-recreate zmartify-edge-api zmartify-edge-api-http
+docker compose up -d --force-recreate zmartify-edge-api http-redirect
 ```
 
 - Run an immediate PostgreSQL backup into the `edge-backups` volume:

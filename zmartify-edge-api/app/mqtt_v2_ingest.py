@@ -11,7 +11,7 @@ from app.contracts import (
     validate_mqtt_v2_setpoint_command_outcome,
 )
 from app.db import get_connection
-from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_command_outcome, list_device_zones
+from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_command_outcome, list_device_zones, upsert_device_state
 from app.domain_model import log_event
 from app.irrigation_domain import (
     complete_irrigation_run,
@@ -26,6 +26,7 @@ from app.irrigation_domain import (
     upsert_irrigation_weather_state,
 )
 from app.registry import RegistryNotFoundError
+from app.nilan_domain import upsert_nilan_state
 
 
 def _safe_source_timestamp(payload: dict[str, Any]) -> str:
@@ -101,9 +102,35 @@ def ingest_mqtt_v2_reported_state(
     publish_zone_state_update_hook=None,
 ) -> dict[str, Any]:
     reported = dict(payload or {})
+    # The first Nilan firmware publishes its read-only projection directly on
+    # the v2 HVAC state topic. Normalize it here while the device is migrated
+    # to the full reported-state envelope.
+    if "hvac" not in reported and "ventilation_level" in reported and "device_id" in reported:
+        device_state = upsert_device_state(
+            device_id,
+            online=reported.get("online"),
+            mqtt_connected=True,
+            source=source,
+            source_timestamp=reported.get("source_timestamp") or _safe_source_timestamp(reported),
+            last_error=None,
+        )
+        state = upsert_nilan_state(
+            device_id,
+            reported,
+            source_timestamp=reported.get("source_timestamp") or _safe_source_timestamp(reported),
+        )
+        return {
+            "device_id": device_id,
+            "source": source,
+            "source_timestamp": state.get("source_timestamp"),
+            "device_state": device_state,
+            "nilan": {"applied": True, "state": state},
+            "hvac": {"applied": False, "zone_updates": 0, "channel_updates": 0},
+        }
     validate_mqtt_v2_reported_state(reported)
 
     hvac = _as_dict(reported.get("hvac"))
+    nilan = _as_dict(hvac.get("nilan"))
     zones = [item for item in _as_list(hvac.get("zones")) if isinstance(item, dict)]
     channels = [item for item in _as_list(hvac.get("channels")) if isinstance(item, dict)]
 
@@ -122,6 +149,14 @@ def ingest_mqtt_v2_reported_state(
     if hvac_result.get("applied") and publish_zone_state_update_hook is not None:
         for zone in list_device_zones(device_id):
             publish_zone_state_update_hook(device_id, zone)
+
+    nilan_result = None
+    if nilan:
+        nilan_result = upsert_nilan_state(
+            device_id,
+            nilan,
+            source_timestamp=reported.get("source_timestamp") or _safe_source_timestamp(reported),
+        )
 
     irrigation = _as_dict(reported.get("irrigation"))
     hydraulics = _as_dict(reported.get("hydraulics"))
@@ -248,6 +283,7 @@ def ingest_mqtt_v2_reported_state(
         "source": source,
         "source_timestamp": reported.get("source_timestamp"),
         "hvac": hvac_result,
+        "nilan": {"applied": nilan_result is not None, "state": nilan_result} if nilan_result is not None else {"applied": False},
         "irrigation": {
             "outputs_updated": outputs_updated,
             "hydraulics_updated": hydraulics_updated,
@@ -302,6 +338,7 @@ def parse_mqtt_v2_setpoint_outcome_payload(payload: dict[str, Any]) -> dict[str,
     detail = str(outcome["detail"]) if outcome.get("detail") is not None else None
 
     return {
+        "command_id": str(outcome["command_id"]),
         "result": result,
         "detail": detail,
         "requested_target_c": requested_target_c,

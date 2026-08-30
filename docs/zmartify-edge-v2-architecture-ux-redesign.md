@@ -1,11 +1,34 @@
 # Zmartify Edge v2 – Architecture & UX Redesign
 
-**Status:** Proposed target architecture  
+**Status:** Approved implementation baseline
 **Repository:** `stangsdal/zmartify-edge`  
 **Scope:** Shared edge control plane for HVAC, irrigation and future Zmartify products  
 **Target clients:** Responsive web app first, installable PWA immediately, Capacitor-based iOS/Android app later  
 **Primary database:** PostgreSQL with TimescaleDB  
-**Document version:** 0.2  
+**Document version:** 0.3
+
+### 0.1 Deployment and application decision
+
+The v2 deployment starts from an empty runtime and has one deployed frontend:
+`zmartify-admin` (Ionic React). It is exposed through two entry-point hosts:
+
+```text
+https://app.zmartify.dk    user-facing site and product control
+https://admin.zmartify.dk  global system administration
+https://api.zmartify.dk    shared FastAPI API
+https://mqtt.zmartify.dk   public MQTT over TLS
+```
+
+Both web hosts use the same frontend bundle, authentication and same-origin
+API. The host only selects the default landing page; it is not an
+authorization boundary. `api.zmartify.dk` remains the canonical machine-facing
+API hostname and can be selected explicitly for integrations.
+The API and server-side permission checks remain authoritative. `pilot`
+remains an optional transition alias, not the canonical public URL.
+
+The former `admin-ui` bundle is not deployed. Its operational pages are either
+represented by the canonical admin routes in `zmartify-admin` or are retired.
+There is one API process. Port 80 is handled only by an HTTP-to-HTTPS redirect.
 
 ---
 
@@ -1344,7 +1367,9 @@ Pydantic models remain the API schema layer.
 
 Keep Ionic, React, TypeScript, Vite, Tailwind and Capacitor.
 
-Consolidate `zmartify-admin` and `admin-ui` into one application. The same application shall adapt its navigation and density to role and screen size.
+`zmartify-admin` is the single application. It adapts its navigation and
+density to role, product access and screen size. `admin-ui` is retired from the
+runtime and is not built or mounted by Compose.
 
 ### 13.2 Application shell
 
@@ -1378,6 +1403,11 @@ Users
 Integrations
 System
 ```
+
+The same route tree is used on both public web hosts. `app.zmartify.dk` opens
+the site/product experience; `admin.zmartify.dk` opens the administrator
+dashboard. Administrator routes remain protected by `administrator` role
+checks, and site routes remain protected by site membership and product access.
 
 ### 13.3 Route map
 

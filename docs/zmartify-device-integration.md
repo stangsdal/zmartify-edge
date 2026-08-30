@@ -8,8 +8,8 @@ gets claimed, receives MQTT credentials, and receives OTA updates.
 Set these backend environment variables to the public URLs that devices should use:
 
 ```bash
-ZMART_EDGE_PUBLIC_API_BASE=https://pilot.zmartify.dk
-ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.pilot.zmartify.dk:8883
+ZMART_EDGE_PUBLIC_API_BASE=https://api.zmartify.dk
+ZMART_EDGE_PUBLIC_MQTT_URI=mqtts://mqtt.zmartify.dk:8883
 ```
 
 The server returns these values in onboarding payloads. For lab setups you can
@@ -45,7 +45,7 @@ Recommended sequence:
 Example discovery request:
 
 ```bash
-curl -X POST https://pilot.zmartify.dk/devices/discover \
+curl -X POST https://api.zmartify.dk/devices/discover \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Content-Type: application/json' \
   -d '{"base_url":"192.168.10.60"}'
@@ -54,7 +54,7 @@ curl -X POST https://pilot.zmartify.dk/devices/discover \
 Example claim request:
 
 ```bash
-curl -X POST https://pilot.zmartify.dk/devices/claim \
+curl -X POST https://api.zmartify.dk/devices/claim \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -91,7 +91,7 @@ typical device-side configuration looks like this:
 
 ```text
 mqtt_enabled = true
-mqtt_uri = mqtts://mqtt.pilot.zmartify.dk:8883
+mqtt_uri = mqtts://mqtt.zmartify.dk:8883
 mqtt_username = device_<device-id>
 mqtt_password = <provisioned-password>
 mqtt_base = homie/5

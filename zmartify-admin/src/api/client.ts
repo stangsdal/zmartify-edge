@@ -1,5 +1,6 @@
 // Configure API base URL and token
-const DEFAULT_API_BASE_URL = 'https://pilot.zmartify.dk';
+const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+  || (typeof window !== 'undefined' ? window.location.origin : 'https://api.zmartify.dk');
 
 const normalizeApiBaseUrl = (raw: string): string => {
   const trimmed = (raw || '').trim();

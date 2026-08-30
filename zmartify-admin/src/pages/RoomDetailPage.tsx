@@ -6,6 +6,7 @@ import { ThermostatDial } from '../components/ThermostatDial';
 import { apiClient } from '../api/client';
 import { mobileApi, MobileSetpointResponse, MobileZone } from '../api/mobile';
 import { freshnessFromAgeMs } from '../utils/freshness';
+import { displayHvacMode, HvacZoneMode } from '../utils/hvacMode';
 
 interface RouteParams {
   zoneRef: string;
@@ -24,6 +25,7 @@ export function RoomDetailPage() {
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState('');
   const [streamState, setStreamState] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
+  const [thermostatTheme, setThermostatTheme] = useState<'classical' | 'gunmalmg'>('classical');
   const lastAppliedRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -260,15 +262,17 @@ export function RoomDetailPage() {
   };
 
   const zoneKey = zone?.zone_key || (zone ? `zone-${zone.zone_id}` : 'Room');
-  const zoneDescription = zone?.name && zone.name !== zoneKey ? zone.name : 'Thermostat Control';
+  const displayName = zone?.name && zone.name !== zoneKey ? zone.name : zoneKey;
+  const activeMode = displayHvacMode(zone?.thermostat_mode ?? zone?.mode, Boolean(zone?.demand ?? zone?.active));
+  const supportedModes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'STANDBY'];
 
   return (
     <IonPage>
-      <AppHeader title={zoneKey} subtitle={zoneDescription} />
+      <AppHeader title={displayName} subtitle={zone?.name && zone.name !== zoneKey ? zoneKey : 'Thermostat Control'} />
       <IonContent className="ion-padding">
         <div className="space-y-5 pb-8">
           <section className="rounded-3xl app-surface shadow-soft p-5">
-            <div className="mb-3 flex justify-end">
+            <div className="mb-3 flex items-center justify-end gap-2">
               <span
                 className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]"
                 style={{
@@ -278,6 +282,34 @@ export function RoomDetailPage() {
               >
                 {streamState === 'connected' ? 'Connected' : streamState === 'connecting' ? 'Connecting' : 'Reconnecting'}
               </span>
+              <details className="relative">
+                <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-muted hover:bg-slate-100" aria-label="Thermostat options">
+                  <span className="text-xl leading-none" aria-hidden="true">⋮</span>
+                </summary>
+                <div className="absolute right-0 top-12 z-10 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                  <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted">Display</p>
+                  <label className="menu-choice">
+                    <span>Theme</span>
+                    <select value={thermostatTheme} onChange={(event) => setThermostatTheme(event.target.value as 'classical' | 'gunmalmg')}>
+                      <option value="classical">Classical</option>
+                      <option value="gunmalmg">Gunmalmg</option>
+                    </select>
+                  </label>
+                  <div className="my-2 border-t border-slate-100" />
+                  <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted">Zone name</p>
+                  <input
+                    className="w-full rounded-lg border border-slate-300/70 bg-white px-3 py-2 text-sm"
+                    value={renameValue}
+                    onChange={(event) => { setRenameValue(event.target.value); setRenameError(''); }}
+                    placeholder={zoneKey}
+                    maxLength={64}
+                  />
+                  <button type="button" className="menu-action menu-action--primary mt-2" onClick={() => { void handleRename(); }} disabled={renaming || !renameValue.trim() || renameValue.trim() === (zone?.name || '').trim()}>
+                    {renaming ? 'Saving...' : 'Save name'}
+                  </button>
+                  {renameError ? <p className="px-2 pt-2 text-xs text-rose-600">{renameError}</p> : null}
+                </div>
+              </details>
             </div>
             <ThermostatDial
               value={target}
@@ -287,15 +319,23 @@ export function RoomDetailPage() {
               online={(zone?.online !== false) && freshnessFromAgeMs(zone?.freshness_age_ms).state === 'fresh'}
               fault={zone?.fault ?? null}
               windowOpen={zone?.window_open ?? null}
-              roomName={zone?.name}
+              roomName={displayName}
               statusLabel={statusText}
               heating={Boolean(zone?.demand ?? zone?.active)}
               thermostatMode={zone?.thermostat_mode ?? zone?.mode ?? null}
+              theme={thermostatTheme}
               onChange={handleTargetChange}
             />
             <p className="mt-3 text-center text-xs uppercase tracking-[0.22em] text-muted">
               {setpointStatusText}
             </p>
+            <div className="thermostat-mode-list" aria-label="Supported thermostat modes">
+              {supportedModes.map((mode) => (
+                <span key={mode} className={`thermostat-mode ${mode === activeMode ? `thermostat-mode--${mode.toLowerCase()}` : 'thermostat-mode--inactive'}`}>
+                  {mode}
+                </span>
+              ))}
+            </div>
             {saveError && <p className="text-center text-sm mt-2 text-rose-600">{saveError}</p>}
           </section>
 
@@ -308,32 +348,6 @@ export function RoomDetailPage() {
             <p className="text-base">{zone?.freshness_age_ms == null ? 'Unknown' : `${Math.floor(zone.freshness_age_ms / 1000)}s ago`}</p>
           </section>
 
-          <section className="rounded-2xl app-surface shadow-soft p-4 space-y-3">
-            <p className="text-sm text-muted">Descriptive Name</p>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-sm"
-                value={renameValue}
-                onChange={(event) => {
-                  setRenameValue(event.target.value);
-                  setRenameError('');
-                }}
-                placeholder="e.g. Living room"
-                maxLength={64}
-              />
-              <button
-                type="button"
-                className="rounded-xl bg-brand-primary text-white px-4 py-2 text-sm font-medium disabled:opacity-60"
-                onClick={() => {
-                  void handleRename();
-                }}
-                disabled={renaming || !renameValue.trim() || renameValue.trim() === (zone?.name || '').trim()}
-              >
-                {renaming ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-            {renameError ? <p className="text-sm text-rose-600">{renameError}</p> : null}
-          </section>
         </div>
       </IonContent>
     </IonPage>

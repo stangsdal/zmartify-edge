@@ -60,6 +60,79 @@ body.dark-mode {
   box-shadow: 0 18px 40px rgba(15, 118, 110, 0.2);
 }
 
+.thermostat-card {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 360px;
+}
+
+.thermostat-card--gunmalmg {
+  border: 1px solid var(--app-border);
+  border-radius: 24px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--app-surface) 94%, #0f766e), var(--app-surface));
+  padding: 22px;
+  box-shadow: 0 18px 40px rgba(21, 34, 56, 0.1);
+}
+
+.thermostat-card__eyebrow {
+  margin: 0;
+  font-family: 'Sora', ui-sans-serif, system-ui;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.thermostat-card__status,
+.thermostat-card__target {
+  margin: 5px 0 0;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.thermostat-card__temperature {
+  margin: 0;
+  color: var(--ion-text-color);
+  font-size: 58px;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+  line-height: 1;
+}
+
+.thermostat-card__temperature span { font-size: 24px; letter-spacing: 0; }
+
+.thermostat-mode {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.thermostat-mode--manual { background: rgba(14, 165, 164, .12); color: #0f766e; }
+.thermostat-mode--eco { background: rgba(34, 197, 94, .13); color: #15803d; }
+.thermostat-mode--komfort { background: rgba(234, 88, 12, .13); color: #c2410c; }
+.thermostat-mode--standby { background: rgba(100, 116, 139, .14); color: #475569; }
+.thermostat-mode--inactive { background: transparent; color: var(--app-muted); border: 1px solid var(--app-border); }
+.thermostat-mode-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+
+.thermostat-card__signal { color: var(--app-muted); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+.thermostat-card__signal span { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #94a3b8; }
+.thermostat-card__signal span.is-active { background: #ea580c; box-shadow: 0 0 0 5px rgba(234, 88, 12, .14); }
+
+.thermostat-slider { position: relative; height: 28px; }
+.thermostat-slider__track, .thermostat-slider__fill { position: absolute; top: 50%; height: 6px; transform: translateY(-50%); border-radius: 999px; }
+.thermostat-slider__track { left: 0; right: 0; background: var(--app-border); }
+.thermostat-slider__fill { left: 0; background: linear-gradient(90deg, #0f766e, #ea580c); }
+.thermostat-slider input { position: absolute; inset: 0; width: 100%; cursor: pointer; opacity: 0; }
+
+.menu-action { display: block; width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 9px 10px; text-align: left; font-size: 13px; color: var(--ion-text-color); }
+.menu-action:hover { background: #f1f5f9; }
+.menu-action--primary { background: #0f766e; color: white; text-align: center; }
+.menu-action--primary:hover { background: #115e59; }
+.menu-choice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px; font-size: 13px; }
+.menu-choice select { border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); padding: 5px 7px; color: var(--ion-text-color); }
+
 .app-layout-tabs {
   min-height: 100%;
 }

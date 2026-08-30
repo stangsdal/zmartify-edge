@@ -261,6 +261,32 @@ CREATE TABLE IF NOT EXISTS device_state (
     FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS nilan_hvac_state (
+    device_id BIGINT PRIMARY KEY,
+    source_timestamp TEXT,
+    online INTEGER,
+    controller_online INTEGER,
+    freshness_age_ms INTEGER,
+    run INTEGER,
+    ventilation_level INTEGER,
+    actual_inlet_level INTEGER,
+    actual_exhaust_level INTEGER,
+    room_temperature_c DOUBLE PRECISION,
+    inlet_temperature_c DOUBLE PRECISION,
+    outlet_temperature_c DOUBLE PRECISION,
+    extract_temperature_c DOUBLE PRECISION,
+    humidity_pct DOUBLE PRECISION,
+    co2_ppm INTEGER,
+    filter_days_remaining INTEGER,
+    status TEXT,
+    poll_requests INTEGER NOT NULL DEFAULT 0,
+    poll_responses INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_nilan_hvac_state_updated_at ON nilan_hvac_state(updated_at);
+
 CREATE TABLE IF NOT EXISTS event_log (
     id BIGSERIAL PRIMARY KEY,
     uuid TEXT NOT NULL UNIQUE,

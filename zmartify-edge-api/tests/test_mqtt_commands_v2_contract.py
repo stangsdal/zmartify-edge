@@ -41,6 +41,23 @@ def test_publish_setpoint_command_uses_v2_contract_payload_for_v2_topics(monkeyp
     assert payload["parameters"]["target_temperature_c"] == 21.5
 
 
+def test_publish_setpoint_command_preserves_supplied_command_id(monkeypatch):
+    calls: list[list[str]] = []
+
+    monkeypatch.setenv("ZMART_EDGE_MQTT_TOPIC_STYLE", "v2")
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(
+        mqtt_commands.subprocess,
+        "run",
+        lambda cmd, capture_output, text, timeout: calls.append(list(cmd)) or _Result(returncode=0),
+    )
+
+    mqtt_commands.publish_setpoint_command("dev-1", 2, 21.5, command_id="sp-123")
+
+    message = calls[0][calls[0].index("-m") + 1]
+    assert json.loads(message)["command_id"] == "sp-123"
+
+
 def test_publish_zone_name_command_dual_mode_keeps_legacy_and_v2(monkeypatch):
     calls: list[list[str]] = []
 

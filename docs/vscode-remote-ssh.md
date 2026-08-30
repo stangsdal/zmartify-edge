@@ -19,7 +19,7 @@ Host zmartify-edge
   User zmartify
 
 Host zmartify-edge-public
-  HostName pilot.zmartify.dk
+  HostName admin.zmartify.dk
   User zmartify
 ```
 
@@ -46,7 +46,7 @@ Use `zmartify-edge` on LAN when possible. Use `zmartify-edge-public` only when r
 - Prefer small, focused commits.
 - Run at least one relevant validation command before commit:
   - `cd zmartify-admin && npm run build`
-  - `cd admin-ui && npm run build`
+  - `cd zmartify-admin && npm run build`
   - `cd zmartify-edge-api && pytest -q` (when backend files change)
 - Verify runtime services after deploy:
   - `docker compose ps`
