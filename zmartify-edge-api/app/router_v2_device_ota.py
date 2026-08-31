@@ -15,7 +15,7 @@ from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_pe
 from app.registry import RegistryNotFoundError, get_device_admin_token, get_device_onboarding_context
 from app.schemas import DeviceOtaOut, DeviceOtaPollOut, DeviceOtaStageOut
 
-_REQUIRED_PUBLIC_EDGE_URL = "https://pilot.zmartify.dk"
+_REQUIRED_PUBLIC_EDGE_URL = "https://api.zmartify.dk"
 
 
 def _ota_stage_root() -> Path:
