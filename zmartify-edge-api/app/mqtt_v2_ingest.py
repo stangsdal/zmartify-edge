@@ -11,7 +11,14 @@ from app.contracts import (
     validate_mqtt_v2_setpoint_command_outcome,
 )
 from app.db import get_connection
-from app.domain_model import ingest_device_twin_snapshot, ingest_setpoint_command_outcome, list_device_zones, upsert_device_state
+from app.domain_model import (
+    ingest_device_twin_snapshot,
+    ingest_setpoint_command_outcome,
+    list_device_zones,
+    upsert_device_state,
+    upsert_hvac_controller_state,
+    upsert_hvac_element_state,
+)
 from app.domain_model import log_event
 from app.irrigation_domain import (
     complete_irrigation_run,
@@ -133,6 +140,7 @@ def ingest_mqtt_v2_reported_state(
     nilan = _as_dict(hvac.get("nilan"))
     zones = [item for item in _as_list(hvac.get("zones")) if isinstance(item, dict)]
     channels = [item for item in _as_list(hvac.get("channels")) if isinstance(item, dict)]
+    controller = _as_dict(hvac.get("controller"))
 
     hvac_result = ingest_device_twin_snapshot(
         device_id,
@@ -145,6 +153,21 @@ def ingest_mqtt_v2_reported_state(
         zones=zones,
         channels=channels,
     )
+
+    if controller:
+        upsert_hvac_controller_state(
+            device_id,
+            controller,
+            source_timestamp=reported.get("source_timestamp"),
+        )
+    for zone in zones:
+        for element_id in _as_list(zone.get("controlled_element_ids")):
+            if isinstance(element_id, int) and element_id > 0:
+                upsert_hvac_element_state(
+                    device_id,
+                    {"element_id": element_id, "thermostat": element_id == zone.get("thermostat_element_id")},
+                    source_timestamp=reported.get("source_timestamp"),
+                )
 
     if hvac_result.get("applied") and publish_zone_state_update_hook is not None:
         for zone in list_device_zones(device_id):

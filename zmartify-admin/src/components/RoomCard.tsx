@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion';
-import { IonButton, IonIcon } from '@ionic/react';
-import { ellipsisVerticalOutline } from 'ionicons/icons';
+import { IonIcon } from '@ionic/react';
+import { batteryFullOutline, ellipsisVerticalOutline } from 'ionicons/icons';
 import { HealthBadge } from './HealthBadge';
 import { TemperatureBadge } from './TemperatureBadge';
 import { MobileZone } from '../api/mobile';
-import { displayHvacMode } from '../utils/hvacMode';
+import { displaySetpointMode, HvacZoneMode } from '../utils/hvacMode';
 
 interface RoomCardProps {
   zone: MobileZone;
@@ -12,6 +12,7 @@ interface RoomCardProps {
   onHistory: () => void;
   onRename: () => void;
   onSetpointChange: (delta: number) => void;
+  onModeChange: (mode: HvacZoneMode) => void;
   canOperate: boolean;
   canConfigure: boolean;
 }
@@ -20,26 +21,43 @@ function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | '
   if (!zone.online) return { label: 'Offline', tone: 'critical' };
   if (zone.fault) return { label: 'Fault', tone: 'critical' };
   if (zone.demand) return { label: 'Heating', tone: 'warn' };
-  return { label: 'Idle', tone: 'good' };
+  return { label: 'Connected', tone: 'good' };
 }
 
-export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, canOperate, canConfigure }: RoomCardProps) {
+export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, onModeChange, canOperate, canConfigure }: RoomCardProps) {
   const state = zoneState(zone);
   const zoneKey = zone.zone_key || `zone-${zone.zone_id}`;
   const displayName = zone.name && zone.name !== zoneKey ? zone.name : zoneKey;
-  const mode = displayHvacMode(zone.setpoint_mode ?? zone.thermostat_mode ?? zone.mode, Boolean(zone.demand ?? zone.active));
+  const mode = displaySetpointMode(zone.setpoint_mode);
+  const modes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'STANDBY'];
   return (
     <motion.div
       whileHover={{ y: -2 }}
-      className="w-full text-left rounded-2xl p-4 app-surface shadow-soft border border-slate-100 min-h-[120px]"
+      className="thermostat-card thermostat-card--gunmalmg thermostat-card--overview w-full text-left"
     >
       <div className="w-full text-left flex items-start justify-between gap-3">
         <div>
-          <p className="text-base font-semibold">{displayName}</p>
-          <p className="text-xs text-muted mt-1">Target {zone.target_temperature_c?.toFixed(1) ?? '--'}°C</p>
+          <p className="text-base font-semibold">
+            {displayName}{zone.controlled_element_ids?.length ? ` [${zone.controlled_element_ids.join(',')}]` : ''}
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <HealthBadge label={state.label} tone={state.tone} />
+          <div className="thermostat-card__overview-status">
+            <HealthBadge label={state.label} tone={state.tone} />
+            <div className="thermostat-card__signal" aria-label={zone.demand ? 'Heating on' : 'Heating off'}>
+              <span className={zone.demand ? 'is-active' : ''} />{zone.demand ? 'ON' : 'OFF'}
+            </div>
+          </div>
+          {typeof zone.battery_percent === 'number' ? (
+            <span
+              className={`thermostat-card__battery ${zone.battery_percent <= 20 ? 'thermostat-card__battery--low' : ''}`}
+              aria-label={`Battery ${zone.battery_percent}%`}
+              title={`Battery ${zone.battery_percent}%`}
+            >
+              <IonIcon icon={batteryFullOutline} aria-hidden="true" />
+              <span>{zone.battery_percent}%</span>
+            </span>
+          ) : null}
           <details className="relative" onClick={(event) => event.stopPropagation()}>
             <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-muted hover:bg-slate-100" aria-label={`More options for ${displayName}`}>
               <IonIcon icon={ellipsisVerticalOutline} aria-hidden="true" />
@@ -52,31 +70,37 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
           </details>
         </div>
       </div>
-      <button type="button" onClick={onOpen} className="mt-3 w-full text-left">
-        <div className="flex items-center justify-between gap-3">
+      <div className="thermostat-card__temperature-row">
+        <button type="button" onClick={onOpen} className="mt-3 text-left" aria-label={`Open ${displayName} thermostat`}>
           <TemperatureBadge value={zone.current_temperature_c} />
-          <span className={`thermostat-mode thermostat-mode--${mode.toLowerCase()}`}>{mode}</span>
+        </button>
+        <div className="thermostat-mode-list thermostat-mode-list--overview" aria-label="Thermostat modes">
+          {modes.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              className={`thermostat-mode thermostat-mode--${candidate.toLowerCase()} ${candidate === mode ? '' : 'thermostat-mode--inactive'}`}
+              disabled={!canOperate}
+              onClick={(event) => { event.stopPropagation(); onModeChange(candidate); }}
+            >
+              {candidate === 'KOMFORT' ? 'Comfort' : candidate}
+            </button>
+          ))}
         </div>
-      </button>
-      <div className="mt-3 flex items-center justify-end gap-3">
-        <div className="flex items-center gap-1">
-          {canOperate ? <IonButton
-            size="small"
-            fill="clear"
-            className="text-lg font-bold"
-            onClick={(e) => { e.stopPropagation(); onSetpointChange(-0.5); }}
-          >
-            −
-          </IonButton> : null}
-          {canOperate ? <IonButton
-            size="small"
-            fill="clear"
-            className="text-lg font-bold"
-            onClick={(e) => { e.stopPropagation(); onSetpointChange(+0.5); }}
-          >
-            +
-          </IonButton> : null}
-        </div>
+      </div>
+      <div className="thermostat-card__lever" onClick={(event) => event.stopPropagation()}>
+        <span className="thermostat-card__lever-label">Setpoint</span>
+        <input
+          aria-label={`Setpoint for ${displayName}`}
+          type="range"
+          min="5"
+          max="35"
+          step="0.5"
+          value={zone.target_temperature_c ?? 20}
+          disabled={!canOperate}
+          onChange={(event) => onSetpointChange(Number(event.target.value) - (zone.target_temperature_c ?? 20))}
+        />
+        <span className="thermostat-card__lever-value">{zone.target_temperature_c?.toFixed(1) ?? '--'}°</span>
       </div>
     </motion.div>
   );

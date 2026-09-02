@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IonContent, IonPage } from '@ionic/react';
-import { useParams } from 'react-router-dom';
+import { IonContent, IonIcon, IonPage } from '@ionic/react';
+import { useHistory, useParams } from 'react-router-dom';
+import { arrowBackOutline } from 'ionicons/icons';
 import { AppHeader } from '../components/AppHeader';
 import { ThermostatDial } from '../components/ThermostatDial';
 import { apiClient } from '../api/client';
@@ -14,6 +15,7 @@ interface RouteParams {
 
 export function RoomDetailPage() {
   const { zoneRef } = useParams<RouteParams>();
+  const history = useHistory();
   const resolvedRef = decodeURIComponent(zoneRef);
   const [zone, setZone] = useState<MobileZone | null>(null);
   const [target, setTarget] = useState(21);
@@ -42,9 +44,30 @@ export function RoomDetailPage() {
 
   const applyIncomingZoneState = (nextZone: MobileZone) => {
     const pendingCommand = pendingCommandRef.current;
+    const hasDifferentCommandOutcome =
+      pendingCommand !== null &&
+      pendingCommand.id !== null &&
+      nextZone.setpoint_command_id !== null &&
+      nextZone.setpoint_command_id !== pendingCommand.id;
     const commandMatches =
       pendingCommand !== null &&
       (pendingCommand.id === null || pendingCommand.id === nextZone.setpoint_command_id);
+
+    // Do not let a late outcome for an older command replace the newer
+    // setpoint currently being confirmed in this view.
+    if (hasDifferentCommandOutcome) {
+      setZone((previous) => previous ? {
+        ...nextZone,
+        target_temperature_c: pendingCommand.target,
+        setpoint_pending: true,
+        setpoint_command_state: 'pending_device_feedback',
+        setpoint_command_id: pendingCommand.id,
+        setpoint_requested_target_c: pendingCommand.target,
+        setpoint_failure_reason: null,
+      } : nextZone);
+      return;
+    }
+
     const awaitingReportedTarget = commandMatches && nextZone.setpoint_pending;
     const nextZoneForDisplay = awaitingReportedTarget
       ? { ...nextZone, target_temperature_c: pendingCommand.target }
@@ -191,7 +214,7 @@ export function RoomDetailPage() {
           const result: MobileSetpointResponse = await mobileApi.setZoneSetpoint(
             resolvedRef,
             target,
-            selectedMode === 'MANUAL' ? undefined : SETPOINT_MODE_BY_NAME[selectedMode],
+            SETPOINT_MODE_BY_NAME[selectedMode],
           );
           const pending = Boolean(result.pending || result.command_state === 'pending_device_feedback');
           lastAppliedRef.current = target;
@@ -202,7 +225,10 @@ export function RoomDetailPage() {
                   ...prev,
                   target_temperature_c: pending ? prev.target_temperature_c : target,
                   setpoint_pending: pending,
-                  setpoint_mode: selectedMode === 'MANUAL' ? null : SETPOINT_MODE_BY_NAME[selectedMode],
+                  // Manual is an explicit controller profile. Omitting the
+                  // field means "whatever profile is active per channel", so
+                  // it can leave a multi-channel zone with mixed targets.
+                  setpoint_mode: SETPOINT_MODE_BY_NAME[selectedMode],
                   setpoint_command_state: result.command_state,
                   setpoint_command_id: result.command_id ?? null,
                   setpoint_requested_target_c: target,
@@ -279,9 +305,16 @@ export function RoomDetailPage() {
 
   return (
     <IonPage>
-      <AppHeader title={displayName} subtitle={zone?.name && zone.name !== zoneKey ? zoneKey : 'Thermostat Control'} />
+      <AppHeader
+        title={`${displayName}${zone?.controlled_element_ids?.length ? ` [${zone.controlled_element_ids.join(',')}]` : ''}`}
+        subtitle={zone?.name && zone.name !== zoneKey ? zoneKey : 'Thermostat Control'}
+      />
       <IonContent className="ion-padding">
-        <div className="space-y-5 pb-8">
+        <div className="room-detail-fullscreen space-y-5 pb-8">
+          <button type="button" className="room-detail-back" onClick={() => history.goBack()}>
+            <IonIcon icon={arrowBackOutline} aria-hidden="true" />
+            <span>Back to HVAC</span>
+          </button>
           <section className="rounded-3xl app-surface shadow-soft p-5">
             <div className="mb-3 flex items-center justify-end gap-2">
               <span
@@ -349,7 +382,7 @@ export function RoomDetailPage() {
                   onClick={() => { setSelectedMode(mode); setDirty(true); setSaveError(''); setSetpointState('idle'); }}
                   disabled={saving}
                 >
-                  {mode}
+                  {mode === 'KOMFORT' ? 'Comfort' : mode}
                 </button>
               ))}
             </div>

@@ -287,6 +287,7 @@ class ZoneOut(BaseModel):
     floor: str | None = None
     area_m2: float | None = None
     current_temperature_c: float | None = None
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
     target_temperature_c: float | None = None
     demand: bool | None = None
     active: bool | None = None
@@ -295,6 +296,7 @@ class ZoneOut(BaseModel):
     source_timestamp: str | None = None
     freshness_age_ms: int | None = None
     online: bool
+    controlled_element_ids: list[int] = Field(default_factory=list)
 
 
 class ChannelMetadataIn(BaseModel):
@@ -318,10 +320,12 @@ class TelemetryZoneIn(BaseModel):
     zone_id: int
     name: str | None = None
     current_temperature_c: float | None = None
+    battery_percent: int | None = Field(default=None, ge=0, le=100)
     target_temperature_c: float | None = None
     demand: bool | None = None
     active: bool | None = None
     fault: str | None = None
+    controlled_element_ids: list[int] | None = None
 
 
 class TelemetryChannelIn(BaseModel):

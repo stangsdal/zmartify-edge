@@ -6,6 +6,7 @@ import { freshnessFromAgeMs, type FreshnessInfo } from '../utils/freshness';
 export interface ZoneData {
   zone_id: string | number;
   name: string;
+  controlled_element_ids?: number[];
   target_temperature_c?: number;
   current_temperature_c?: number;
   mode?: 'heat' | 'cool' | 'auto' | 'off';

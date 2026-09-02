@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.db import get_connection
+from app.db import get_connection, get_database_backend
 from app.registry import RegistryNotFoundError
 
 NOTIFICATION_EVENT_TYPES = {
@@ -36,6 +36,90 @@ def _floats_close(a: float | None, b: float | None, tolerance: float = 0.05) -> 
     if a is None or b is None:
         return False
     return abs(float(a) - float(b)) <= tolerance
+
+
+def _ensure_hvac_projection_schema(conn: Any) -> None:
+    """Keep the thermostat-rooted projection available on existing edge DBs."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS hvac_controller_state (
+            device_id INTEGER PRIMARY KEY, valid INTEGER, inlet_sensor_present INTEGER,
+            inlet_temperature_c DOUBLE PRECISION, dhw_sensor_present INTEGER,
+            dhw_temperature_c DOUBLE PRECISION, total_current_ma DOUBLE PRECISION,
+            raw_status INTEGER, source_timestamp TEXT, updated_at TEXT)"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS hvac_element_state (
+            device_id INTEGER NOT NULL, element_id INTEGER NOT NULL, thermostat INTEGER,
+            status INTEGER, fault TEXT, battery_percent INTEGER,
+            current_temperature_c DOUBLE PRECISION, assigned_channel_ids_json TEXT,
+            source_timestamp TEXT, updated_at TEXT, PRIMARY KEY(device_id, element_id))"""
+    )
+    if get_database_backend() == "postgres":
+        # PostgreSQL aborts the whole transaction on a duplicate-column error.
+        # Keep this projection migration idempotent without relying on an
+        # exception that leaves the connection unusable.
+        for sql in (
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS thermostat_element_id INTEGER",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS controlled_element_ids_json TEXT",
+        ):
+            conn.execute(sql)
+    else:
+        for sql in (
+            "ALTER TABLE zone_state ADD COLUMN thermostat_element_id INTEGER",
+            "ALTER TABLE zone_state ADD COLUMN controlled_element_ids_json TEXT",
+        ):
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass
+
+
+def upsert_hvac_controller_state(device_external_id: str, state: dict[str, Any], *, source_timestamp: str | None) -> None:
+    now = _now_iso()
+    with get_connection() as conn:
+        _ensure_hvac_projection_schema(conn)
+        device = _resolve_device(conn, device_external_id)
+        conn.execute(
+            """INSERT INTO hvac_controller_state
+               (device_id, valid, inlet_sensor_present, inlet_temperature_c,
+                dhw_sensor_present, dhw_temperature_c, total_current_ma, raw_status,
+                source_timestamp, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(device_id) DO UPDATE SET
+                valid=excluded.valid, inlet_sensor_present=excluded.inlet_sensor_present,
+                inlet_temperature_c=excluded.inlet_temperature_c,
+                dhw_sensor_present=excluded.dhw_sensor_present,
+                dhw_temperature_c=excluded.dhw_temperature_c,
+                total_current_ma=excluded.total_current_ma, raw_status=excluded.raw_status,
+                source_timestamp=excluded.source_timestamp, updated_at=excluded.updated_at""",
+            (device["id"], int(bool(state.get("valid"))), int(bool(state.get("inlet_sensor_present"))),
+             state.get("inlet_temperature_c"), int(bool(state.get("dhw_sensor_present"))),
+             state.get("dhw_temperature_c"), state.get("total_current_ma"), state.get("raw_status"),
+             source_timestamp, now),
+        )
+
+
+def upsert_hvac_element_state(device_external_id: str, element: dict[str, Any], *, source_timestamp: str | None) -> None:
+    element_id = int(element["element_id"])
+    now = _now_iso()
+    with get_connection() as conn:
+        _ensure_hvac_projection_schema(conn)
+        device = _resolve_device(conn, device_external_id)
+        conn.execute(
+            """INSERT INTO hvac_element_state
+               (device_id, element_id, thermostat, status, fault, battery_percent,
+                current_temperature_c, assigned_channel_ids_json, source_timestamp, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(device_id, element_id) DO UPDATE SET
+                thermostat=excluded.thermostat, status=excluded.status, fault=excluded.fault,
+                battery_percent=excluded.battery_percent,
+                current_temperature_c=excluded.current_temperature_c,
+                assigned_channel_ids_json=excluded.assigned_channel_ids_json,
+                source_timestamp=excluded.source_timestamp, updated_at=excluded.updated_at""",
+            (device["id"], element_id, int(bool(element.get("thermostat"))), element.get("status"),
+             element.get("fault"), element.get("battery_percent"), element.get("current_temperature_c"),
+             json.dumps(element.get("assigned_channel_ids") or [], separators=(",", ":")), source_timestamp, now),
+        )
 
 
 def _find_pending_setpoint_command_id(
@@ -575,12 +659,15 @@ def ensure_default_channels(device_external_id: str, channel_count: int = 16) ->
 
 def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = True) -> list[dict[str, Any]]:
     ensure_default_zones(device_external_id)
+    ensure_default_channels(device_external_id)
     with get_connection() as conn:
+        _ensure_hvac_projection_schema(conn)
         device = _resolve_device(conn, device_external_id)
         rows = conn.execute(
             """
             SELECT zm.uuid AS zone_uuid, zm.zone_id, zm.name, zm.icon, zm.sort_order, zm.floor, zm.area_m2,
-                   zs.current_temperature, zs.target_temperature, zs.demand, zs.active, zs.fault,
+                   zs.thermostat_element_id, zs.controlled_element_ids_json,
+                   zs.current_temperature, zs.battery_percent, zs.target_temperature, zs.demand, zs.active, zs.fault,
                    zs.source_timestamp, zs.updated_at,
                    ds.online AS device_online
             FROM zone_metadata zm
@@ -591,6 +678,25 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
             """,
             (device["id"],),
         ).fetchall()
+
+        channel_link_rows = conn.execute(
+            "SELECT channel_id, linked_zone_ids_json FROM channel_metadata WHERE device_id = ?",
+            (device["id"],),
+        ).fetchall()
+        controlled_elements_by_channel: dict[int, list[int]] = {}
+        for channel_row in channel_link_rows:
+            channel_id = int(channel_row["channel_id"])
+            controlled_elements_by_channel[channel_id] = sorted(
+                _parse_int_list_json(channel_row["linked_zone_ids_json"])
+            )
+        has_controller_mapping = any(
+            row["controlled_element_ids_json"] not in (None, "", "[]") for row in rows
+        )
+        if has_controller_mapping:
+            rows = [
+                row for row in rows
+                if row["controlled_element_ids_json"] not in (None, "", "[]")
+            ]
 
         now = datetime.now(UTC)
         command_states: dict[int, dict[str, Any]] = {}
@@ -625,6 +731,7 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                 "floor": row["floor"],
                 "area_m2": row["area_m2"],
                 "current_temperature_c": row["current_temperature"],
+                "battery_percent": row["battery_percent"],
                 "target_temperature_c": displayed_target_c,
                 "demand": None if row["demand"] is None else bool(row["demand"]),
                 "active": None if row["active"] is None else bool(row["active"]),
@@ -633,6 +740,12 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                 "source_timestamp": row["source_timestamp"],
                 "freshness_age_ms": _age_ms(row["updated_at"], now),
                 "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
+                "thermostat_element_id": row["thermostat_element_id"],
+                "controlled_element_ids": (
+                    _parse_int_list_json(row["controlled_element_ids_json"])
+                    if row["controlled_element_ids_json"] not in (None, "")
+                    else controlled_elements_by_channel.get(int(row["zone_id"]), [])
+                ),
                 "setpoint_command_state": zone_state.get("setpoint_command_state", "confirmed"),
                 "setpoint_pending": pending,
                 "setpoint_command_id": zone_state.get("setpoint_command_id"),
@@ -1116,8 +1229,13 @@ def ingest_device_twin_snapshot(
     for zone in zones or []:
         zone_id = int(zone["zone_id"])
         reported_target_c = zone.get("target_temperature_c")
-        previous_zone = get_device_zone(device_external_id, zone_id, optimistic_setpoint=False)
-        previous_target_c = previous_zone.get("target_temperature_c")
+        try:
+            previous_zone = get_device_zone(device_external_id, zone_id, optimistic_setpoint=False)
+            previous_target_c = previous_zone.get("target_temperature_c")
+        except RegistryNotFoundError:
+            # A complete controller snapshot may introduce a channel before
+            # its metadata/mapping has been materialised in Edge.
+            previous_target_c = None
         zone_demand = zone.get("demand")
         zone_active = zone.get("active")
         if zone_demand is None and zone_active is not None:
@@ -1126,12 +1244,15 @@ def ingest_device_twin_snapshot(
             device_external_id,
             zone_id,
             current_temperature=zone.get("current_temperature_c"),
+            battery_percent=zone.get("battery_percent"),
             target_temperature=zone.get("target_temperature_c"),
             demand=zone_demand,
             active=zone_active,
             fault=zone.get("fault"),
             source=source,
             source_timestamp=source_timestamp,
+            thermostat_element_id=zone.get("thermostat_element_id"),
+            controlled_element_ids=[int(value) for value in zone.get("controlled_element_ids", []) if isinstance(value, int)],
         )
         if (
             source != "mobile_api"
@@ -1163,6 +1284,38 @@ def ingest_device_twin_snapshot(
             )
             setpoint_feedback_count += 1
         zone_count += 1
+
+    # The controller is authoritative for channel -> element assignments.
+    # Store the reported mapping, rather than maintaining a manually curated
+    # list in Edge. Here zone_id is the channel/zone ID in the channel-centric
+    # HVAC model.
+    if zones and any(zone.get("controlled_element_ids") is not None for zone in zones):
+        ensure_default_channels(device_external_id)
+        with get_connection() as conn:
+            device = _resolve_device(conn, device_external_id)
+            # A device twin is a complete controller snapshot. Clear old
+            # mappings first so removed channels/elements cannot remain as
+            # phantom HVAC zones in Edge.
+            conn.execute(
+                """
+                UPDATE channel_metadata
+                SET linked_zone_ids_json = '[]', updated_at = ?
+                WHERE device_id = ?
+                """,
+                (now_iso, device["id"]),
+            )
+            for zone in zones:
+                channel_id = int(zone["zone_id"])
+                element_ids = sorted({int(item) for item in (zone.get("controlled_element_ids") or []) if int(item) > 0})
+                conn.execute(
+                    """
+                    UPDATE channel_metadata
+                    SET linked_zone_ids_json = ?, updated_at = ?
+                    WHERE device_id = ? AND channel_id = ?
+                    """,
+                    (json.dumps(element_ids, separators=(",", ":")), now_iso, device["id"], channel_id),
+                )
+            conn.commit()
 
     channel_count = 0
     for channel in channels or []:
@@ -1657,35 +1810,45 @@ def upsert_zone_state(
     zone_id: int,
     *,
     current_temperature: float | None = None,
+    battery_percent: int | None = None,
     target_temperature: float | None = None,
     demand: bool | None = None,
     active: bool | None = None,
     fault: str | None = None,
     source: str = "rest",
     source_timestamp: str | None = None,
+    thermostat_element_id: int | None = None,
+    controlled_element_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     ensure_default_zones(device_external_id, zone_count=max(3, int(zone_id)))
     now = _now_iso()
     with get_connection() as conn:
+        _ensure_hvac_projection_schema(conn)
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, target_temperature, demand, active, fault, source_timestamp FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, thermostat_element_id, controlled_element_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
 
         persisted_current_temperature = row["current_temperature"] if current_temperature is None and row is not None else current_temperature
+        persisted_battery_percent = row["battery_percent"] if battery_percent is None and row is not None else battery_percent
         persisted_target_temperature = row["target_temperature"] if target_temperature is None and row is not None else target_temperature
         persisted_demand = row["demand"] if demand is None and row is not None else (None if demand is None else int(bool(demand)))
         persisted_active = row["active"] if active is None and row is not None else (None if active is None else int(bool(active)))
         persisted_fault = row["fault"] if fault is None and row is not None else fault
         persisted_source_timestamp = source_timestamp if source_timestamp is not None else (row["source_timestamp"] if row is not None else now)
+        persisted_thermostat_element_id = thermostat_element_id if thermostat_element_id is not None else (row["thermostat_element_id"] if row is not None else None)
+        persisted_controlled_element_ids = json.dumps(controlled_element_ids, separators=(",", ":")) if controlled_element_ids is not None else (row["controlled_element_ids_json"] if row is not None else "[]")
 
         conn.execute(
             """
-            INSERT INTO zone_state(device_id, zone_id, current_temperature, target_temperature, demand, active, fault, source_timestamp, updated_at, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, updated_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id, zone_id) DO UPDATE SET
+                thermostat_element_id = excluded.thermostat_element_id,
+                controlled_element_ids_json = excluded.controlled_element_ids_json,
                 current_temperature = excluded.current_temperature,
+                battery_percent = excluded.battery_percent,
                 target_temperature = excluded.target_temperature,
                 demand = excluded.demand,
                 active = excluded.active,
@@ -1697,7 +1860,10 @@ def upsert_zone_state(
             (
                 device["id"],
                 zone_id,
+                persisted_thermostat_element_id,
+                persisted_controlled_element_ids,
                 persisted_current_temperature,
+                persisted_battery_percent,
                 persisted_target_temperature,
                 persisted_demand,
                 persisted_active,

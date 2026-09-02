@@ -599,6 +599,24 @@ hvac_setpoint_profiles
 
 Do not store irrigation zones in the HVAC zone table.
 
+For the AHC9000 product, the public HVAC zone identity is the controller
+channel. A channel may control one or more physical elements; the controller
+reads the element assignment maps during its initial configuration scan and
+publishes the derived `channel -> element_ids` relation. Edge and the UI must
+consume that reported relation and must not maintain a hardcoded mapping or
+invert it into element-based zones. A zone name may therefore be rendered as
+`description [element ids]` to make commissioning explicit.
+
+The Modbus register source must also be distinguished from the public domain
+owner. CHANNELS contains the channel mode, desired setpoint and actuator
+current; it has no independent air-temperature or battery register. ELEMENTS
+contains assignment data and may represent either a valve/actuator or a room
+thermostat. Only an element whose STATUS has the TP bit set may provide air
+temperature and battery data. Edge exposes those thermostat readings on the
+channel zone, while valve elements contribute assignment, output and current
+consumption only. Missing thermostat readings must be represented as unknown,
+never as a real 0 C value.
+
 ### 6.7 Irrigation product tables
 
 ```text

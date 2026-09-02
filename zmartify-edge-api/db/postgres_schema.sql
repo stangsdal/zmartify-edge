@@ -228,7 +228,10 @@ CREATE TABLE IF NOT EXISTS channel_metadata (
 CREATE TABLE IF NOT EXISTS zone_state (
     device_id INTEGER NOT NULL,
     zone_id INTEGER NOT NULL,
+    thermostat_element_id INTEGER,
+    controlled_element_ids_json TEXT,
     current_temperature DOUBLE PRECISION,
+    battery_percent INTEGER,
     target_temperature DOUBLE PRECISION,
     demand INTEGER,
     active INTEGER,
@@ -237,6 +240,35 @@ CREATE TABLE IF NOT EXISTS zone_state (
     source_timestamp TEXT,
     updated_at TEXT,
     PRIMARY KEY(device_id, zone_id),
+    FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS hvac_controller_state (
+    device_id INTEGER PRIMARY KEY,
+    valid INTEGER,
+    inlet_sensor_present INTEGER,
+    inlet_temperature_c DOUBLE PRECISION,
+    dhw_sensor_present INTEGER,
+    dhw_temperature_c DOUBLE PRECISION,
+    total_current_ma DOUBLE PRECISION,
+    raw_status INTEGER,
+    source_timestamp TEXT,
+    updated_at TEXT,
+    FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS hvac_element_state (
+    device_id INTEGER NOT NULL,
+    element_id INTEGER NOT NULL,
+    thermostat INTEGER,
+    status INTEGER,
+    fault TEXT,
+    battery_percent INTEGER,
+    current_temperature_c DOUBLE PRECISION,
+    assigned_channel_ids_json TEXT,
+    source_timestamp TEXT,
+    updated_at TEXT,
+    PRIMARY KEY(device_id, element_id),
     FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 

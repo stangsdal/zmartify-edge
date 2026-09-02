@@ -282,7 +282,14 @@ def publish_setpoint_command(
         command_id=command_id,
     )
     for topic in command_topics_for_setpoint(device_id, int(zone_id)):
-        _publish_to_topic(device_id, topic, v2_payload if _is_v2_command_topic(topic) else legacy_payload)
+        # Commands are actions, not state. Retaining them causes a controller
+        # to replay an old setpoint every time it reconnects to MQTT.
+        _publish_to_topic(
+            device_id,
+            topic,
+            v2_payload if _is_v2_command_topic(topic) else legacy_payload,
+            retain=False,
+        )
 
 
 def publish_zone_name_command(device_id: str, zone_id: int, zone_name: str) -> None:
@@ -296,3 +303,10 @@ def publish_zone_name_command(device_id: str, zone_id: int, zone_name: str) -> N
     )
     for topic in command_topics_for_zone_name(device_id, int(zone_id)):
         _publish_to_topic(device_id, topic, v2_payload if _is_v2_command_topic(topic) else name)
+
+
+def publish_device_ota_check(device_id: str) -> dict:
+    """Tell a device to poll Edge for a staged firmware update."""
+    topic = f"{_mqtt_base_topic()}/{device_id}/gateway/ota-check/set"
+    _publish_to_topic(device_id, topic, "1", retain=False)
+    return {"device_id": device_id, "status": "published", "topic": topic}

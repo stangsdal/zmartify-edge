@@ -7,6 +7,7 @@ import { RoomCard } from '../components/RoomCard';
 import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
 import { apiClient } from '../api/client';
 import { useAccess } from '../auth/AccessContext';
+import { HvacZoneMode, SETPOINT_MODE_BY_NAME } from '../utils/hvacMode';
 
 interface RoomWithRef extends MobileZone {
   zone_ref: string;
@@ -47,6 +48,17 @@ export function RoomsPage() {
       );
     } catch (error) {
       console.error('setpoint change failed', error);
+    }
+  };
+
+  const handleModeChange = async (room: RoomWithRef, mode: HvacZoneMode) => {
+    if (!room.zone_ref) return;
+    const target = room.target_temperature_c ?? 20;
+    try {
+      await mobileApi.setZoneSetpoint(room.zone_ref, target, SETPOINT_MODE_BY_NAME[mode]);
+      setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, setpoint_mode: SETPOINT_MODE_BY_NAME[mode] } : r)));
+    } catch (error) {
+      console.error('mode change failed', error);
     }
   };
 
@@ -116,7 +128,9 @@ export function RoomsPage() {
     let cancelled = false;
 
     const loadRooms = async () => {
-      const siteZones = await mobileApi.getSiteZones(String(selectedSiteId));
+      const selectedSite = context?.sites.find((site) => site.id === selectedSiteId);
+      if (!selectedSite) return;
+      const siteZones = await mobileApi.getSiteZones(selectedSite.uuid);
       const nextRooms: RoomWithRef[] = (siteZones.devices || []).flatMap((device) =>
         (device.zones || []).map((zone) => ({
           ...zone,
@@ -152,7 +166,7 @@ export function RoomsPage() {
       window.clearInterval(intervalId);
       emptyResponseStreakRef.current = 0;
     };
-  }, [selectedSiteId]);
+  }, [context, selectedSiteId]);
 
   useEffect(() => {
     const activeRefs = new Set(rooms.map((room) => room.zone_ref));
@@ -247,6 +261,9 @@ export function RoomsPage() {
                 }}
                 onSetpointChange={(delta) => {
                   void handleSetpointChange(room, delta);
+                }}
+                onModeChange={(mode) => {
+                  void handleModeChange(room, mode);
                 }}
                 canOperate={canOperate}
                 canConfigure={canConfigure}

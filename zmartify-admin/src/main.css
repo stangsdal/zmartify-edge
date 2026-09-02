@@ -74,6 +74,116 @@ body.dark-mode {
   box-shadow: 0 18px 40px rgba(21, 34, 56, 0.1);
 }
 
+.thermostat-card--overview {
+  max-width: none;
+  padding: 18px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--app-surface) 96%, #0f766e), var(--app-surface));
+}
+
+.thermostat-card__temperature-label {
+  display: block;
+  margin-top: 4px;
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.thermostat-card__overview-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thermostat-card__temperature-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.thermostat-mode-list--overview {
+  justify-content: flex-end;
+  margin: 10px 0 0;
+}
+
+.thermostat-mode-list--overview .thermostat-mode {
+  border: 0;
+  cursor: pointer;
+}
+
+.thermostat-mode-list--overview .thermostat-mode:disabled {
+  cursor: default;
+  opacity: .65;
+}
+
+.thermostat-card__lever {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  border-top: 1px solid var(--app-border);
+  padding-top: 12px;
+}
+
+.thermostat-card__lever-label,
+.thermostat-card__lever-value {
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.thermostat-card__lever-value {
+  min-width: 42px;
+  color: var(--ion-text-color);
+  text-align: right;
+  letter-spacing: 0;
+}
+
+.thermostat-card__lever input {
+  width: 100%;
+  accent-color: #0f766e;
+  cursor: pointer;
+}
+
+.thermostat-card__lever input:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.room-detail-fullscreen {
+  min-height: calc(100vh - 112px);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.room-detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--app-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.room-detail-back:hover {
+  color: var(--ion-text-color);
+}
+
+@media (max-width: 620px) {
+  .thermostat-card__overview-status { gap: 6px; }
+  .thermostat-mode-list--overview { gap: 4px; }
+  .thermostat-mode-list--overview .thermostat-mode { padding-inline: 7px; }
+
+  .thermostat-card__temperature-row { align-items: flex-start; }
+}
+
 .thermostat-card__eyebrow {
   margin: 0;
   font-family: 'Sora', ui-sans-serif, system-ui;
@@ -335,4 +445,21 @@ body.dark-mode {
     margin-left: 252px;
     padding-bottom: 0;
   }
+}
+.thermostat-card__battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--color-muted, #64748b);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.thermostat-card__battery ion-icon {
+  font-size: 0.95rem;
+}
+
+.thermostat-card__battery--low {
+  color: #dc2626;
 }

@@ -62,6 +62,37 @@ export interface DeviceDiscovery {
   };
 }
 
+export interface DeviceOtaStage {
+  device_id: string;
+  version: string;
+  sha256: string;
+  size_bytes: number;
+  force: boolean;
+  notes?: string | null;
+  uploaded_at: string;
+}
+
+export interface DeviceOtaTrigger {
+  device_id: string;
+  status: string;
+  topic: string;
+}
+
+export interface DeviceOtaStatus {
+  device_id: string;
+  state: 'not_staged' | 'staged' | 'awaiting_device' | 'deployed';
+  deployed: boolean;
+  staged_version?: string | null;
+  current_version?: string | null;
+  staged_at?: string | null;
+  triggered_at?: string | null;
+  trigger_status?: string | null;
+  last_seen_at?: string | null;
+  sha256?: string | null;
+  size_bytes?: number | null;
+  last_error?: string | null;
+}
+
 export interface DeviceClaimRequest {
   base_url: string;
   claim_token?: string;

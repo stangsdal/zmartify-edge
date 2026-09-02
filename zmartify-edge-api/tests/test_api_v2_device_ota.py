@@ -36,6 +36,15 @@ def test_api_v2_device_ota_flow(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(ota, "get_device_onboarding_context", lambda _device_id: {"local_url": "http://192.168.10.57"})
     monkeypatch.setattr(ota, "push_remote_firmware", lambda _base_url, payload: {"written_bytes": len(payload)})
     monkeypatch.setattr(ota, "trigger_remote_reboot", lambda _base_url: {"ok": True})
+    monkeypatch.setattr(
+        ota,
+        "publish_device_ota_check",
+        lambda device_id: {
+            "device_id": device_id,
+            "status": "published",
+            "topic": f"homie/5/{device_id}/gateway/ota-check/set",
+        },
+    )
 
     payload = b"firmware-v2-payload"
 
@@ -56,6 +65,14 @@ def test_api_v2_device_ota_flow(monkeypatch, tmp_path: Path):
 
     expected_sha = hashlib.sha256(payload).hexdigest()
     assert staged_json["sha256"] == expected_sha
+
+    triggered = client.post(
+        "/api/v2/devices/hvac-gateway-ota01/ota/trigger",
+        headers={"Authorization": "Bearer emergency-token"},
+    )
+    assert triggered.status_code == 200
+    assert triggered.json()["status"] == "published"
+    assert triggered.json()["topic"].endswith("/gateway/ota-check/set")
 
     poll_available = client.get(
         "/api/v2/devices/hvac-gateway-ota01/ota/poll",

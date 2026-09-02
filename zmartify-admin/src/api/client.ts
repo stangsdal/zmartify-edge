@@ -121,6 +121,14 @@ export class ApiClient {
     });
   }
 
+  upload(endpoint: string, body: BodyInit, contentType = 'application/octet-stream', extraHeaders: Record<string, string> = {}): Promise<any> {
+    return this.fetch(endpoint, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': contentType, ...extraHeaders },
+    });
+  }
+
   put(endpoint: string, body?: any): Promise<any> {
     return this.fetch(endpoint, {
       method: 'PUT',

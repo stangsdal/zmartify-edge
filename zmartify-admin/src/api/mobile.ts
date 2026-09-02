@@ -56,10 +56,12 @@ export interface MobileZone {
   humidity?: number | null;
   window_open?: boolean | null;
   current_temperature_c?: number;
+  battery_percent?: number | null;
   target_temperature_c?: number;
   demand?: boolean;
   active?: boolean;
   online?: boolean;
+  controlled_element_ids?: number[];
   fault?: string | null;
   freshness_age_ms?: number | null;
   setpoint_command_state?: string;

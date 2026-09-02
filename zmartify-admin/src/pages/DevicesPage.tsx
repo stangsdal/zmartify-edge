@@ -13,7 +13,7 @@ import {
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { deviceApi } from '../api/devices';
-import { Device, DeviceControllerSettings, DeviceSdCardStatus, NilanHvacState } from '../types/api';
+import { Device, DeviceControllerSettings, DeviceOtaStatus, DeviceSdCardStatus, NilanHvacState } from '../types/api';
 import { useDeviceZones } from '../hooks/useDeviceZones';
 import { ZoneCard } from '../components/ZoneCard';
 import { AppHeader } from '../components/AppHeader';
@@ -499,6 +499,93 @@ function ControllerSettingsPanel({ deviceId }: { deviceId: string }) {
   );
 }
 
+function FirmwareOtaPanel({ device }: { device: Device }) {
+  const [otaStatus, setOtaStatus] = useState<DeviceOtaStatus | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const refreshOtaStatus = async () => {
+    try {
+      setOtaStatus(await deviceApi.getFirmwareOtaStatus(device.device_id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  useEffect(() => { void refreshOtaStatus(); }, [device.device_id]);
+
+  const stageAndTrigger = async () => {
+    if (!file) {
+      setError('Select a firmware .bin file first.');
+      return;
+    }
+    try {
+      setBusy(true);
+      setError('');
+      setMessage('Uploading and staging firmware...');
+      const staged = await deviceApi.stageFirmware(
+        device.device_id,
+        file,
+        false,
+        `Admin OTA upload for ${device.device_id}`,
+      );
+      setMessage(`Firmware ${staged.version} staged (${staged.size_bytes} bytes, SHA-256 ${staged.sha256.slice(0, 12)}...). Triggering controller poll...`);
+      const triggered = await deviceApi.triggerFirmwareOta(device.device_id);
+      setMessage(`Firmware ${staged.version} staged and OTA poll triggered (${triggered.status}). Controller will download it from Edge.`);
+      await refreshOtaStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setMessage('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+      <div className="mb-2">
+        <p className="font-semibold">Firmware OTA</p>
+        <p className="text-xs text-muted">Upload a signed .bin named with its release version, e.g. zmartify-hvac-ahc9000-0.3.12.bin.</p>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        <IonItem>
+          <IonLabel position="stacked">Firmware binary</IonLabel>
+          <input
+            className="mt-2 block w-full text-sm"
+            type="file"
+            accept=".bin,application/octet-stream"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+        </IonItem>
+      </div>
+      {error ? <p className="mt-2 text-sm text-rose-600">{error}</p> : null}
+      {message ? <p className="mt-2 text-sm text-emerald-700">{message}</p> : null}
+      {otaStatus ? (
+        <div className="mt-3 rounded-lg bg-slate-50 p-2 text-xs">
+          <p><span className="font-semibold">OTA status:</span> {otaStatus.state}</p>
+          <p>Staged: {otaStatus.staged_version || '—'} · Controller: {otaStatus.current_version || '—'}</p>
+          {otaStatus.triggered_at ? <p>Triggered: {otaStatus.triggered_at}</p> : null}
+          {otaStatus.last_error ? <p className="text-rose-600">{otaStatus.last_error}</p> : null}
+          <IonButton fill="clear" size="small" onClick={() => { void refreshOtaStatus(); }}>Refresh status</IonButton>
+        </div>
+      ) : null}
+      <IonButton className="mt-3" size="small" onClick={() => { void stageAndTrigger(); }} disabled={busy}>
+        {busy ? 'Deploying...' : 'Stage and trigger OTA'}
+      </IonButton>
+    </div>
+  );
+}
+
+// Device zone and controller panels remain available as implementation pieces,
+// but are intentionally not exposed from the Devices inventory. HVAC is
+// managed from the dedicated HVAC view.
+void isIrrigationDevice;
+void DeviceZonesPanel;
+void IrrigationZonesPanel;
+void ControllerSettingsPanel;
+
 export function DevicesPage() {
   const history = useHistory();
   const [devices, setDevices] = useState<Device[]>([]);
@@ -512,7 +599,6 @@ export function DevicesPage() {
   const [creating, setCreating] = useState(false);
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
 
   const fetchDevices = async () => {
     try {
@@ -674,17 +760,6 @@ export function DevicesPage() {
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {!isNilanDevice(device) ? (
-                        <IonButton
-                          size="small"
-                          fill="outline"
-                          onClick={() =>
-                            setExpandedDeviceId(expandedDeviceId === device.device_id ? null : device.device_id)
-                          }
-                        >
-                          {expandedDeviceId === device.device_id ? 'Hide zones' : 'Zones'}
-                        </IonButton>
-                      ) : null}
                       <IonButton
                         size="small"
                         fill="outline"
@@ -708,18 +783,7 @@ export function DevicesPage() {
                   {isNilanDevice(device) ? (
                     <NilanStatePanel deviceId={device.device_id} />
                   ) : null}
-                  {expandedDeviceId === device.device_id ? (
-                    <div className="mt-3 rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
-                      {isIrrigationDevice(device) ? (
-                        <>
-                          <IrrigationZonesPanel deviceId={device.device_id} />
-                          <ControllerSettingsPanel deviceId={device.device_id} />
-                        </>
-                      ) : (
-                        <DeviceZonesPanel deviceId={device.device_id} />
-                      )}
-                    </div>
-                  ) : null}
+                  <FirmwareOtaPanel device={device} />
                 </article>
               ))}
             </section>

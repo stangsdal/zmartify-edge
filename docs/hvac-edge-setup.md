@@ -187,3 +187,18 @@ docker compose up -d --build zmartify-edge-api
 For a clean reinstall, stop the stack and replace the deployment directory
 only after confirming that no data is needed. This guide does not prescribe
 deleting volumes; that is an explicit operator decision.
+
+# AHC9000 data model
+
+For AHC9000 devices, Edge must treat each Wavin channel with a thermostat
+assignment as one public HVAC zone. Each channel-zone owns one or more assigned
+elements: thermostat elements provide room telemetry, while valve elements
+provide valve membership, output and current data. The mapping is read from the
+controller's live element assignment data and persisted in
+`zone_state.controlled_element_ids_json`; Edge must not maintain a hardcoded
+channel-to-element table. Packed setpoint values are read and written by the
+zone's single Modbus channel. Channel 17 is separate and is not a room zone.
+
+Controller-wide telemetry is stored separately. The Modbus inlet sensor is
+represented as `inlet_temperature_c` (the English field name for fremløb), and
+unknown sensor values are `null`, not zero.

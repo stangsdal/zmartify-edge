@@ -10,6 +10,9 @@ import {
   DeviceFreshness,
   NilanHvacState,
   DeviceSdCardStatus,
+  DeviceOtaStage,
+  DeviceOtaTrigger,
+  DeviceOtaStatus,
 } from '../types/api';
 
 export const deviceApi = {
@@ -65,6 +68,20 @@ export const deviceApi = {
 
   initializeSdCard: (deviceId: string, format = true): Promise<DeviceSdCardStatus> =>
     apiClient.post(`/api/v2/devices/${deviceId}/storage/sd-card/initialize`, { format }),
+
+  stageFirmware: (deviceId: string, firmware: Blob, force = false, notes?: string): Promise<DeviceOtaStage> =>
+    apiClient.upload(
+      `/api/v2/devices/${encodeURIComponent(deviceId)}/ota/stage?force=${force}${notes ? `&notes=${encodeURIComponent(notes)}` : ''}`,
+      firmware,
+      'application/octet-stream',
+      { 'X-Firmware-Filename': firmware instanceof File ? firmware.name : '' },
+    ),
+
+  triggerFirmwareOta: (deviceId: string): Promise<DeviceOtaTrigger> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/ota/trigger`, {}),
+
+  getFirmwareOtaStatus: (deviceId: string): Promise<DeviceOtaStatus> =>
+    apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/ota/status`),
   
   assignToSite: (deviceId: string, siteId: number): Promise<Device> =>
     apiClient.post(`/devices/${deviceId}/site`, { site_id: siteId }),
