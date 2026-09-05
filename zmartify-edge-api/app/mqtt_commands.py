@@ -11,7 +11,12 @@ from app.contracts import ContractValidationError, validate_mqtt_v2_command
 from app.db import get_connection
 from app.domain_model import log_event
 from app.registry import get_device_mqtt_credentials
-from app.mqtt_v2_topics import command_topic_for_irrigation, command_topics_for_setpoint, command_topics_for_zone_name
+from app.mqtt_v2_topics import (
+    command_topic_for_irrigation,
+    command_topic_for_zone_control,
+    command_topics_for_setpoint,
+    command_topics_for_zone_name,
+)
 
 
 class MqttCommandError(RuntimeError):
@@ -303,6 +308,49 @@ def publish_zone_name_command(device_id: str, zone_id: int, zone_name: str) -> N
     )
     for topic in command_topics_for_zone_name(device_id, int(zone_id)):
         _publish_to_topic(device_id, topic, v2_payload if _is_v2_command_topic(topic) else name)
+
+
+def publish_zone_mode_command(device_id: str, zone_id: int, zone_mode: int, *, command_id: str | None = None) -> dict:
+    mode = int(zone_mode)
+    if mode < 0 or mode > 5:
+        raise MqttCommandError("zone_mode must be an integer from 0 to 5")
+    payload = _build_v2_command_payload(
+        command_type="hvac.zone.mode",
+        target_ref=f"zone:{int(zone_id)}",
+        parameters={"zone_mode": mode},
+        command_id=command_id,
+    )
+    topic = command_topic_for_zone_control(device_id, int(zone_id), "mode")
+    _publish_to_topic(device_id, topic, payload, retain=False)
+    return {"command_id": json.loads(payload)["command_id"], "status": "published", "topic": topic}
+
+
+def publish_zone_configuration_command(
+    device_id: str,
+    zone_id: int,
+    configuration: dict[str, float],
+    *,
+    command_id: str | None = None,
+) -> dict:
+    if not configuration:
+        raise MqttCommandError("zone configuration requires at least one field")
+    allowed = {
+        "min_temperature_c", "max_temperature_c", "floor_min_temperature_c",
+        "floor_max_temperature_c", "alarm_min_temperature_c", "alarm_max_temperature_c",
+        "hysteresis_c",
+    }
+    parameters = {key: float(value) for key, value in configuration.items() if key in allowed}
+    if not parameters:
+        raise MqttCommandError("zone configuration contains no supported fields")
+    payload = _build_v2_command_payload(
+        command_type="hvac.zone.configuration",
+        target_ref=f"zone:{int(zone_id)}",
+        parameters=parameters,
+        command_id=command_id,
+    )
+    topic = command_topic_for_zone_control(device_id, int(zone_id), "configuration")
+    _publish_to_topic(device_id, topic, payload, retain=False)
+    return {"command_id": json.loads(payload)["command_id"], "status": "published", "topic": topic}
 
 
 def publish_device_ota_check(device_id: str) -> dict:

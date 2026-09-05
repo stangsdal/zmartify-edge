@@ -1,4 +1,5 @@
 from app.mqtt_v2_topics import (
+    command_topic_for_zone_control,
     command_topics_for_setpoint,
     command_topics_for_zone_name,
     outcome_subscription_topics,
@@ -36,3 +37,8 @@ def test_parse_nilan_hvac_state_topic():
         "zmartify-hvac-nilan-aabbcc",
         "reported_state",
     )
+
+
+def test_zone_control_topics_use_v2_commands():
+    assert command_topic_for_zone_control("dev-1", 2, "mode") == "zmartify/v2/devices/dev-1/commands/hvac/zones/2/mode"
+    assert command_topic_for_zone_control("dev-1", 2, "configuration") == "zmartify/v2/devices/dev-1/commands/hvac/zones/2/configuration"

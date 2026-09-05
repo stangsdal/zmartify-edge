@@ -61,12 +61,14 @@ def _ensure_hvac_projection_schema(conn: Any) -> None:
         for sql in (
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS thermostat_element_id INTEGER",
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS controlled_element_ids_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS assigned_channel_ids_json TEXT",
         ):
             conn.execute(sql)
     else:
         for sql in (
             "ALTER TABLE zone_state ADD COLUMN thermostat_element_id INTEGER",
             "ALTER TABLE zone_state ADD COLUMN controlled_element_ids_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN assigned_channel_ids_json TEXT",
         ):
             try:
                 conn.execute(sql)
@@ -157,7 +159,7 @@ def _find_pending_setpoint_command_id(
 
 
 def _setpoint_command_timeout_ms() -> int:
-    raw = os.getenv("ZMART_EDGE_SETPOINT_PENDING_TIMEOUT_S", "20").strip()
+    raw = os.getenv("ZMART_EDGE_SETPOINT_PENDING_TIMEOUT_S", "45").strip()
     try:
         timeout_s = max(1, int(raw))
     except ValueError:
@@ -666,7 +668,7 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
         rows = conn.execute(
             """
             SELECT zm.uuid AS zone_uuid, zm.zone_id, zm.name, zm.icon, zm.sort_order, zm.floor, zm.area_m2,
-                   zs.thermostat_element_id, zs.controlled_element_ids_json,
+                   zs.thermostat_element_id, zs.controlled_element_ids_json, zs.assigned_channel_ids_json,
                    zs.current_temperature, zs.battery_percent, zs.target_temperature, zs.demand, zs.active, zs.fault,
                    zs.source_timestamp, zs.updated_at,
                    ds.online AS device_online
@@ -697,6 +699,14 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                 row for row in rows
                 if row["controlled_element_ids_json"] not in (None, "", "[]")
             ]
+        has_assigned_channel_mapping = any(
+            row["assigned_channel_ids_json"] not in (None, "", "[]") for row in rows
+        )
+        if has_assigned_channel_mapping:
+            rows = [
+                row for row in rows
+                if row["assigned_channel_ids_json"] not in (None, "", "[]")
+            ]
 
         now = datetime.now(UTC)
         command_states: dict[int, dict[str, Any]] = {}
@@ -720,6 +730,11 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
             if optimistic_setpoint and pending and requested_target_c is not None
             else row["target_temperature"]
         )
+        source_age_ms = _age_ms(row["source_timestamp"], now)
+        device_online = row["device_online"]
+        inferred_online = source_age_ms is not None and source_age_ms <= 120_000
+        raw_fault = row["fault"]
+        normalized_fault = None if isinstance(raw_fault, str) and raw_fault.strip().lower() in {"false", "0", "none", "null", ""} else raw_fault
         zones.append(
             {
                 "zone_uuid": row["zone_uuid"],
@@ -735,17 +750,19 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                 "target_temperature_c": displayed_target_c,
                 "demand": None if row["demand"] is None else bool(row["demand"]),
                 "active": None if row["active"] is None else bool(row["active"]),
-                "fault": row["fault"],
+                "fault": normalized_fault,
                 "updated_at": row["updated_at"],
                 "source_timestamp": row["source_timestamp"],
                 "freshness_age_ms": _age_ms(row["updated_at"], now),
-                "online": bool(row["device_online"]) if row["device_online"] is not None else bool(device["last_seen_at"]),
+                "online": bool(device_online) if device_online is not None else inferred_online,
                 "thermostat_element_id": row["thermostat_element_id"],
                 "controlled_element_ids": (
                     _parse_int_list_json(row["controlled_element_ids_json"])
                     if row["controlled_element_ids_json"] not in (None, "")
                     else controlled_elements_by_channel.get(int(row["zone_id"]), [])
                 ),
+                "assigned_channel_ids": _parse_int_list_json(row["assigned_channel_ids_json"])
+                    if row["assigned_channel_ids_json"] not in (None, "") else [],
                 "setpoint_command_state": zone_state.get("setpoint_command_state", "confirmed"),
                 "setpoint_pending": pending,
                 "setpoint_command_id": zone_state.get("setpoint_command_id"),
@@ -1253,6 +1270,7 @@ def ingest_device_twin_snapshot(
             source_timestamp=source_timestamp,
             thermostat_element_id=zone.get("thermostat_element_id"),
             controlled_element_ids=[int(value) for value in zone.get("controlled_element_ids", []) if isinstance(value, int)],
+            assigned_channel_ids=[int(value) for value in zone.get("assigned_channel_ids", []) if isinstance(value, int)],
         )
         if (
             source != "mobile_api"
@@ -1819,6 +1837,7 @@ def upsert_zone_state(
     source_timestamp: str | None = None,
     thermostat_element_id: int | None = None,
     controlled_element_ids: list[int] | None = None,
+    assigned_channel_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     ensure_default_zones(device_external_id, zone_count=max(3, int(zone_id)))
     now = _now_iso()
@@ -1826,7 +1845,7 @@ def upsert_zone_state(
         _ensure_hvac_projection_schema(conn)
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, thermostat_element_id, controlled_element_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
 
@@ -1839,14 +1858,16 @@ def upsert_zone_state(
         persisted_source_timestamp = source_timestamp if source_timestamp is not None else (row["source_timestamp"] if row is not None else now)
         persisted_thermostat_element_id = thermostat_element_id if thermostat_element_id is not None else (row["thermostat_element_id"] if row is not None else None)
         persisted_controlled_element_ids = json.dumps(controlled_element_ids, separators=(",", ":")) if controlled_element_ids is not None else (row["controlled_element_ids_json"] if row is not None else "[]")
+        persisted_assigned_channel_ids = json.dumps(assigned_channel_ids, separators=(",", ":")) if assigned_channel_ids is not None else (row["assigned_channel_ids_json"] if row is not None else "[]")
 
         conn.execute(
             """
-            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, updated_at, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, updated_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id, zone_id) DO UPDATE SET
                 thermostat_element_id = excluded.thermostat_element_id,
                 controlled_element_ids_json = excluded.controlled_element_ids_json,
+                assigned_channel_ids_json = excluded.assigned_channel_ids_json,
                 current_temperature = excluded.current_temperature,
                 battery_percent = excluded.battery_percent,
                 target_temperature = excluded.target_temperature,
@@ -1862,6 +1883,7 @@ def upsert_zone_state(
                 zone_id,
                 persisted_thermostat_element_id,
                 persisted_controlled_element_ids,
+                persisted_assigned_channel_ids,
                 persisted_current_temperature,
                 persisted_battery_percent,
                 persisted_target_temperature,

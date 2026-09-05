@@ -1,0 +1,1 @@
+ALTER TABLE zone_state ADD COLUMN assigned_channel_ids_json TEXT;

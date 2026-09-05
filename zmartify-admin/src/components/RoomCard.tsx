@@ -38,7 +38,9 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
       <div className="w-full text-left flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold">
-            {displayName}{zone.controlled_element_ids?.length ? ` [${zone.controlled_element_ids.join(',')}]` : ''}
+            {displayName}{(zone.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone.controlled_element_ids)?.length
+              ? ` [${(zone.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone.controlled_element_ids)?.join(',')}]`
+              : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">

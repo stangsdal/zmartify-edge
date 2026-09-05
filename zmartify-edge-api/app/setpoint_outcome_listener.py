@@ -27,18 +27,23 @@ class SetpointOutcomeMqttListener:
         mqtt_client_module: Any = None,
         ingest_irrigation_outcome_fn: Callable[..., None] | None = None,
         ingest_reported_state_fn: Callable[..., None] | None = None,
+        publish_setpoint_zone_update_fn: Callable[[str, int], None] | None = None,
     ) -> None:
         self._list_devices = list_devices_fn
         self._get_device_mqtt_credentials = get_device_mqtt_credentials_fn
         self._ingest_setpoint_command_outcome = ingest_setpoint_command_outcome_fn
         self._ingest_irrigation_outcome = ingest_irrigation_outcome_fn
         self._ingest_reported_state = ingest_reported_state_fn
+        self._publish_setpoint_zone_update = publish_setpoint_zone_update_fn
         self._mqtt = mqtt_client_module
         self._clients: dict[str, Any] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._credentials: dict[str, tuple[str, str]] = {}
         self._reconcile_thread: threading.Thread | None = None
         self._running = False
+
+    def set_publish_setpoint_zone_update_fn(self, callback: Callable[[str, int], None] | None) -> None:
+        self._publish_setpoint_zone_update = callback
 
     @staticmethod
     def _mqtt_host() -> str:
@@ -90,6 +95,8 @@ class SetpointOutcomeMqttListener:
             confirmed_target_c=float(confirmed) if isinstance(confirmed, (int, float)) else None,
             payload={"source": "mqtt_last_setpoint_command", "raw": data},
         )
+        if self._publish_setpoint_zone_update is not None:
+            self._publish_setpoint_zone_update(device_id, zone_id)
 
     def _handle_v2_setpoint_outcome(self, device_id: str, zone_id: int, payload_text: str) -> None:
         try:
@@ -115,6 +122,8 @@ class SetpointOutcomeMqttListener:
             confirmed_target_c=normalized["confirmed_target_c"],
             payload={"source": "mqtt_v2_setpoint_outcome", "raw": normalized["raw"]},
         )
+        if self._publish_setpoint_zone_update is not None:
+            self._publish_setpoint_zone_update(device_id, zone_id)
 
     def _on_connect(self, client, userdata, _flags, _rc):
         device_id = str(userdata or "").strip()

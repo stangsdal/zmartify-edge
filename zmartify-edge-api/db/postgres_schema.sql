@@ -230,6 +230,7 @@ CREATE TABLE IF NOT EXISTS zone_state (
     zone_id INTEGER NOT NULL,
     thermostat_element_id INTEGER,
     controlled_element_ids_json TEXT,
+    assigned_channel_ids_json TEXT,
     current_temperature DOUBLE PRECISION,
     battery_percent INTEGER,
     target_temperature DOUBLE PRECISION,

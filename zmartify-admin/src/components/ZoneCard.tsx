@@ -9,7 +9,7 @@ interface ZoneCardProps {
 
 export function ZoneCard({ zone, onSetpointChange }: ZoneCardProps) {
   const displayName = (zone.name || '').trim() || `Zone ${zone.zone_id}`;
-  const elementIds = (zone.controlled_element_ids || []).filter((id) => Number.isInteger(id) && id > 0);
+  const elementIds = (zone.assigned_channel_ids || zone.controlled_element_ids || []).filter((id) => Number.isInteger(id) && id > 0);
   const displayLabel = elementIds.length > 0
     ? `${displayName} [${elementIds.join(', ')}]`
     : displayName;

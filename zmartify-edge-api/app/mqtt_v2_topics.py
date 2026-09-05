@@ -58,6 +58,13 @@ def command_topics_for_zone_name(device_id: str, zone_id: int) -> list[str]:
     return [legacy]
 
 
+def command_topic_for_zone_control(device_id: str, zone_id: int, action: str) -> str:
+    safe_device = _clean_segment(device_id, "device")
+    safe_zone = max(1, int(zone_id))
+    safe_action = _clean_segment(action, "command")
+    return f"{_v2_base()}/devices/{safe_device}/commands/hvac/zones/{safe_zone}/{safe_action}"
+
+
 def command_topic_for_irrigation(device_id: str, command_type: str) -> str:
     safe_device = _clean_segment(device_id, "device")
     action = str(command_type or "command").strip().lower()

@@ -141,12 +141,14 @@ def test_on_message_ingests_last_setpoint_command():
 def test_on_message_ingests_v2_setpoint_outcome(monkeypatch):
     monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
     captured = []
+    updates = []
 
     listener = SetpointOutcomeMqttListener(
         list_devices_fn=lambda: [],
         get_device_mqtt_credentials_fn=lambda _device_id: {},
         ingest_setpoint_command_outcome_fn=lambda *args, **kwargs: captured.append((args, kwargs)),
         mqtt_client_module=None,
+        publish_setpoint_zone_update_fn=lambda device_id, zone_id: updates.append((device_id, zone_id)),
     )
 
     msg = _Msg(
@@ -164,6 +166,7 @@ def test_on_message_ingests_v2_setpoint_outcome(monkeypatch):
     assert kwargs["requested_target_c"] == 21.5
     assert kwargs["confirmed_target_c"] == 21.0
     assert kwargs["payload"]["source"] == "mqtt_v2_setpoint_outcome"
+    assert updates == [("device-a", 3)]
 
 
 def test_on_message_ignores_invalid_v2_outcome_under_enforce(monkeypatch):

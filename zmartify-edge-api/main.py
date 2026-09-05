@@ -53,6 +53,7 @@ from app.domain_model import (
 from app.mqtt_commands import (
     MqttCommandError,
     publish_setpoint_command,
+    publish_zone_mode_command,
     publish_zone_name_command,
     should_forward_setpoint_commands,
 )
@@ -116,6 +117,7 @@ from app.schemas import (
     DevicePushConfigIn,
     DeviceRename,
     MobileSetpointIn,
+    MobileZoneModeIn,
     MqttClientCreate,
     MqttClientOut,
     MqttCredentialOut,
@@ -304,6 +306,17 @@ def _publish_zone_state_update(device_id: str, zone: dict) -> None:
         "device.state.updated",
         {"device_id": device_id, "zone": zone},
     )
+
+
+def _publish_setpoint_zone_update(device_id: str, zone_id: int) -> None:
+    try:
+        zone = get_device_zone(device_id, zone_id)
+    except (DomainModelError, RegistryNotFoundError):
+        return
+    _publish_zone_state_update(device_id, zone)
+
+
+setpoint_outcome_listener.set_publish_setpoint_zone_update_fn(_publish_setpoint_zone_update)
 
 
 def _publish_event_update(event: dict) -> None:
@@ -1325,6 +1338,53 @@ def mobile_setpoint(zone_ref: str, payload: MobileSetpointIn, request: Request) 
         }
     except ContractValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/mobile/zones/{zone_ref}/mode")
+def mobile_zone_mode(zone_ref: str, payload: MobileZoneModeIn, request: Request) -> dict:
+    try:
+        device_id, zone_id = resolve_zone_ref(zone_ref)
+        context = get_device_onboarding_context(device_id)
+        site_pk_id = context.get("site_id")
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+        _require_site_product_permission(request, int(site_pk_id), "hvac", "operate")
+        if not should_forward_setpoint_commands():
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="MQTT HVAC forwarding is disabled")
+
+        command_id = f"mode-{uuid.uuid4().hex[:12]}"
+        try:
+            published = publish_zone_mode_command(device_id, zone_id, payload.zone_mode, command_id=command_id)
+        except MqttCommandError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"mode publish failed: {exc}") from exc
+
+        log_event(
+            "zone_mode_changed",
+            domain_id=context.get("domain_id"),
+            site_id=context.get("site_id"),
+            device_pk_id=context["id"],
+            zone_id=zone_id,
+            payload={
+                "device_id": device_id,
+                "zone_id": zone_id,
+                "zone_mode": payload.zone_mode,
+                "source": "mobile_api",
+                "command_state": "pending_device_feedback",
+                "command_id": command_id,
+            },
+        )
+        return {
+            "device_id": device_id,
+            "zone_id": zone_id,
+            "zone_mode": payload.zone_mode,
+            "pending": True,
+            "command_state": "pending_device_feedback",
+            "command_id": published["command_id"],
+        }
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:

@@ -106,6 +106,27 @@ def test_publish_zone_name_command_dual_mode_keeps_legacy_and_v2(monkeypatch):
     assert v2_payload["parameters"]["name"] == "Kitchen"
 
 
+def test_publish_zone_mode_command_uses_v2_contract(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(mqtt_commands.subprocess, "run", lambda cmd, capture_output, text, timeout: calls.append(list(cmd)) or _Result())
+
+    result = mqtt_commands.publish_zone_mode_command("dev-1", 2, 5, command_id="mode-1")
+    message = calls[0][calls[0].index("-m") + 1]
+    assert result["topic"].endswith("/zones/2/mode")
+    assert json.loads(message)["parameters"] == {"zone_mode": 5}
+
+
+def test_publish_zone_configuration_command_uses_supported_fields(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(mqtt_commands.subprocess, "run", lambda cmd, capture_output, text, timeout: calls.append(list(cmd)) or _Result())
+
+    mqtt_commands.publish_zone_configuration_command("dev-1", 2, {"min_temperature_c": 5, "unknown": 99})
+    message = calls[0][calls[0].index("-m") + 1]
+    assert json.loads(message)["parameters"] == {"min_temperature_c": 5.0}
+
+
 def test_publish_irrigation_command_uses_compact_irrigation_payload(monkeypatch):
     calls: list[list[str]] = []
 

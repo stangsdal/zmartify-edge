@@ -62,6 +62,7 @@ export interface MobileZone {
   active?: boolean;
   online?: boolean;
   controlled_element_ids?: number[];
+  assigned_channel_ids?: number[];
   fault?: string | null;
   freshness_age_ms?: number | null;
   setpoint_command_state?: string;

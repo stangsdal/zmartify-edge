@@ -29,6 +29,16 @@
         "homie/5/device/zone-1/$name/set",
         "zmartify/v2/devices/device/commands/hvac/zones/1/name"
       ]
+    },
+    "hvac.zone_mode": {
+      "v2": [
+        "zmartify/v2/devices/device/commands/hvac/zones/1/mode"
+      ]
+    },
+    "hvac.zone_configuration": {
+      "v2": [
+        "zmartify/v2/devices/device/commands/hvac/zones/1/configuration"
+      ]
     }
   },
   "outcome_subscriptions": {
@@ -36,11 +46,13 @@
       "homie/5/device/+/last-setpoint-command"
     ],
     "v2": [
-      "zmartify/v2/devices/device/events/hvac/zones/+/setpoint-outcome"
+      "zmartify/v2/devices/device/events/hvac/zones/+/setpoint-outcome",
+      "zmartify/v2/devices/device/events/hvac/zones/+/command-outcome"
     ],
     "dual": [
       "homie/5/device/+/last-setpoint-command",
-      "zmartify/v2/devices/device/events/hvac/zones/+/setpoint-outcome"
+      "zmartify/v2/devices/device/events/hvac/zones/+/setpoint-outcome",
+      "zmartify/v2/devices/device/events/hvac/zones/+/command-outcome"
     ]
   },
   "ingest_http_paths": [

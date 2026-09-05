@@ -115,6 +115,45 @@ Base URL examples:
 - GET /admin/acl/preview/{client_id}
 - POST /admin/acl/regenerate
 
+### Local HVAC Controller API
+
+These endpoints are served directly by the HVAC-AHC9000 device. Zone IDs and
+channel IDs are 1-based. Zone state owns operating mode and temperature targets;
+channel responses contain only channel status and diagnostics.
+
+Base URL example: `http://192.168.10.57`
+
+- GET `/zones` or `/zones?extended=1`
+	- Each zone includes `zone_mode`, taken from the first controlled channel.
+- GET `/zones/configuration`
+	- Returns the first packed data configuration register for each zone, including the raw register and decoded `FLOOR_SENS`, `FLOOR_ENA`, `COOL_MODE`, `ADAPT_MODE`, `INT_LOCK`, `CTRL_LOCK`, `HOTEL_MODE`, `SCHED_ENA`, and `MODE` values.
+	- `SCHED_ENA` is always disabled on the AHC9000; scheduling is managed by the Edge controller or firmware.
+- GET `/zones/{zone_id}`
+- GET `/channels` or `/channels?extended=1`
+	- Does not include `channel_mode` or `target_temperature_c`; configure these through zones.
+- POST `/zones/mode` or `/zone/mode`
+	- Body: `{"zone_mode":0}` applies the mode to all controlled channels.
+- POST `/zones/{zone_id}/mode` or `/zone/{zone_id}/mode`
+	- Body: `{"zone_mode":0}` applies the mode to every channel controlled by that zone.
+- POST `/zones/{zone_id}/setpoint`
+	- Single profile: `{"setpoint_c":20.5}` writes the manual profile by default.
+	- Specific profile: `{"setpoint_c":20.5,"zone_mode":1}`.
+	- Multiple profiles: `{"setpoints":[{"zone_mode":0,"setpoint_c":20.5},{"zone_mode":1,"setpoint_c":21.0}]}`.
+	- Profile values: `0` manual, `1` comfort, `2` eco, `3` holiday, `4` standby, `5` party.
+	- The response includes `zone_mode`, the selected profile, `register_applied`, and `effective_confirmed`. `register_applied: true` means the immediate controller write and register readback succeeded. `confirmation_pending: true` means the register write succeeded but the effective target is still being applied or is controlled by another mode.
+	- A successful register write may return `accepted: true` and `confirmation_pending: true` while the controller applies the effective target asynchronously.
+	- GET `/zones/setpoint`
+		- Returns the current setpoint status for all zones using the same fields as the single-zone endpoint.
+	- GET `/zones/{zone_id}/setpoint`
+		- Returns the current `zone_mode`, active `setpoint_c`, `effective_setpoint_c`, and all six profile values in `setpoints` before editing.
+		- Profile values are read from the first controlled channel, which is also the zone mode authority.
+
+The controller uses three Modbus timing lanes: slow polling for general state,
+fast polling for change flags and freshness, and an immediate transaction path
+for writes such as setpoints. Setpoint writes use the immediate path, serialize
+through the controller operation lock, verify the echoed register, then perform
+a targeted refresh before returning the result.
+
 ### Invite Management
 
 - POST /admin/invites/register
@@ -180,8 +219,10 @@ Base URL examples:
 - GET /mobile/devices/{device_id}/zones
 - GET /mobile/devices/{device_id}/channels
 - POST /mobile/zones/{zone_ref}/setpoint
-  - body: {"target_temperature_c": 21.5} updates the active firmware profile
+	- body: {"target_temperature_c": 21.5} updates the manual firmware profile by default
   - optional `setpoint_mode`: 0 manual, 1 comfort, 2 eco, 3 holiday, 4 standby, 5 party
+- POST /mobile/zones/{zone_ref}/mode
+	- body: {"zone_mode": 0} publishes the controller mode through MQTT v2
 - POST /mobile/zones/{zone_ref}/rename
 - GET /mobile/zones/{zone_ref}/history
 - GET /mobile/devices/{device_id}/history

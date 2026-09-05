@@ -306,7 +306,9 @@ export function RoomDetailPage() {
   return (
     <IonPage>
       <AppHeader
-        title={`${displayName}${zone?.controlled_element_ids?.length ? ` [${zone.controlled_element_ids.join(',')}]` : ''}`}
+        title={`${displayName}${(zone?.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone?.controlled_element_ids)?.length
+          ? ` [${(zone?.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone?.controlled_element_ids)?.join(',')}]`
+          : ''}`}
         subtitle={zone?.name && zone.name !== zoneKey ? zoneKey : 'Thermostat Control'}
       />
       <IonContent className="ion-padding">

@@ -296,7 +296,9 @@ class ZoneOut(BaseModel):
     source_timestamp: str | None = None
     freshness_age_ms: int | None = None
     online: bool
+    thermostat_element_id: int | None = None
     controlled_element_ids: list[int] = Field(default_factory=list)
+    assigned_channel_ids: list[int] = Field(default_factory=list)
 
 
 class ChannelMetadataIn(BaseModel):
@@ -326,6 +328,7 @@ class TelemetryZoneIn(BaseModel):
     active: bool | None = None
     fault: str | None = None
     controlled_element_ids: list[int] | None = None
+    assigned_channel_ids: list[int] | None = None
 
 
 class TelemetryChannelIn(BaseModel):
@@ -406,6 +409,10 @@ class MobileSetpointIn(BaseModel):
     # Firmware setpoint profiles: manual=0, comfort=1, eco=2, holiday=3,
     # standby=4, party=5. Omitted means the active profile.
     setpoint_mode: int | None = Field(default=None, ge=0, le=5)
+
+
+class MobileZoneModeIn(BaseModel):
+    zone_mode: int = Field(ge=0, le=5)
 
 
 class EventOut(BaseModel):
