@@ -314,6 +314,8 @@ export function RoomsPage() {
             </div>
           </section>
 
+          <NilanControlPanel devices={siteDevices} canOperate={canOperate} />
+
           <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <h2 className="text-lg font-semibold">Zones</h2>
             <p className="text-sm text-muted mt-1">Tap a zone to inspect details, change setpoint and open trend history.</p>
@@ -353,7 +355,6 @@ export function RoomsPage() {
             }}
           />
 
-          <NilanControlPanel devices={siteDevices} canOperate={canOperate} />
         </div>
       </IonContent>
     </IonPage>

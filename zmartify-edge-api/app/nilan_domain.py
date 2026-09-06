@@ -54,6 +54,15 @@ def get_nilan_state(device_external_id: str) -> dict[str, Any]:
     if row is None:
         return {"device_id": device_external_id, "available": False, **{field: None for field in ("source_timestamp", *_FIELDS)}}
     result = {"device_id": device_external_id, "available": True, **{key: row[key] for key in row.keys()}}
+    source_timestamp = result.get("source_timestamp")
+    if source_timestamp:
+        try:
+            timestamp = datetime.fromisoformat(str(source_timestamp).replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            result["freshness_age_ms"] = max(0, int((datetime.now(UTC) - timestamp).total_seconds() * 1000))
+        except (TypeError, ValueError):
+            pass
     result["online"] = None if result["online"] is None else bool(result["online"])
     result["controller_online"] = None if result["controller_online"] is None else bool(result["controller_online"])
     result["run"] = None if result["run"] is None else bool(result["run"])

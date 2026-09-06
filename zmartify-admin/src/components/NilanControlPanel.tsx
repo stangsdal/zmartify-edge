@@ -22,6 +22,10 @@ const value = (reading: number | null | undefined, suffix = '') => (
   reading == null ? 'Ikke tilgængelig' : `${reading}${suffix}`
 );
 
+const isFreshState = (state: NilanHvacState): boolean => (
+  state.available === true && state.online === true && state.controller_online === true && state.status !== 'stale'
+);
+
 export function NilanControlPanel({ devices, canOperate }: NilanControlPanelProps) {
   const nilanDevices = devices.filter(isNilanDevice);
   if (!nilanDevices.length) return null;
@@ -107,6 +111,9 @@ function NilanDeviceCard({ device, canOperate }: { device: MobileSiteDevice; can
   if (error && !state) return <p className="text-sm text-rose-600">Nilan-status: {error}</p>;
   if (!state?.available) return <p className="text-sm text-muted">Ingen Nilan-telemetri modtaget endnu.</p>;
 
+  const fresh = isFreshState(state);
+  const displayValue = (reading: number | null | undefined, suffix = '') => value(fresh ? reading : null, suffix);
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -116,16 +123,22 @@ function NilanDeviceCard({ device, canOperate }: { device: MobileSiteDevice; can
         </div>
       </div>
 
+      {!fresh ? (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Data er stale eller controlleren er offline. Målinger vises ikke som aktuelle værdier.
+        </p>
+      ) : null}
+
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-        <p><span className="text-muted">Ventilation</span><br /><strong>{value(state.ventilation_level, ' / 4')}</strong></p>
-        <p><span className="text-muted">Rumtemperatur</span><br /><strong>{value(state.room_temperature_c, ' °C')}</strong></p>
-        <p><span className="text-muted">Indblæsning</span><br /><strong>{value(state.actual_inlet_level, '%')}</strong></p>
-        <p><span className="text-muted">Udsugning</span><br /><strong>{value(state.actual_exhaust_level, '%')}</strong></p>
-        <p><span className="text-muted">Indblæsningstemp.</span><br /><strong>{value(state.inlet_temperature_c, ' °C')}</strong></p>
-        <p><span className="text-muted">Udsugningstemp.</span><br /><strong>{value(state.extract_temperature_c, ' °C')}</strong></p>
-        <p><span className="text-muted">Luftfugtighed</span><br /><strong>{value(state.humidity_pct, '%')}</strong></p>
-        <p><span className="text-muted">CO₂</span><br /><strong>{value(state.co2_ppm, ' ppm')}</strong></p>
-        <p><span className="text-muted">Filter</span><br /><strong>{value(state.filter_days_remaining, ' dage')}</strong></p>
+        <p><span className="text-muted">Ventilation</span><br /><strong>{displayValue(state.ventilation_level, ' / 4')}</strong></p>
+        <p><span className="text-muted">Rumtemperatur</span><br /><strong>{displayValue(state.room_temperature_c, ' °C')}</strong></p>
+        <p><span className="text-muted">Indblæsning</span><br /><strong>{displayValue(state.actual_inlet_level, '%')}</strong></p>
+        <p><span className="text-muted">Udsugning</span><br /><strong>{displayValue(state.actual_exhaust_level, '%')}</strong></p>
+        <p><span className="text-muted">Indblæsningstemp.</span><br /><strong>{displayValue(state.inlet_temperature_c, ' °C')}</strong></p>
+        <p><span className="text-muted">Udsugningstemp.</span><br /><strong>{displayValue(state.extract_temperature_c, ' °C')}</strong></p>
+        <p><span className="text-muted">Luftfugtighed</span><br /><strong>{displayValue(state.humidity_pct, '%')}</strong></p>
+        <p><span className="text-muted">CO₂</span><br /><strong>{displayValue(state.co2_ppm, ' ppm')}</strong></p>
+        <p><span className="text-muted">Filter</span><br /><strong>{displayValue(state.filter_days_remaining, ' dage')}</strong></p>
         <p><span className="text-muted">Data</span><br /><strong>{state.freshness_age_ms == null ? 'Ukendt' : `${Math.floor(state.freshness_age_ms / 1000)} sek. gammel`}</strong></p>
       </div>
 
