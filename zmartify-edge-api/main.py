@@ -53,6 +53,7 @@ from app.domain_model import (
 from app.mqtt_commands import (
     MqttCommandError,
     publish_setpoint_command,
+    publish_zone_configuration_command,
     publish_zone_mode_command,
     publish_zone_name_command,
     should_forward_setpoint_commands,
@@ -117,6 +118,7 @@ from app.schemas import (
     DevicePushConfigIn,
     DeviceRename,
     MobileSetpointIn,
+    MobileZoneConfigurationIn,
     MobileZoneModeIn,
     MqttClientCreate,
     MqttClientOut,
@@ -316,7 +318,17 @@ def _publish_setpoint_zone_update(device_id: str, zone_id: int) -> None:
     _publish_zone_state_update(device_id, zone)
 
 
+def _publish_nilan_state_update(device_id: str, state: dict) -> None:
+    realtime_topic_hub.publish_from_sync(
+        f"device:{device_id}:state",
+        "device.state.updated",
+        {"device_id": device_id, "nilan": state},
+    )
+
+
 setpoint_outcome_listener.set_publish_setpoint_zone_update_fn(_publish_setpoint_zone_update)
+setpoint_outcome_listener.set_publish_reported_zone_state_update_fn(_publish_zone_state_update)
+setpoint_outcome_listener.set_publish_nilan_state_update_fn(_publish_nilan_state_update)
 
 
 def _publish_event_update(event: dict) -> None:
@@ -1119,8 +1131,15 @@ def mobile_site_zones(site_id: str, request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     devices_out = []
+    device_zone_results: list[tuple[dict, list[dict]]] = []
     for item in site.get("devices", []):
         if item.get("device_type") != "hvac_gateway":
+            continue
+        device_identity = " ".join(
+            str(item.get(field) or "")
+            for field in ("device_id", "display_name", "device_type", "integration_mode")
+        ).lower()
+        if any(marker in device_identity for marker in ("nilan", "cts602", "comfort-302")):
             continue
         device_id = item.get("device_id")
         if not device_id:
@@ -1129,13 +1148,28 @@ def mobile_site_zones(site_id: str, request: Request) -> dict:
             zones = list_device_zones(device_id)
         except RegistryNotFoundError:
             continue
-        devices_out.append(
-            {
-                "device_id": device_id,
-                "display_name": item.get("display_name"),
-                "zones": zones,
-            }
+        device_zone_results.append((item, zones))
+
+    has_initialized_device = any(
+        any(
+            zone.get("current_temperature_c") is not None
+            or zone.get("target_temperature_c") is not None
+            for zone in zones
         )
+        for _, zones in device_zone_results
+    )
+    for item, zones in device_zone_results:
+        if has_initialized_device and not any(
+            zone.get("current_temperature_c") is not None
+            or zone.get("target_temperature_c") is not None
+            for zone in zones
+        ):
+            continue
+        devices_out.append({
+            "device_id": item.get("device_id"),
+            "display_name": item.get("display_name"),
+            "zones": zones,
+        })
 
     return {
         "site_id": site["site_id"],
@@ -1385,6 +1419,71 @@ def mobile_zone_mode(zone_ref: str, payload: MobileZoneModeIn, request: Request)
             "command_state": "pending_device_feedback",
             "command_id": published["command_id"],
         }
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DomainModelError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/mobile/zones/{zone_ref}/configuration")
+def mobile_zone_configuration(zone_ref: str, payload: MobileZoneConfigurationIn, request: Request) -> dict:
+    try:
+        device_id, zone_id = resolve_zone_ref(zone_ref)
+        context = get_device_onboarding_context(device_id)
+        site_pk_id = context.get("site_id")
+        if site_pk_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="site not found")
+        _require_site_product_permission(request, int(site_pk_id), "hvac", "configure")
+
+        configuration = payload.model_dump(exclude_none=True, exclude={"setpoint_profiles"})
+        profiles: dict[int, float] = {}
+        for raw_profile, value in payload.setpoint_profiles.items():
+            try:
+                profile = int(raw_profile)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid setpoint profile") from exc
+            if profile < 0 or profile > 5:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="setpoint profile must be between 0 and 5")
+            profiles[profile] = float(value)
+
+        if not configuration and not profiles:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no thermostat settings supplied")
+        if (configuration or profiles) and not should_forward_setpoint_commands():
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="MQTT HVAC forwarding is disabled")
+
+        command_ids: list[str] = []
+        if configuration:
+            command_id = f"cfg-{uuid.uuid4().hex[:12]}"
+            try:
+                published = publish_zone_configuration_command(device_id, zone_id, configuration, command_id=command_id)
+            except MqttCommandError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"configuration publish failed: {exc}") from exc
+            command_ids.append(published["command_id"])
+
+        for profile, target in profiles.items():
+            command_id = f"sp-{uuid.uuid4().hex[:12]}"
+            try:
+                published = publish_setpoint_command(device_id, zone_id, target, setpoint_mode=profile, command_id=command_id)
+            except MqttCommandError as exc:
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setpoint publish failed: {exc}") from exc
+            command_ids.append(published["command_id"])
+
+        zone = upsert_zone_state(
+            device_id,
+            zone_id,
+            configuration=configuration or None,
+            setpoint_profiles={str(profile): target for profile, target in profiles.items()} or None,
+            source="mobile_api",
+        )
+        log_event(
+            "zone_configuration_changed",
+            domain_id=context.get("domain_id"),
+            site_id=context.get("site_id"),
+            device_pk_id=context["id"],
+            zone_id=zone_id,
+            payload={"device_id": device_id, "zone_id": zone_id, "configuration": configuration, "setpoint_profiles": profiles, "command_ids": command_ids},
+        )
+        return {"device_id": device_id, "zone_id": zone_id, "pending": bool(command_ids), "command_ids": command_ids, "zone": zone}
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except DomainModelError as exc:

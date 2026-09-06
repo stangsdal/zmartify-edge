@@ -120,7 +120,7 @@ body.dark-mode {
 
 .thermostat-card__lever {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 10px;
   margin-top: 12px;
@@ -131,10 +131,9 @@ body.dark-mode {
 .thermostat-card__lever-label,
 .thermostat-card__lever-value {
   color: var(--app-muted);
-  font-size: 11px;
+  font-size: 22px;
   font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .thermostat-card__lever-value {
@@ -225,10 +224,21 @@ body.dark-mode {
 .thermostat-mode--standby { background: rgba(100, 116, 139, .14); color: #475569; }
 .thermostat-mode--inactive { background: transparent; color: var(--app-muted); border: 1px solid var(--app-border); }
 .thermostat-mode-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.thermostat-mode-select { margin-top: 12px; }
+.thermostat-mode-select select { min-width: 108px; border: 1px solid var(--app-border); border-radius: 999px; background: var(--app-surface); padding: 8px 28px 8px 12px; color: var(--ion-text-color); font-size: 11px; font-weight: 800; letter-spacing: .06em; }
 
 .thermostat-card__signal { color: var(--app-muted); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
 .thermostat-card__signal span { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #94a3b8; }
 .thermostat-card__signal span.is-active { background: #ea580c; box-shadow: 0 0 0 5px rgba(234, 88, 12, .14); }
+.thermostat-card__connection { display: inline-flex; align-items: center; gap: 5px; color: var(--app-muted); }
+.thermostat-card__connection ion-icon { font-size: 18px; }
+.thermostat-card__rssi { display: inline-flex; align-items: flex-end; gap: 2px; height: 15px; }
+.thermostat-card__rssi i { display: block; width: 3px; border-radius: 2px; background: #cbd5e1; }
+.thermostat-card__rssi i:nth-child(1) { height: 4px; }
+.thermostat-card__rssi i:nth-child(2) { height: 7px; }
+.thermostat-card__rssi i:nth-child(3) { height: 10px; }
+.thermostat-card__rssi i:nth-child(4) { height: 13px; }
+.thermostat-card__rssi i.is-active { background: #0f766e; }
 
 .thermostat-slider { position: relative; height: 28px; }
 .thermostat-slider__track, .thermostat-slider__fill { position: absolute; top: 50%; height: 6px; transform: translateY(-50%); border-radius: 999px; }

@@ -1,12 +1,26 @@
 import { useEffect, useState } from 'react';
-import { IonContent, IonPage } from '@ionic/react';
+import { IonButton, IonContent, IonPage } from '@ionic/react';
+import { useHistory } from 'react-router-dom';
 import { authApi } from '../api/auth';
+import { apiClient } from '../api/client';
 import { User } from '../types/api';
 import { AppHeader } from '../components/AppHeader';
 
 export function ProfilePage() {
+  const history = useHistory();
   const [profile, setProfile] = useState<User | null>(null);
   const [error, setError] = useState('');
+
+  const logout = async () => {
+    apiClient.clearAuthToken();
+    try {
+      await authApi.logout();
+    } catch {
+      // Local session is already cleared if the server is unavailable.
+    }
+    history.replace('/app/login');
+    window.location.assign('/app/login');
+  };
 
   useEffect(() => {
     (async () => {
@@ -42,6 +56,13 @@ export function ProfilePage() {
                   <p className="text-xs uppercase tracking-wide text-muted">Last login</p>
                   <p className="text-base font-semibold mt-1">{profile.last_login_at || 'Never'}</p>
                 </div>
+              </section>
+              <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
+                <p className="font-semibold">Session</p>
+                <p className="text-sm text-muted mt-1">End your current session on this device.</p>
+                <IonButton color="danger" fill="outline" className="ion-margin-top" onClick={() => void logout()}>
+                  Log out
+                </IonButton>
               </section>
             </>
           ) : (

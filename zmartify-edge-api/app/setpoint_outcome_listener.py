@@ -6,6 +6,7 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from typing import Any
 
@@ -28,6 +29,8 @@ class SetpointOutcomeMqttListener:
         ingest_irrigation_outcome_fn: Callable[..., None] | None = None,
         ingest_reported_state_fn: Callable[..., None] | None = None,
         publish_setpoint_zone_update_fn: Callable[[str, int], None] | None = None,
+        publish_reported_zone_state_update_fn: Callable[[str, dict], None] | None = None,
+        publish_nilan_state_update_fn: Callable[[str, dict], None] | None = None,
     ) -> None:
         self._list_devices = list_devices_fn
         self._get_device_mqtt_credentials = get_device_mqtt_credentials_fn
@@ -35,15 +38,30 @@ class SetpointOutcomeMqttListener:
         self._ingest_irrigation_outcome = ingest_irrigation_outcome_fn
         self._ingest_reported_state = ingest_reported_state_fn
         self._publish_setpoint_zone_update = publish_setpoint_zone_update_fn
+        self._publish_reported_zone_state_update = publish_reported_zone_state_update_fn
+        self._publish_nilan_state_update = publish_nilan_state_update_fn
         self._mqtt = mqtt_client_module
         self._clients: dict[str, Any] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._credentials: dict[str, tuple[str, str]] = {}
         self._reconcile_thread: threading.Thread | None = None
+        self._reported_state_executor = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="mqtt-reported-state",
+        )
+        self._reported_state_lock = threading.Lock()
+        self._reported_state_pending: dict[str, dict[str, Any]] = {}
+        self._reported_state_active: set[str] = set()
         self._running = False
 
     def set_publish_setpoint_zone_update_fn(self, callback: Callable[[str, int], None] | None) -> None:
         self._publish_setpoint_zone_update = callback
+
+    def set_publish_reported_zone_state_update_fn(self, callback: Callable[[str, dict], None] | None) -> None:
+        self._publish_reported_zone_state_update = callback
+
+    def set_publish_nilan_state_update_fn(self, callback: Callable[[str, dict], None] | None) -> None:
+        self._publish_nilan_state_update = callback
 
     @staticmethod
     def _mqtt_host() -> str:
@@ -56,6 +74,14 @@ class SetpointOutcomeMqttListener:
             return int(raw)
         except ValueError:
             return 1883
+
+    @staticmethod
+    def _mqtt_keepalive_seconds() -> int:
+        raw = os.getenv("ZMART_EDGE_MQTT_KEEPALIVE_SECONDS", "120").strip() or "120"
+        try:
+            return max(30, int(raw))
+        except ValueError:
+            return 120
 
     @staticmethod
     def _base_topic() -> str:
@@ -132,7 +158,31 @@ class SetpointOutcomeMqttListener:
         topics = list(outcome_subscription_topics(device_id))
         logger.info("Connected MQTT listener for %s; subscribing to %d topics", device_id, len(topics))
         for topic in topics:
-            client.subscribe(topic, qos=1)
+            result, message_id = client.subscribe(topic, qos=1)
+            logger.info(
+                "MQTT listener subscribe device=%s topic=%s rc=%s mid=%s",
+                device_id,
+                topic,
+                result,
+                message_id,
+            )
+
+    def _on_subscribe(self, _client, userdata, message_id, granted_qos):
+        device_id = str(userdata or "").strip()
+        logger.info(
+            "MQTT listener subscription granted device=%s mid=%s qos=%s",
+            device_id,
+            message_id,
+            granted_qos,
+        )
+
+    def _on_disconnect(self, _client, userdata, reason_code, *_args):
+        device_id = str(userdata or "").strip()
+        logger.warning(
+            "MQTT listener disconnected device=%s rc=%s",
+            device_id,
+            reason_code,
+        )
 
     def _on_message(self, _client, _userdata, msg):
         topic = str(msg.topic or "")
@@ -155,7 +205,7 @@ class SetpointOutcomeMqttListener:
                 if kind == "irrigation_outcome" and self._ingest_irrigation_outcome is not None:
                     self._ingest_irrigation_outcome(device_id, data)
                 elif kind == "reported_state" and self._ingest_reported_state is not None:
-                    self._ingest_reported_state(device_id, data)
+                    self._queue_reported_state(device_id, data)
                 logger.info("Ingested MQTT v2 %s for %s from %s", kind, device_id, topic)
             except ContractValidationError:
                 logger.warning("Rejected MQTT v2 %s for %s due to contract validation", kind, device_id)
@@ -174,6 +224,41 @@ class SetpointOutcomeMqttListener:
             return
         if topic.endswith("/setpoint-outcome"):
             self._handle_v2_setpoint_outcome(device_id, zone_id, payload_text)
+
+    def _queue_reported_state(self, device_id: str, data: dict[str, Any]) -> None:
+        with self._reported_state_lock:
+            self._reported_state_pending[device_id] = data
+            if device_id in self._reported_state_active:
+                return
+            self._reported_state_active.add(device_id)
+        self._reported_state_executor.submit(self._drain_reported_state, device_id)
+
+    def _drain_reported_state(self, device_id: str) -> None:
+        while True:
+            with self._reported_state_lock:
+                data = self._reported_state_pending.pop(device_id, None)
+                if data is None:
+                    self._reported_state_active.discard(device_id)
+                    return
+            self._ingest_reported_state_async(device_id, data)
+
+    def _ingest_reported_state_async(self, device_id: str, data: dict[str, Any]) -> None:
+        try:
+            if self._publish_reported_zone_state_update is None and self._publish_nilan_state_update is None:
+                self._ingest_reported_state(device_id, data)
+            elif self._publish_nilan_state_update is None:
+                self._ingest_reported_state(device_id, data, self._publish_reported_zone_state_update)
+            else:
+                self._ingest_reported_state(
+                    device_id,
+                    data,
+                    self._publish_reported_zone_state_update,
+                    self._publish_nilan_state_update,
+                )
+        except ContractValidationError:
+            logger.warning("Rejected MQTT v2 reported_state for %s due to contract validation", device_id)
+        except Exception:
+            logger.exception("Failed ingesting MQTT v2 reported_state for %s", device_id)
 
     def _device_listener_targets(self) -> list[tuple[str, str, str]]:
         override = self._device_id_override()
@@ -221,8 +306,14 @@ class SetpointOutcomeMqttListener:
         client = self._mqtt.Client(client_id=f"edge-setpoint-{device_id}-{uuid.uuid4().hex[:6]}", userdata=device_id)
         client.username_pw_set(username=username, password=password)
         client.on_connect = self._on_connect
+        client.on_subscribe = self._on_subscribe
+        client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
-        client.connect_async(self._mqtt_host(), self._mqtt_port(), keepalive=30)
+        client.connect_async(
+            self._mqtt_host(),
+            self._mqtt_port(),
+            keepalive=self._mqtt_keepalive_seconds(),
+        )
         thread = threading.Thread(
             target=client.loop_forever,
             kwargs={"retry_first_connection": True},
@@ -279,6 +370,7 @@ class SetpointOutcomeMqttListener:
         self._running = False
         for device_id in list(self._clients):
             self._disconnect_client(device_id)
+        self._reported_state_executor.shutdown(wait=False, cancel_futures=True)
         self._reconcile_thread = None
 
 
@@ -298,7 +390,9 @@ def create_setpoint_outcome_listener() -> SetpointOutcomeMqttListener:
         ingest_setpoint_command_outcome_fn=ingest_setpoint_command_outcome,
         mqtt_client_module=mqtt_client_module,
         ingest_irrigation_outcome_fn=ingest_mqtt_v2_irrigation_outcome,
-        ingest_reported_state_fn=lambda device_id, payload: ingest_mqtt_v2_reported_state(
-            device_id, payload, source="mqtt_v2_state_reported"
+        ingest_reported_state_fn=lambda device_id, payload, publish_zone_state_update_hook=None, publish_nilan_state_update_hook=None: ingest_mqtt_v2_reported_state(
+            device_id, payload, source="mqtt_v2_state_reported",
+            publish_zone_state_update_hook=publish_zone_state_update_hook,
+            publish_nilan_state_update_hook=publish_nilan_state_update_hook,
         ),
     )

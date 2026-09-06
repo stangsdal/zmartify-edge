@@ -329,6 +329,8 @@ class TelemetryZoneIn(BaseModel):
     fault: str | None = None
     controlled_element_ids: list[int] | None = None
     assigned_channel_ids: list[int] | None = None
+    configuration: dict[str, float] | None = None
+    setpoint_profiles: dict[str, float] | None = None
 
 
 class TelemetryChannelIn(BaseModel):
@@ -409,6 +411,15 @@ class MobileSetpointIn(BaseModel):
     # Firmware setpoint profiles: manual=0, comfort=1, eco=2, holiday=3,
     # standby=4, party=5. Omitted means the active profile.
     setpoint_mode: int | None = Field(default=None, ge=0, le=5)
+
+
+class MobileZoneConfigurationIn(BaseModel):
+    min_temperature_c: float | None = Field(default=None, ge=5, le=35)
+    max_temperature_c: float | None = Field(default=None, ge=5, le=35)
+    floor_min_temperature_c: float | None = Field(default=None, ge=5, le=45)
+    floor_max_temperature_c: float | None = Field(default=None, ge=5, le=45)
+    hysteresis_c: float | None = Field(default=None, ge=0, le=10)
+    setpoint_profiles: dict[str, float] = Field(default_factory=dict)
 
 
 class MobileZoneModeIn(BaseModel):

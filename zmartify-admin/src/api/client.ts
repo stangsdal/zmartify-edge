@@ -1,6 +1,7 @@
 // Configure API base URL and token
 const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL
   || (typeof window !== 'undefined' ? window.location.origin : 'https://api.zmartify.dk');
+const PUBLIC_APP_HOSTS = new Set(['app.zmartify.dk', 'admin.zmartify.dk']);
 
 const normalizeApiBaseUrl = (raw: string): string => {
   const trimmed = (raw || '').trim();
@@ -25,6 +26,16 @@ const normalizeApiBaseUrl = (raw: string): string => {
 
 const getApiBaseUrl = (): string => {
   const stored = localStorage.getItem('api_base_url');
+  if (stored && typeof window !== 'undefined') {
+    try {
+      const storedUrl = new URL(normalizeApiBaseUrl(stored));
+      if (PUBLIC_APP_HOSTS.has(window.location.hostname) && PUBLIC_APP_HOSTS.has(storedUrl.hostname)
+        && storedUrl.hostname !== window.location.hostname) {
+        return window.location.origin;
+      }
+    } catch {
+    }
+  }
   return normalizeApiBaseUrl(stored || DEFAULT_API_BASE_URL);
 };
 

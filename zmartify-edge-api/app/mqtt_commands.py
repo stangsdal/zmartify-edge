@@ -39,6 +39,10 @@ def _mqtt_base_topic() -> str:
     return os.getenv("ZMART_EDGE_COMMAND_MQTT_BASE", "homie/5").strip().rstrip("/") or "homie/5"
 
 
+def _mqtt_v2_base_topic() -> str:
+    return os.getenv("ZMART_EDGE_COMMAND_MQTT_V2_BASE", "zmartify/v2").strip().rstrip("/") or "zmartify/v2"
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -308,6 +312,30 @@ def publish_zone_name_command(device_id: str, zone_id: int, zone_name: str) -> N
     )
     for topic in command_topics_for_zone_name(device_id, int(zone_id)):
         _publish_to_topic(device_id, topic, v2_payload if _is_v2_command_topic(topic) else name)
+
+
+def publish_nilan_command(device_id: str, command: str, value: int) -> dict:
+    definitions = {
+        "ventilation": ("commands/hvac/ventilation", "hvac.set_ventilation_level", "level", 1, 4),
+        "inlet_speed": ("commands/hvac/inlet-speed", "hvac.set_inlet_speed", "inlet_pct", 0, 100),
+        "exhaust_speed": ("commands/hvac/exhaust-speed", "hvac.set_exhaust_speed", "exhaust_pct", 0, 100),
+    }
+    definition = definitions.get(command)
+    if definition is None:
+        raise MqttCommandError("unsupported Nilan command")
+    topic_suffix, command_type, parameter_name, minimum, maximum = definition
+    if value < minimum or value > maximum:
+        raise MqttCommandError(f"{command} must be between {minimum} and {maximum}")
+    command_id = f"cmd-{uuid.uuid4().hex[:16]}"
+    # Nilan firmware consumes the compact command shape directly from these topics.
+    payload = json.dumps(
+        {"command_id": command_id, parameter_name: value},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    topic = f"{_mqtt_v2_base_topic()}/devices/{device_id}/{topic_suffix}"
+    _publish_to_topic(device_id, topic, payload, retain=False)
+    return {"command_id": command_id, "status": "published", "topic": topic}
 
 
 def publish_zone_mode_command(device_id: str, zone_id: int, zone_mode: int, *, command_id: str | None = None) -> dict:

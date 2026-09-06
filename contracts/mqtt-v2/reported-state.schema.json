@@ -23,6 +23,11 @@
             "type": "object",
             "properties": {
               "zone_mode": { "type": "integer", "minimum": 0, "maximum": 5 },
+              "current_temperature_c": { "type": ["number", "null"] },
+              "floor_temperature_c": { "type": ["number", "null"] },
+              "target_temperature_c": { "type": ["number", "null"] },
+              "rssi_element_dbm": { "type": ["number", "null"] },
+              "rssi_control_unit_dbm": { "type": ["number", "null"] },
               "configuration": { "type": ["object", "null"] }
             }
           }

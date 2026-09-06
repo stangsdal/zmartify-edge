@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -62,6 +63,11 @@ def _ensure_hvac_projection_schema(conn: Any) -> None:
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS thermostat_element_id INTEGER",
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS controlled_element_ids_json TEXT",
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS assigned_channel_ids_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS rssi_element_dbm DOUBLE PRECISION",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS rssi_control_unit_dbm DOUBLE PRECISION",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS floor_temperature_c DOUBLE PRECISION",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS configuration_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS setpoint_profiles_json TEXT",
         ):
             conn.execute(sql)
     else:
@@ -69,6 +75,11 @@ def _ensure_hvac_projection_schema(conn: Any) -> None:
             "ALTER TABLE zone_state ADD COLUMN thermostat_element_id INTEGER",
             "ALTER TABLE zone_state ADD COLUMN controlled_element_ids_json TEXT",
             "ALTER TABLE zone_state ADD COLUMN assigned_channel_ids_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN rssi_element_dbm DOUBLE PRECISION",
+            "ALTER TABLE zone_state ADD COLUMN rssi_control_unit_dbm DOUBLE PRECISION",
+            "ALTER TABLE zone_state ADD COLUMN floor_temperature_c DOUBLE PRECISION",
+            "ALTER TABLE zone_state ADD COLUMN configuration_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN setpoint_profiles_json TEXT",
         ):
             try:
                 conn.execute(sql)
@@ -346,6 +357,20 @@ def _zone_setpoint_command_state(
                     "setpoint_failure_reason": detail or result,
                     "setpoint_command_age_ms": age_ms,
                 }
+
+        if (
+            current_target_c is not None
+            and requested_target_c is not None
+            and _floats_close(float(current_target_c), float(requested_target_c))
+        ):
+            return {
+                "setpoint_command_state": "confirmed",
+                "setpoint_pending": False,
+                "setpoint_command_id": command_id,
+                "setpoint_requested_target_c": requested_target_c,
+                "setpoint_failure_reason": None,
+                "setpoint_command_age_ms": age_ms,
+            }
 
         if (
             age_ms is not None
@@ -670,6 +695,9 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
             SELECT zm.uuid AS zone_uuid, zm.zone_id, zm.name, zm.icon, zm.sort_order, zm.floor, zm.area_m2,
                    zs.thermostat_element_id, zs.controlled_element_ids_json, zs.assigned_channel_ids_json,
                    zs.current_temperature, zs.battery_percent, zs.target_temperature, zs.demand, zs.active, zs.fault,
+                   zs.rssi_element_dbm, zs.rssi_control_unit_dbm,
+                   zs.floor_temperature_c,
+                   zs.configuration_json, zs.setpoint_profiles_json,
                    zs.source_timestamp, zs.updated_at,
                    ds.online AS device_online
             FROM zone_metadata zm
@@ -747,6 +775,11 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                 "area_m2": row["area_m2"],
                 "current_temperature_c": row["current_temperature"],
                 "battery_percent": row["battery_percent"],
+                "rssi_element_dbm": row["rssi_element_dbm"],
+                "rssi_control_unit_dbm": row["rssi_control_unit_dbm"],
+                "floor_temperature_c": row["floor_temperature_c"],
+                "configuration": json.loads(row["configuration_json"]) if row["configuration_json"] else None,
+                "setpoint_profiles": json.loads(row["setpoint_profiles_json"]) if row["setpoint_profiles_json"] else {},
                 "target_temperature_c": displayed_target_c,
                 "demand": None if row["demand"] is None else bool(row["demand"]),
                 "active": None if row["active"] is None else bool(row["active"]),
@@ -1093,6 +1126,7 @@ def ingest_device_twin_snapshot(
     last_error: str | None,
     zones: list[dict[str, Any]] | None,
     channels: list[dict[str, Any]] | None,
+    publish_zone_state_update_hook: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -1114,6 +1148,23 @@ def ingest_device_twin_snapshot(
 
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
+        current_state = conn.execute(
+            "SELECT source_timestamp FROM device_state WHERE device_id = ?",
+            (device["id"],),
+        ).fetchone()
+        current_source_timestamp = None if current_state is None else current_state["source_timestamp"]
+        incoming_dt = _parse_iso_datetime(source_timestamp)
+        current_dt = _parse_iso_datetime(current_source_timestamp)
+        if incoming_dt is not None and current_dt is not None and incoming_dt < current_dt:
+            return {
+                "device_id": device_external_id,
+                "source": source,
+                "source_timestamp": source_timestamp,
+                "zone_updates": 0,
+                "channel_updates": 0,
+                "applied": False,
+                "skip_reason": "stale_source_timestamp",
+            }
         if firmware_version is not None and str(firmware_version).strip() != "":
             conn.execute(
                 "UPDATE devices SET firmware_version = ? WHERE id = ?",
@@ -1257,7 +1308,7 @@ def ingest_device_twin_snapshot(
         zone_active = zone.get("active")
         if zone_demand is None and zone_active is not None:
             zone_demand = bool(zone_active)
-        upsert_zone_state(
+        persisted_zone = upsert_zone_state(
             device_external_id,
             zone_id,
             current_temperature=zone.get("current_temperature_c"),
@@ -1271,7 +1322,14 @@ def ingest_device_twin_snapshot(
             thermostat_element_id=zone.get("thermostat_element_id"),
             controlled_element_ids=[int(value) for value in zone.get("controlled_element_ids", []) if isinstance(value, int)],
             assigned_channel_ids=[int(value) for value in zone.get("assigned_channel_ids", []) if isinstance(value, int)],
+            rssi_element_dbm=zone.get("rssi_element_dbm"),
+            rssi_control_unit_dbm=zone.get("rssi_control_unit_dbm"),
+            floor_temperature_c=zone.get("floor_temperature_c"),
+            configuration=zone.get("configuration"),
+            setpoint_profiles=zone.get("setpoint_profiles"),
         )
+        if publish_zone_state_update_hook is not None:
+            publish_zone_state_update_hook(device_external_id, persisted_zone)
         if (
             source != "mobile_api"
             and reported_target_c is not None
@@ -1838,6 +1896,11 @@ def upsert_zone_state(
     thermostat_element_id: int | None = None,
     controlled_element_ids: list[int] | None = None,
     assigned_channel_ids: list[int] | None = None,
+    rssi_element_dbm: float | None = None,
+    rssi_control_unit_dbm: float | None = None,
+    floor_temperature_c: float | None = None,
+    configuration: dict[str, float] | None = None,
+    setpoint_profiles: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     ensure_default_zones(device_external_id, zone_count=max(3, int(zone_id)))
     now = _now_iso()
@@ -1845,7 +1908,7 @@ def upsert_zone_state(
         _ensure_hvac_projection_schema(conn)
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, rssi_element_dbm, rssi_control_unit_dbm, floor_temperature_c, configuration_json, setpoint_profiles_json, source_timestamp, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
 
@@ -1855,6 +1918,11 @@ def upsert_zone_state(
         persisted_demand = row["demand"] if demand is None and row is not None else (None if demand is None else int(bool(demand)))
         persisted_active = row["active"] if active is None and row is not None else (None if active is None else int(bool(active)))
         persisted_fault = row["fault"] if fault is None and row is not None else fault
+        persisted_rssi_element_dbm = rssi_element_dbm if rssi_element_dbm is not None else (row["rssi_element_dbm"] if row is not None else None)
+        persisted_rssi_control_unit_dbm = rssi_control_unit_dbm if rssi_control_unit_dbm is not None else (row["rssi_control_unit_dbm"] if row is not None else None)
+        persisted_floor_temperature_c = floor_temperature_c if floor_temperature_c is not None else (row["floor_temperature_c"] if row is not None else None)
+        persisted_configuration = json.dumps(configuration, separators=(",", ":")) if configuration is not None else (row["configuration_json"] if row is not None else None)
+        persisted_setpoint_profiles = json.dumps(setpoint_profiles, separators=(",", ":")) if setpoint_profiles is not None else (row["setpoint_profiles_json"] if row is not None else "{}")
         persisted_source_timestamp = source_timestamp if source_timestamp is not None else (row["source_timestamp"] if row is not None else now)
         persisted_thermostat_element_id = thermostat_element_id if thermostat_element_id is not None else (row["thermostat_element_id"] if row is not None else None)
         persisted_controlled_element_ids = json.dumps(controlled_element_ids, separators=(",", ":")) if controlled_element_ids is not None else (row["controlled_element_ids_json"] if row is not None else "[]")
@@ -1862,8 +1930,8 @@ def upsert_zone_state(
 
         conn.execute(
             """
-            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, source_timestamp, updated_at, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, rssi_element_dbm, rssi_control_unit_dbm, floor_temperature_c, configuration_json, setpoint_profiles_json, source_timestamp, updated_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id, zone_id) DO UPDATE SET
                 thermostat_element_id = excluded.thermostat_element_id,
                 controlled_element_ids_json = excluded.controlled_element_ids_json,
@@ -1874,6 +1942,11 @@ def upsert_zone_state(
                 demand = excluded.demand,
                 active = excluded.active,
                 fault = excluded.fault,
+                rssi_element_dbm = excluded.rssi_element_dbm,
+                rssi_control_unit_dbm = excluded.rssi_control_unit_dbm,
+                floor_temperature_c = excluded.floor_temperature_c,
+                configuration_json = excluded.configuration_json,
+                setpoint_profiles_json = excluded.setpoint_profiles_json,
                 source_timestamp = excluded.source_timestamp,
                 updated_at = excluded.updated_at,
                 source = excluded.source
@@ -1890,6 +1963,11 @@ def upsert_zone_state(
                 persisted_demand,
                 persisted_active,
                 persisted_fault,
+                persisted_rssi_element_dbm,
+                persisted_rssi_control_unit_dbm,
+                persisted_floor_temperature_c,
+                persisted_configuration,
+                persisted_setpoint_profiles,
                 persisted_source_timestamp,
                 now,
                 source,

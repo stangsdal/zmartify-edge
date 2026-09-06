@@ -156,6 +156,14 @@ export interface NilanHvacState {
   poll_responses?: number | null;
 }
 
+export type NilanCommand = 'ventilation' | 'inlet_speed' | 'exhaust_speed';
+
+export interface NilanCommandResponse {
+  command_id: string;
+  status: string;
+  topic: string;
+}
+
 export interface DeviceControllerSettings {
   device_id: string;
   local_url: string;

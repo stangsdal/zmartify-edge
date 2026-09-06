@@ -1,7 +1,6 @@
 import { motion } from 'framer-motion';
 import { IonIcon } from '@ionic/react';
-import { batteryFullOutline, ellipsisVerticalOutline } from 'ionicons/icons';
-import { HealthBadge } from './HealthBadge';
+import { batteryFullOutline, ellipsisVerticalOutline, wifiOutline } from 'ionicons/icons';
 import { TemperatureBadge } from './TemperatureBadge';
 import { MobileZone } from '../api/mobile';
 import { displaySetpointMode, HvacZoneMode } from '../utils/hvacMode';
@@ -11,25 +10,32 @@ interface RoomCardProps {
   onOpen: () => void;
   onHistory: () => void;
   onRename: () => void;
-  onSetpointChange: (delta: number) => void;
+  onAdvancedSettings: () => void;
+  onSetpointChange: (target: number) => void;
   onModeChange: (mode: HvacZoneMode) => void;
   canOperate: boolean;
   canConfigure: boolean;
 }
 
-function zoneState(zone: MobileZone): { label: string; tone: 'good' | 'warn' | 'critical' | 'info' } {
-  if (!zone.online) return { label: 'Offline', tone: 'critical' };
-  if (zone.fault) return { label: 'Fault', tone: 'critical' };
-  if (zone.demand) return { label: 'Heating', tone: 'warn' };
-  return { label: 'Connected', tone: 'good' };
+function rssiQuality(zone: MobileZone): number | null {
+  const values = [zone.rssi_element_dbm, zone.rssi_control_unit_dbm]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (!values.length) return null;
+  const rssi = Math.min(...values);
+  if (rssi >= -55) return 4;
+  if (rssi >= -67) return 3;
+  if (rssi >= -75) return 2;
+  if (rssi >= -85) return 1;
+  return 0;
 }
 
-export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, onModeChange, canOperate, canConfigure }: RoomCardProps) {
-  const state = zoneState(zone);
+export function RoomCard({ zone, onOpen, onHistory, onRename, onAdvancedSettings, onSetpointChange, onModeChange, canOperate, canConfigure }: RoomCardProps) {
   const zoneKey = zone.zone_key || `zone-${zone.zone_id}`;
   const displayName = zone.name && zone.name !== zoneKey ? zone.name : zoneKey;
   const mode = displaySetpointMode(zone.setpoint_mode);
-  const modes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'STANDBY'];
+  const signalQuality = rssiQuality(zone);
+  const signalLabel = signalQuality === null ? 'Signal unavailable' : `Signal quality ${signalQuality} of 4`;
+  const modes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'HOLIDAY', 'STANDBY', 'PARTY'];
   return (
     <motion.div
       whileHover={{ y: -2 }}
@@ -45,9 +51,14 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
         </div>
         <div className="flex items-center gap-2">
           <div className="thermostat-card__overview-status">
-            <HealthBadge label={state.label} tone={state.tone} />
-            <div className="thermostat-card__signal" aria-label={zone.demand ? 'Heating on' : 'Heating off'}>
-              <span className={zone.demand ? 'is-active' : ''} />{zone.demand ? 'ON' : 'OFF'}
+            <div className="thermostat-card__connection" title={signalLabel} aria-label={signalLabel}>
+              <IonIcon icon={wifiOutline} aria-hidden="true" />
+              <span className="thermostat-card__rssi" aria-hidden="true">
+                {[1, 2, 3, 4].map((level) => <i key={level} className={signalQuality !== null && level <= signalQuality ? 'is-active' : ''} />)}
+              </span>
+            </div>
+            <div className="thermostat-card__signal" aria-label={zone.demand === true ? 'Heating on' : 'Heating off'}>
+              <span className={zone.demand === true ? 'is-active' : ''} />{zone.demand === true ? 'ON' : 'OFF'}
             </div>
           </div>
           {typeof zone.battery_percent === 'number' ? (
@@ -68,6 +79,7 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
               <button type="button" className="menu-action" onClick={onOpen}>Open thermostat</button>
               <button type="button" className="menu-action" onClick={onHistory}>History</button>
               {canConfigure ? <button type="button" className="menu-action" onClick={onRename}>Rename zone</button> : null}
+              {canConfigure ? <button type="button" className="menu-action" onClick={onAdvancedSettings}>Advanced settings</button> : null}
             </div>
           </details>
         </div>
@@ -76,22 +88,27 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
         <button type="button" onClick={onOpen} className="mt-3 text-left" aria-label={`Open ${displayName} thermostat`}>
           <TemperatureBadge value={zone.current_temperature_c} />
         </button>
-        <div className="thermostat-mode-list thermostat-mode-list--overview" aria-label="Thermostat modes">
-          {modes.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              className={`thermostat-mode thermostat-mode--${candidate.toLowerCase()} ${candidate === mode ? '' : 'thermostat-mode--inactive'}`}
-              disabled={!canOperate}
-              onClick={(event) => { event.stopPropagation(); onModeChange(candidate); }}
-            >
-              {candidate === 'KOMFORT' ? 'Comfort' : candidate}
-            </button>
-          ))}
+        <div className="thermostat-mode-select" onClick={(event) => event.stopPropagation()}>
+          <label htmlFor={`mode-${zoneKey}`} className="sr-only">Temperature mode</label>
+          <select
+            id={`mode-${zoneKey}`}
+            aria-label="Temperature mode"
+            value={mode}
+            disabled={!canOperate}
+            onChange={(event) => onModeChange(event.target.value as HvacZoneMode)}
+          >
+            {modes.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate === 'KOMFORT' ? 'Comfort' : candidate}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="thermostat-card__lever" onClick={(event) => event.stopPropagation()}>
-        <span className="thermostat-card__lever-label">Setpoint</span>
+        <span className="thermostat-card__lever-label">
+          {zone.target_temperature_c?.toFixed(1) ?? '--'}°
+        </span>
         <input
           aria-label={`Setpoint for ${displayName}`}
           type="range"
@@ -100,9 +117,8 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onSetpointChange, 
           step="0.5"
           value={zone.target_temperature_c ?? 20}
           disabled={!canOperate}
-          onChange={(event) => onSetpointChange(Number(event.target.value) - (zone.target_temperature_c ?? 20))}
+          onChange={(event) => onSetpointChange(Number(event.target.value))}
         />
-        <span className="thermostat-card__lever-value">{zone.target_temperature_c?.toFixed(1) ?? '--'}°</span>
       </div>
     </motion.div>
   );

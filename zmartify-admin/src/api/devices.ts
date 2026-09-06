@@ -8,6 +8,8 @@ import {
   DeviceControllerSettingsUpdate,
   DeviceDiscovery,
   DeviceFreshness,
+  NilanCommand,
+  NilanCommandResponse,
   NilanHvacState,
   DeviceSdCardStatus,
   DeviceOtaStage,
@@ -25,6 +27,9 @@ export const deviceApi = {
 
   getNilanState: (deviceId: string): Promise<NilanHvacState> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/hvac/nilan`),
+
+  setNilanCommand: (deviceId: string, command: NilanCommand, value: number): Promise<NilanCommandResponse> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/hvac/nilan/command`, { command, value }),
   
   create: (
     deviceId: string,

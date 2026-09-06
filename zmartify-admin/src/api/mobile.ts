@@ -46,6 +46,7 @@ export interface MobileSiteZonesDetail {
 }
 
 export interface MobileZone {
+  device_id?: string;
   zone_uuid?: string;
   zone_id: number;
   zone_key?: string;
@@ -56,6 +57,9 @@ export interface MobileZone {
   humidity?: number | null;
   window_open?: boolean | null;
   current_temperature_c?: number;
+  floor_temperature_c?: number | null;
+  configuration?: MobileZoneConfiguration | null;
+  setpoint_profiles?: Record<string, number>;
   battery_percent?: number | null;
   target_temperature_c?: number;
   demand?: boolean;
@@ -63,6 +67,8 @@ export interface MobileZone {
   online?: boolean;
   controlled_element_ids?: number[];
   assigned_channel_ids?: number[];
+  rssi_element_dbm?: number | null;
+  rssi_control_unit_dbm?: number | null;
   fault?: string | null;
   freshness_age_ms?: number | null;
   setpoint_command_state?: string;
@@ -71,6 +77,14 @@ export interface MobileZone {
   setpoint_requested_target_c?: number | null;
   setpoint_failure_reason?: string | null;
   setpoint_command_age_ms?: number | null;
+}
+
+export interface MobileZoneConfiguration {
+  min_temperature_c?: number | null;
+  max_temperature_c?: number | null;
+  floor_min_temperature_c?: number | null;
+  floor_max_temperature_c?: number | null;
+  hysteresis_c?: number | null;
 }
 
 export interface MobileSetpointResponse {
@@ -486,6 +500,12 @@ export const mobileApi = {
       target_temperature_c: targetTemperatureC,
       ...(setpointMode == null ? {} : { setpoint_mode: setpointMode }),
     }),
+
+  configureZone: (
+    zoneRef: string,
+    payload: MobileZoneConfiguration & { setpoint_profiles?: Record<string, number> },
+  ): Promise<{ device_id: string; zone_id: number; pending: boolean; command_ids: string[]; zone: MobileZone }> =>
+    apiClient.post(`/mobile/zones/${encodeURIComponent(zoneRef)}/configuration`, payload),
 
   renameDeviceZone: (deviceId: string, zoneId: number, name: string): Promise<MobileZone> =>
     apiClient.post(`/devices/${deviceId}/zones/${zoneId}/rename`, { name }),

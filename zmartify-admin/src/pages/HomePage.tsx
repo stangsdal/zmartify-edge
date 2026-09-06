@@ -3,21 +3,18 @@ import { IonContent, IonPage } from '@ionic/react';
 import { motion } from 'framer-motion';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileSiteSummary, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
+import { mobileApi, MobileEvent, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
 import { notificationsApi } from '../api/notifications';
 import { useAccess } from '../auth/AccessContext';
 
 export function HomePage() {
-  const { selectedSiteId, selectSite } = useAccess();
-  const [sites, setSites] = useState<MobileSiteSummary[]>([]);
+  const { context, selectedSiteId, selectSite } = useAccess();
   const [zones, setZones] = useState<MobileZone[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
 
   useEffect(() => {
     const load = async () => {
-      const siteRes = await mobileApi.listSites();
-      setSites(siteRes.sites || []);
       const eventRes = await mobileApi.listEvents(8);
       setEvents(eventRes.events || []);
 
@@ -31,11 +28,30 @@ export function HomePage() {
     if (!selectedSiteId) return;
     const loadZones = async () => {
       const siteZones = await mobileApi.getSiteZones(String(selectedSiteId));
-      const allZones = (siteZones.devices || []).flatMap((d) => d.zones || []);
+      const allZones = (siteZones.devices || []).flatMap((device) => (
+        (device.zones || []).map((zone) => ({ ...zone, device_id: device.device_id }))
+      ));
       setZones(allZones);
+      return siteZones;
+    };
 
-      const topics = (siteZones.devices || []).map((device) => `device:${device.device_id}:irrigation`);
+    const subscribe = async () => {
+      const siteZones = await loadZones();
+
+      const topics = (siteZones.devices || []).flatMap((device) => [
+        `device:${device.device_id}:irrigation`,
+        `device:${device.device_id}:state`,
+      ]);
       const unsubscribe = subscribeRealtimeTopics(topics, (event) => {
+        const updatedZone = event.payload?.zone as MobileZone | undefined;
+        if (event.event_type === 'device.state.updated' && updatedZone?.zone_id != null) {
+          const deviceId = typeof event.payload?.device_id === 'string' ? event.payload.device_id : null;
+          setZones((previous) => previous.map((zone) => (
+            zone.zone_id === updatedZone.zone_id && (!deviceId || zone.device_id === deviceId)
+              ? { ...zone, ...updatedZone }
+              : zone
+          )));
+        }
         const receivedAt = new Date().toISOString();
         const nextEvent: MobileEvent = {
           event_id: `rt-${receivedAt}-${event.event_type}`,
@@ -50,14 +66,19 @@ export function HomePage() {
     };
 
     let cleanup: (() => void) | undefined;
-    loadZones()
+    let refreshTimer: number | undefined;
+    subscribe()
       .then((unsubscribe) => {
         cleanup = unsubscribe;
+        refreshTimer = window.setInterval(() => {
+          loadZones().catch(console.error);
+        }, 10000);
       })
       .catch(console.error);
 
     return () => {
       cleanup?.();
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
     };
   }, [selectedSiteId]);
 
@@ -109,7 +130,7 @@ export function HomePage() {
         <div className="space-y-4 pb-20 lg:pb-8">
           <SiteSelector
             label="Property"
-            options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))}
+            options={(context?.sites || []).map((site) => ({ site_id: String(site.id), site_name: site.name }))}
             value={selectedSiteId ? String(selectedSiteId) : ''}
             onChange={(siteId) => selectSite(Number(siteId))}
           />

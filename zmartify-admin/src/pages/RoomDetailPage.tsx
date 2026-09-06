@@ -117,7 +117,7 @@ export function RoomDetailPage() {
     load().catch(console.error);
     const intervalId = window.setInterval(() => {
       load().catch(console.error);
-    }, 60000);
+    }, 5000);
 
     return () => {
       cancelled = true;
@@ -136,6 +136,7 @@ export function RoomDetailPage() {
 
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let pingTimer: number | null = null;
     let stopped = false;
 
     const connect = () => {
@@ -145,6 +146,10 @@ export function RoomDetailPage() {
 
       socket.onopen = () => {
         setStreamState('connected');
+        if (pingTimer != null) window.clearInterval(pingTimer);
+        pingTimer = window.setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) socket.send('ping');
+        }, 15000);
       };
 
       socket.onmessage = (event) => {
@@ -159,7 +164,16 @@ export function RoomDetailPage() {
 
       socket.onclose = () => {
         if (stopped) return;
+        if (pingTimer != null) {
+          window.clearInterval(pingTimer);
+          pingTimer = null;
+        }
         setStreamState('reconnecting');
+        mobileApi.getZoneByRef(resolvedRef)
+          .then((response) => {
+            if (!stopped) applyIncomingZoneState(response.zone);
+          })
+          .catch(console.error);
         reconnectTimer = window.setTimeout(connect, 2000);
       };
 
@@ -174,6 +188,9 @@ export function RoomDetailPage() {
       stopped = true;
       if (reconnectTimer != null) {
         window.clearTimeout(reconnectTimer);
+      }
+      if (pingTimer != null) {
+        window.clearInterval(pingTimer);
       }
       socket?.close();
     };
@@ -250,7 +267,7 @@ export function RoomDetailPage() {
     }, 1200);
 
     return () => window.clearTimeout(timer);
-  }, [dirty, resolvedRef, selectedMode, target, zone]);
+  }, [dirty, resolvedRef, selectedMode, target]);
 
   useEffect(() => {
     if (zone && !dirty) {
@@ -301,7 +318,7 @@ export function RoomDetailPage() {
 
   const zoneKey = zone?.zone_key || (zone ? `zone-${zone.zone_id}` : 'Room');
   const displayName = zone?.name && zone.name !== zoneKey ? zone.name : zoneKey;
-  const supportedModes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'STANDBY'];
+  const supportedModes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'HOLIDAY', 'STANDBY', 'PARTY'];
 
   return (
     <IonPage>

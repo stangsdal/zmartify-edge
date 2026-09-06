@@ -107,6 +107,7 @@ def ingest_mqtt_v2_reported_state(
     *,
     source: str = "mqtt_v2_ingest",
     publish_zone_state_update_hook=None,
+    publish_nilan_state_update_hook=None,
 ) -> dict[str, Any]:
     reported = dict(payload or {})
     # The first Nilan firmware publishes its read-only projection directly on
@@ -126,6 +127,8 @@ def ingest_mqtt_v2_reported_state(
             reported,
             source_timestamp=reported.get("source_timestamp") or _safe_source_timestamp(reported),
         )
+        if publish_nilan_state_update_hook is not None:
+            publish_nilan_state_update_hook(device_id, state)
         return {
             "device_id": device_id,
             "source": source,
@@ -152,6 +155,7 @@ def ingest_mqtt_v2_reported_state(
         last_error=reported.get("last_error"),
         zones=zones,
         channels=channels,
+        publish_zone_state_update_hook=publish_zone_state_update_hook,
     )
 
     if controller:
@@ -169,10 +173,6 @@ def ingest_mqtt_v2_reported_state(
                     source_timestamp=reported.get("source_timestamp"),
                 )
 
-    if hvac_result.get("applied") and publish_zone_state_update_hook is not None:
-        for zone in list_device_zones(device_id):
-            publish_zone_state_update_hook(device_id, zone)
-
     nilan_result = None
     if nilan:
         nilan_result = upsert_nilan_state(
@@ -180,6 +180,8 @@ def ingest_mqtt_v2_reported_state(
             nilan,
             source_timestamp=reported.get("source_timestamp") or _safe_source_timestamp(reported),
         )
+        if publish_nilan_state_update_hook is not None:
+            publish_nilan_state_update_hook(device_id, nilan_result)
 
     irrigation = _as_dict(reported.get("irrigation"))
     hydraulics = _as_dict(reported.get("hydraulics"))

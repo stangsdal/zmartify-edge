@@ -27,9 +27,8 @@ import urllib.error
 import urllib.request
 
 try:
-    import certifi
-    TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-except ImportError:
+    TLS_CONTEXT = ssl.create_default_context(cafile="/etc/ssl/cert.pem")
+except OSError:
     TLS_CONTEXT = ssl.create_default_context()
 
 # Never send private-LAN device traffic through a shell-configured proxy.

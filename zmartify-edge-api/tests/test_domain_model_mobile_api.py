@@ -147,6 +147,84 @@ def test_mobile_site_zones_excludes_non_hvac_devices(monkeypatch, tmp_path: Path
     assert [device["device_id"] for device in response.json()["devices"]] == [device_id]
 
 
+def test_mobile_site_zones_excludes_uninitialized_hvac_devices(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    active_device_id = _seed_domain_site_device(client, headers, "hvac-gateway-active01")
+    with get_connection() as conn:
+        site_id = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (active_device_id,)).fetchone()["site_id"]
+        active_pk = conn.execute("SELECT id FROM devices WHERE device_id = ?", (active_device_id,)).fetchone()["id"]
+        conn.execute(
+            "INSERT INTO zone_state(device_id, zone_id, current_temperature, target_temperature) VALUES (?, ?, ?, ?)",
+            (active_pk, 1, 21.5, 22.0),
+        )
+        conn.commit()
+
+    historical = client.post(
+        "/devices",
+        headers=headers,
+        json={
+            "device_id": "hvac-gateway-historical01",
+            "display_name": "Historical gateway",
+            "mac": "11:22:33:44:55:66",
+            "firmware_version": "0.1.0",
+        },
+    )
+    assert historical.status_code == 201
+    assert client.post(
+        "/devices/hvac-gateway-historical01/assign-site",
+        headers=headers,
+        json={"site_id": site_id},
+    ).status_code == 200
+
+    site = conn.execute("SELECT uuid FROM sites WHERE id = ?", (site_id,)).fetchone()
+    response = client.get(f"/mobile/sites/{site['uuid']}/zones", headers=headers)
+
+    assert response.status_code == 200
+    assert [device["device_id"] for device in response.json()["devices"]] == [active_device_id]
+
+
+def test_mobile_site_zones_excludes_nilan_but_site_detail_keeps_device(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    active_device_id = _seed_domain_site_device(client, headers, "hvac-gateway-ahc01")
+    with get_connection() as conn:
+        site_id = conn.execute("SELECT site_id FROM devices WHERE device_id = ?", (active_device_id,)).fetchone()["site_id"]
+
+    nilan = client.post(
+        "/devices",
+        headers=headers,
+        json={
+            "device_id": "zmartify-hvac-nilan-test01",
+            "display_name": "Nilan Comfort 302",
+            "mac": "22:33:44:55:66:77",
+            "firmware_version": "0.1.0",
+        },
+    )
+    assert nilan.status_code == 201
+    assert client.post(
+        "/devices/zmartify-hvac-nilan-test01/assign-site",
+        headers=headers,
+        json={"site_id": site_id},
+    ).status_code == 200
+
+    with get_connection() as conn:
+        site = conn.execute("SELECT uuid FROM sites WHERE id = ?", (site_id,)).fetchone()
+
+    zones = client.get(f"/mobile/sites/{site['uuid']}/zones", headers=headers)
+    assert zones.status_code == 200
+    assert [device["device_id"] for device in zones.json()["devices"]] == [active_device_id]
+
+    detail = client.get(f"/mobile/sites/{site['uuid']}", headers=headers)
+    assert detail.status_code == 200
+    assert {device["device_id"] for device in detail.json()["devices"]} == {
+        active_device_id,
+        "zmartify-hvac-nilan-test01",
+    }
+
+
 def test_mobile_setpoint_updates_twin_and_events(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
@@ -304,6 +382,13 @@ def test_accepted_setpoint_outcome_keeps_optimistic_target_until_twin_confirmati
     assert accepted_past_timeout["target_temperature_c"] == 21.0
     assert accepted_past_timeout["setpoint_pending"] is True
     assert accepted_past_timeout["setpoint_command_state"] == "pending_device_feedback"
+
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM event_log WHERE event_type = 'setpoint_command_outcome_received' AND device_id = (SELECT id FROM devices WHERE device_id = ?)",
+            (device_id,),
+        )
+        conn.commit()
 
     confirmed_twin = client.post(
         f"/devices/{device_id}/ingest/twin",
@@ -599,6 +684,43 @@ def test_channel_zone_links_and_twin_ingest(monkeypatch, tmp_path: Path):
     mobile = client.get(f"/mobile/devices/{device_id}", headers=headers)
     assert mobile.status_code == 200
     assert mobile.json()["channels"][0]["linked_zone_ids"] == [1, 2]
+
+
+def test_older_twin_snapshot_cannot_overwrite_newer_setpoint(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_domain_site_device(client, headers, "hvac-gateway-aabbcc")
+
+    newer = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "source_timestamp": "2026-09-06T17:35:00Z",
+            "online": True,
+            "zones": [{"zone_id": 4, "target_temperature_c": 16.0}],
+        },
+    )
+    assert newer.status_code == 200
+    assert newer.json()["applied"] is True
+
+    older = client.post(
+        f"/devices/{device_id}/ingest/twin",
+        headers=headers,
+        json={
+            "source": "firmware_periodic",
+            "source_timestamp": "2026-09-06T17:31:00Z",
+            "online": True,
+            "zones": [{"zone_id": 4, "target_temperature_c": 18.0}],
+        },
+    )
+    assert older.status_code == 200
+    assert older.json()["applied"] is False
+    assert older.json()["skip_reason"] == "stale_source_timestamp"
+
+    zone = client.get(f"/devices/{device_id}/zones/4", headers=headers)
+    assert zone.status_code == 200
+    assert zone.json()["target_temperature_c"] == 16.0
 
 
 def test_ingest_dedup_and_rate_limit(monkeypatch, tmp_path: Path):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 from app.setpoint_outcome_listener import SetpointOutcomeMqttListener
 
@@ -85,10 +87,46 @@ def test_on_message_routes_irrigation_outcome_and_reported_state():
         ),
     )
 
+    deadline = time.monotonic() + 1.0
+    while not states and time.monotonic() < deadline:
+        time.sleep(0.01)
+
     assert outcomes and outcomes[0][0] == "zmartify-irrigation-01"
     assert outcomes[0][1]["event_type"] == "run.started"
     assert states and states[0][0] == "zmartify-irrigation-01"
     assert states[0][1]["hydraulics"]["flow_lpm"] == 12.0
+
+
+def test_reported_state_queue_keeps_only_latest_snapshot_per_device():
+    started = threading.Event()
+    release = threading.Event()
+    seen = []
+
+    listener = SetpointOutcomeMqttListener(
+        list_devices_fn=lambda: [],
+        get_device_mqtt_credentials_fn=lambda _device_id: {},
+        ingest_setpoint_command_outcome_fn=lambda *args, **kwargs: None,
+        mqtt_client_module=None,
+        ingest_reported_state_fn=lambda *_args: None,
+    )
+
+    def ingest(_device_id, data):
+        seen.append(data["source_timestamp"])
+        started.set()
+        release.wait(1.0)
+
+    listener._ingest_reported_state_async = ingest
+    listener._queue_reported_state("device-a", {"source_timestamp": "first"})
+    assert started.wait(1.0)
+    listener._queue_reported_state("device-a", {"source_timestamp": "latest"})
+    release.set()
+
+    deadline = time.monotonic() + 1.0
+    while len(seen) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    listener._reported_state_executor.shutdown(wait=True)
+    assert seen == ["first", "latest"]
 
 
 def test_on_message_logs_v2_reported_state_ingest(caplog):
@@ -219,5 +257,5 @@ def test_start_uses_async_connect_and_retries_first_connection(monkeypatch):
 
     assert listener._running is True
     assert len(fake_mqtt.clients) == 1
-    assert fake_mqtt.clients[0].connected_to == ("mosquitto", 1883, 30)
+    assert fake_mqtt.clients[0].connected_to == ("mosquitto", 1883, 120)
     assert fake_mqtt.clients[0].loop_kwargs == {"retry_first_connection": True}

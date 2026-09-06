@@ -4,7 +4,9 @@ import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { RoomCard } from '../components/RoomCard';
-import { mobileApi, MobileSiteSummary, MobileZone } from '../api/mobile';
+import { AdvancedThermostatSettings } from '../components/AdvancedThermostatSettings';
+import { mobileApi, MobileSiteDevice, MobileZone } from '../api/mobile';
+import { NilanControlPanel } from '../components/NilanControlPanel';
 import { apiClient } from '../api/client';
 import { useAccess } from '../auth/AccessContext';
 import { HvacZoneMode, SETPOINT_MODE_BY_NAME } from '../utils/hvacMode';
@@ -13,12 +15,19 @@ interface RoomWithRef extends MobileZone {
   zone_ref: string;
 }
 
+const roomIdentity = (deviceId: string, zoneId: number) => `${deviceId}:${zoneId}`;
+
 export function RoomsPage() {
   const { context, selectedSiteId, selectSite, can } = useAccess();
   const history = useHistory();
-  const [sites, setSites] = useState<MobileSiteSummary[]>([]);
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
+  const [siteDevices, setSiteDevices] = useState<MobileSiteDevice[]>([]);
+  const [advancedRoom, setAdvancedRoom] = useState<RoomWithRef | null>(null);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const socketPingTimersRef = useRef<Map<string, number>>(new Map());
+  const socketReconnectTimersRef = useRef<Map<string, number>>(new Map());
+  const setpointTimersRef = useRef<Map<string, number>>(new Map());
+  const desiredSetpointsRef = useRef<Map<string, number>>(new Map());
   const emptyResponseStreakRef = useRef(0);
 
   const blurActiveElement = () => {
@@ -37,18 +46,24 @@ export function RoomsPage() {
     blurActiveElement();
   });
 
-  const handleSetpointChange = async (room: RoomWithRef, delta: number) => {
-    const current = room.target_temperature_c ?? 20;
-    const next = Math.round((current + delta) * 2) / 2; // keep 0.5 steps
+  const handleSetpointChange = (room: RoomWithRef, target: number) => {
+    const next = Math.max(5, Math.min(35, Math.round(target * 2) / 2));
     if (!room.zone_ref) return;
-    try {
-      await mobileApi.setZoneSetpoint(room.zone_ref, next);
-      setRooms((prev) =>
-        prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, target_temperature_c: next } : r))
-      );
-    } catch (error) {
-      console.error('setpoint change failed', error);
+    desiredSetpointsRef.current.set(room.zone_ref, next);
+    setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, target_temperature_c: next } : r)));
+
+    const previousTimer = setpointTimersRef.current.get(room.zone_ref);
+    if (previousTimer !== undefined) {
+      window.clearTimeout(previousTimer);
     }
+    const timer = window.setTimeout(() => {
+      const requestedTarget = desiredSetpointsRef.current.get(room.zone_ref);
+      if (requestedTarget === undefined) return;
+      void mobileApi.setZoneSetpoint(room.zone_ref, requestedTarget).catch((error) => {
+        console.error('setpoint change failed', error);
+      });
+    }, 700);
+    setpointTimersRef.current.set(room.zone_ref, timer);
   };
 
   const handleModeChange = async (room: RoomWithRef, mode: HvacZoneMode) => {
@@ -91,14 +106,39 @@ export function RoomsPage() {
     const endpoint = `${wsBase}/mobile/ws/zones/${encodeURIComponent(zoneRef)}?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(endpoint);
 
+    socket.onopen = () => {
+      const previousTimer = socketPingTimersRef.current.get(zoneRef);
+      if (previousTimer !== undefined) window.clearInterval(previousTimer);
+      const pingTimer = window.setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) socket.send('ping');
+      }, 15000);
+      socketPingTimersRef.current.set(zoneRef, pingTimer);
+    };
+
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
         if (payload?.type === 'zone_update' && payload.zone) {
+          const incomingZone = payload.zone as MobileZone;
+          const desiredTarget = desiredSetpointsRef.current.get(zoneRef);
+          const incomingTarget = incomingZone.target_temperature_c;
+          const incomingRequestedTarget = incomingZone.setpoint_requested_target_c;
+          const commandState = String(incomingZone.setpoint_command_state || '');
+          const confirmsDesired = desiredTarget !== undefined && (
+            (commandState === 'confirmed' && typeof incomingTarget === 'number' && Math.abs(incomingTarget - desiredTarget) < 0.01)
+            || (incomingZone.setpoint_pending === true && typeof incomingRequestedTarget === 'number' && Math.abs(incomingRequestedTarget - desiredTarget) < 0.01)
+          );
+          const commandFailed = commandState.startsWith('failed');
+          if (confirmsDesired || commandFailed) {
+            desiredSetpointsRef.current.delete(zoneRef);
+          }
+          const nextZone = desiredTarget !== undefined && !confirmsDesired && !commandFailed
+            ? { ...incomingZone, target_temperature_c: desiredTarget }
+            : incomingZone;
           setRooms((prev) =>
             prev.map((room) =>
               room.zone_ref === zoneRef
-                ? { ...room, ...payload.zone }
+                ? { ...room, ...nextZone }
                 : room
             )
           );
@@ -112,16 +152,24 @@ export function RoomsPage() {
       socket?.close();
     };
 
+    socket.onclose = () => {
+      const pingTimer = socketPingTimersRef.current.get(zoneRef);
+      if (pingTimer !== undefined) {
+        window.clearInterval(pingTimer);
+        socketPingTimersRef.current.delete(zoneRef);
+      }
+      if (socketsRef.current.get(zoneRef) !== socket) return;
+      socketsRef.current.delete(zoneRef);
+      if (socketReconnectTimersRef.current.has(zoneRef)) return;
+      const reconnectTimer = window.setTimeout(() => {
+        socketReconnectTimersRef.current.delete(zoneRef);
+        if (!socketsRef.current.has(zoneRef)) subscribeToZoneUpdates(zoneRef);
+      }, 2000);
+      socketReconnectTimersRef.current.set(zoneRef, reconnectTimer);
+    };
+
     socketsRef.current.set(zoneRef, socket);
   };
-
-  useEffect(() => {
-    const loadSites = async () => {
-      const res = await mobileApi.listSites();
-      setSites(res.sites || []);
-    };
-    loadSites().catch(console.error);
-  }, []);
 
   useEffect(() => {
     if (!selectedSiteId) return;
@@ -130,41 +178,54 @@ export function RoomsPage() {
     const loadRooms = async () => {
       const selectedSite = context?.sites.find((site) => site.id === selectedSiteId);
       if (!selectedSite) return;
-      const siteZones = await mobileApi.getSiteZones(selectedSite.uuid);
-      const nextRooms: RoomWithRef[] = (siteZones.devices || []).flatMap((device) =>
-        (device.zones || []).map((zone) => ({
-          ...zone,
-          zone_ref: zone.zone_uuid || `${device.device_id}:${zone.zone_id}`,
-        }))
-      );
+      const [siteZones, siteDetail] = await Promise.all([
+        mobileApi.getSiteZones(selectedSite.uuid),
+        mobileApi.getSite(selectedSite.uuid),
+      ]);
+      const uniqueRooms = new Map<string, RoomWithRef>();
+      for (const device of siteZones.devices || []) {
+        for (const zone of device.zones || []) {
+          const identity = roomIdentity(device.device_id, zone.zone_id);
+          if (!uniqueRooms.has(identity)) {
+            uniqueRooms.set(identity, { ...zone, zone_ref: identity });
+          }
+        }
+      }
+      const nextRooms = Array.from(uniqueRooms.values());
 
       if (cancelled) return;
 
+      setSiteDevices(siteDetail.devices || []);
       setRooms((prev) => {
         if (nextRooms.length === 0 && prev.length > 0) {
-          // Ignore a single empty response to avoid flicker when backend data briefly lags.
+          // Keep the last complete snapshot while the backend briefly returns no zones.
           emptyResponseStreakRef.current += 1;
-          if (emptyResponseStreakRef.current < 2) {
-            return prev;
-          }
+          return prev;
         } else {
           emptyResponseStreakRef.current = 0;
         }
-        return nextRooms;
+        if (!prev.length) return nextRooms;
+
+        const nextRoomKeys = new Set(nextRooms.map((room) => room.zone_ref));
+        const nextDeviceIds = new Set(nextRooms.map((room) => room.zone_ref.split(':')[0]));
+        const temporarilyMissing = prev.filter((room) => (
+          nextDeviceIds.has(room.zone_ref.split(':')[0]) && !nextRoomKeys.has(room.zone_ref)
+        ));
+        return [...nextRooms, ...temporarilyMissing];
       });
     };
 
     emptyResponseStreakRef.current = 0;
+    setSiteDevices([]);
     loadRooms().catch(console.error);
-
-    const intervalId = window.setInterval(() => {
+    const refreshTimer = window.setInterval(() => {
       loadRooms().catch(console.error);
-    }, 15000);
+    }, 5000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
       emptyResponseStreakRef.current = 0;
+      window.clearInterval(refreshTimer);
     };
   }, [context, selectedSiteId]);
 
@@ -189,8 +250,15 @@ export function RoomsPage() {
 
   useEffect(() => {
     return () => {
+      setpointTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      setpointTimersRef.current.clear();
+      desiredSetpointsRef.current.clear();
       socketsRef.current.forEach((socket) => socket?.close());
       socketsRef.current.clear();
+      socketPingTimersRef.current.forEach((timer) => window.clearInterval(timer));
+      socketPingTimersRef.current.clear();
+      socketReconnectTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      socketReconnectTimersRef.current.clear();
     };
   }, []);
 
@@ -207,7 +275,7 @@ export function RoomsPage() {
   }, [sortedRooms]);
 
   const activeRooms = useMemo(
-    () => sortedRooms.filter((room) => room.demand === true || room.active === true).length,
+    () => sortedRooms.filter((room) => room.demand === true).length,
     [sortedRooms]
   );
 
@@ -224,7 +292,9 @@ export function RoomsPage() {
         <div className="space-y-4 pb-20 lg:pb-8">
           <SiteSelector
             label="Site"
-            options={sites.map((s) => ({ site_id: s.site_id, site_name: s.site_name }))}
+            options={(context?.sites || [])
+              .filter((site) => site.products.some((product) => product.type === 'hvac' && product.allowed))
+              .map((site) => ({ site_id: String(site.id), site_name: site.name }))}
             value={selectedSiteId ? String(selectedSiteId) : ''}
             onChange={(siteId) => selectSite(Number(siteId))}
           />
@@ -259,6 +329,7 @@ export function RoomsPage() {
                 onRename={() => {
                   void handleRename(room);
                 }}
+                onAdvancedSettings={() => setAdvancedRoom(room)}
                 onSetpointChange={(delta) => {
                   void handleSetpointChange(room, delta);
                 }}
@@ -271,6 +342,18 @@ export function RoomsPage() {
             ))}
             {!sortedRooms.length ? <p className="text-sm text-muted">No rooms found for this property.</p> : null}
           </div>
+
+          <AdvancedThermostatSettings
+            zone={advancedRoom}
+            zoneRef={advancedRoom?.zone_ref ?? null}
+            isOpen={advancedRoom !== null}
+            onDismiss={() => setAdvancedRoom(null)}
+            onSaved={(updatedZone) => {
+              setRooms((prev) => prev.map((room) => room.zone_ref === advancedRoom?.zone_ref ? { ...room, ...updatedZone } : room));
+            }}
+          />
+
+          <NilanControlPanel devices={siteDevices} canOperate={canOperate} />
         </div>
       </IonContent>
     </IonPage>

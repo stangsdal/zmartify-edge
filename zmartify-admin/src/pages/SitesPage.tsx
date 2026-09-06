@@ -8,10 +8,14 @@ import {
   IonItem,
   IonInput,
   IonLabel,
+  IonSelect,
+  IonSelectOption,
 } from '@ionic/react';
 import { siteApi } from '../api/sites';
 import { domainApi } from '../api/domains';
-import { Site, Domain } from '../types/api';
+import { siteMembersApi, SiteMembership } from '../api/siteMembers';
+import { usersApi } from '../api/users';
+import { Site, Domain, User } from '../types/api';
 import { AppHeader } from '../components/AppHeader';
 
 export function SitesPage() {
@@ -29,6 +33,10 @@ export function SitesPage() {
   const [savingSiteId, setSavingSiteId] = useState<number | null>(null);
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [siteMemberships, setSiteMemberships] = useState<Record<number, SiteMembership[]>>({});
+  const [ownerSelections, setOwnerSelections] = useState<Record<number, number[]>>({});
+  const [savingOwnerSiteId, setSavingOwnerSiteId] = useState<number | null>(null);
 
   const fetchDomains = async () => {
     try {
@@ -50,6 +58,21 @@ export function SitesPage() {
       }
 
       setSites(allSites);
+      const [userRows, membershipRows] = await Promise.all([
+        usersApi.list(),
+        Promise.all(allSites.map(async (site) => ({ siteId: site.id, members: await siteMembersApi.list(site.id) }))),
+      ]);
+      const membershipsBySite: Record<number, SiteMembership[]> = {};
+      const ownersBySite: Record<number, number[]> = {};
+      for (const row of membershipRows) {
+        membershipsBySite[row.siteId] = row.members;
+        ownersBySite[row.siteId] = row.members
+          .filter((member) => member.role === 'owner' && member.status === 'active')
+          .map((member) => member.user_id);
+      }
+      setUsers(userRows);
+      setSiteMemberships(membershipsBySite);
+      setOwnerSelections(ownersBySite);
       setError('');
     } catch (e) {
       setError(String(e));
@@ -141,6 +164,48 @@ export function SitesPage() {
       setError(String(e));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSaveOwners = async (siteId: number) => {
+    const selectedOwnerIds = ownerSelections[siteId] || [];
+    if (selectedOwnerIds.length === 0) {
+      setError('Each site must have at least one owner');
+      return;
+    }
+
+    const memberships = siteMemberships[siteId] || [];
+    const currentOwnerIds = new Set(
+      memberships.filter((member) => member.role === 'owner' && member.status === 'active').map((member) => member.user_id),
+    );
+    const selectedIds = new Set(selectedOwnerIds);
+
+    try {
+      setSavingOwnerSiteId(siteId);
+      for (const userId of selectedOwnerIds) {
+        const membership = memberships.find((member) => member.user_id === userId);
+        if (membership) {
+          if (membership.role !== 'owner' || membership.status !== 'active') {
+            await siteMembersApi.update(siteId, membership.id, { role: 'owner', status: 'active' });
+          }
+        } else {
+          await siteMembersApi.create(siteId, { user_id: userId, role: 'owner', product_types: [] });
+        }
+      }
+      for (const userId of currentOwnerIds) {
+        if (selectedIds.has(userId)) {
+          continue;
+        }
+        const membership = memberships.find((member) => member.user_id === userId);
+        if (membership) {
+          await siteMembersApi.update(siteId, membership.id, { role: 'user' });
+        }
+      }
+      await fetchSites();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingOwnerSiteId(null);
     }
   };
 
@@ -264,6 +329,24 @@ export function SitesPage() {
                       placeholder="No address set"
                     />
                   </label>
+                  <IonItem className="ion-no-padding mt-3">
+                    <IonLabel position="stacked">Owners</IonLabel>
+                    <IonSelect
+                      value={ownerSelections[site.id] || []}
+                      multiple
+                      interface="popover"
+                      onIonChange={(event) => setOwnerSelections((current) => ({
+                        ...current,
+                        [site.id]: (event.detail.value as number[]) || [],
+                      }))}
+                    >
+                      {users.map((user) => (
+                        <IonSelectOption key={user.id} value={user.id}>
+                          {user.display_name || user.username}
+                        </IonSelectOption>
+                      ))}
+                    </IonSelect>
+                  </IonItem>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <IonButton
                       size="small"
@@ -271,6 +354,13 @@ export function SitesPage() {
                       onClick={() => { void handleUpdateSite(site); }}
                     >
                       {savingSiteId === site.id ? 'Saving...' : 'Save'}
+                    </IonButton>
+                    <IonButton
+                      size="small"
+                      disabled={savingOwnerSiteId === site.id}
+                      onClick={() => { void handleSaveOwners(site.id); }}
+                    >
+                      {savingOwnerSiteId === site.id ? 'Saving owners...' : 'Save owners'}
                     </IonButton>
                     <IonButton
                       color="danger"

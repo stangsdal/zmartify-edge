@@ -14,13 +14,19 @@ import {
   IonItem,
   IonLabel,
   IonList,
+  IonModal,
   IonSelect,
   IonSelectOption,
 } from '@ionic/react';
 import { usersApi } from '../api/users';
+import { siteMembersApi, SiteMembership } from '../api/siteMembers';
+import { useAccess } from '../auth/AccessContext';
 import { User } from '../types/api';
 
+type UserSiteMembership = SiteMembership & { siteId: number; siteName: string };
+
 export function UsersPage() {
+  const { context } = useAccess();
   const roleOptions = ['administrator'];
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState('');
@@ -31,6 +37,8 @@ export function UsersPage() {
   const [roleEditUser, setRoleEditUser] = useState<User | null>(null);
   const [roleEditSelected, setRoleEditSelected] = useState<string[]>([]);
   const [siteAccessLoading, setSiteAccessLoading] = useState(false);
+  const [siteRoleEditUser, setSiteRoleEditUser] = useState<User | null>(null);
+  const [siteMemberships, setSiteMemberships] = useState<UserSiteMembership[]>([]);
 
   const load = async () => {
     try {
@@ -88,6 +96,40 @@ export function UsersPage() {
     }
   };
 
+  const changeSiteRoles = async (user: User) => {
+    try {
+      setSiteAccessLoading(true);
+      const memberships = (await Promise.all(
+        (context?.sites || []).map(async (site) => ({
+          site,
+          memberships: await siteMembersApi.list(site.id),
+        })),
+      )).flatMap(({ site, memberships }) => memberships
+        .filter((membership) => membership.user_id === user.id)
+        .map((membership) => ({ ...membership, siteId: site.id, siteName: site.name })));
+      setSiteMemberships(memberships);
+      setSiteRoleEditUser(user);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSiteAccessLoading(false);
+    }
+  };
+
+  const updateSiteRole = async (membership: UserSiteMembership, role: string) => {
+    try {
+      setSiteAccessLoading(true);
+      const updated = await siteMembersApi.update(membership.siteId, membership.id, { role });
+      setSiteMemberships((current) => current.map((item) => item.id === updated.id
+        ? { ...updated, siteId: membership.siteId, siteName: membership.siteName }
+        : item));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSiteAccessLoading(false);
+    }
+  };
+
   return (
     <IonPage>
       <IonHeader>
@@ -128,6 +170,28 @@ export function UsersPage() {
             setRoleEditSelected([]);
           }}
         />
+        <IonModal isOpen={siteRoleEditUser !== null} onDidDismiss={() => setSiteRoleEditUser(null)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>{siteRoleEditUser ? `Site roles: ${siteRoleEditUser.username}` : 'Site roles'}</IonTitle>
+              <IonButton slot="end" fill="clear" onClick={() => setSiteRoleEditUser(null)}>Close</IonButton>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
+            {siteMemberships.length === 0 ? (
+              <p>This user has no site memberships.</p>
+            ) : siteMemberships.map((membership) => (
+              <IonItem key={membership.id}>
+                <IonLabel position="stacked">{membership.siteName}</IonLabel>
+                <IonSelect value={membership.role} interface="popover" onIonChange={(event) => void updateSiteRole(membership, String(event.detail.value))}>
+                  <IonSelectOption value="owner">Owner</IonSelectOption>
+                  <IonSelectOption value="user">User</IonSelectOption>
+                  <IonSelectOption value="viewer">Viewer</IonSelectOption>
+                </IonSelect>
+              </IonItem>
+            ))}
+          </IonContent>
+        </IonModal>
         {error && <p style={{ color: 'red' }}>{error}</p>}
         <IonCard>
           <IonCardContent>
@@ -175,7 +239,10 @@ export function UsersPage() {
                 <p>Last Login: {u.last_login_at || 'Never'}</p>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <IonButton size="small" onClick={() => changeRoles(u)}>
-                    Change Roles
+                    Global Role
+                  </IonButton>
+                  <IonButton size="small" onClick={() => void changeSiteRoles(u)}>
+                    Site Roles
                   </IonButton>
                   {u.enabled ? (
                     <IonButton size="small" color="warning" onClick={async () => { await usersApi.disable(u.id); await load(); }}>
