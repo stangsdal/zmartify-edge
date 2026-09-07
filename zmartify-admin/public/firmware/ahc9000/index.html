@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Zmartify AHC9000 USB Recovery</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+    <style>
+      :root {
+        color: #17201d;
+        background: #eef3f0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        font-synthesis: none;
+      }
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background-color: #eef3f0;
+        background-image: radial-gradient(#b9c8c1 0.7px, transparent 0.7px);
+        background-size: 18px 18px;
+      }
+      header {
+        padding: 20px clamp(20px, 5vw, 64px);
+        color: #fff;
+        background: #163f36;
+      }
+      header strong { font-size: 20px; }
+      main {
+        width: min(760px, calc(100% - 32px));
+        margin: 40px auto;
+      }
+      h1 { margin: 0 0 12px; font-size: clamp(28px, 5vw, 44px); letter-spacing: 0; }
+      h2 { margin: 32px 0 10px; font-size: 19px; letter-spacing: 0; }
+      p, li { line-height: 1.55; }
+      .warning {
+        margin: 24px 0;
+        padding: 16px;
+        border-left: 4px solid #c04b32;
+        background: #fff;
+      }
+      .installer {
+        margin-top: 24px;
+        padding: 24px;
+        border: 1px solid #b9c8c1;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .identity {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 24px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid #d7e0dc;
+      }
+      .identity h2, .identity p { margin: 0; }
+      .identity-result {
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid #b9c8c1;
+        border-radius: 6px;
+        background: #f5f8f6;
+      }
+      .identity-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+      }
+      .identity-value {
+        display: block;
+        overflow-wrap: anywhere;
+        font-weight: 700;
+      }
+      button {
+        min-height: 44px;
+        padding: 0 18px;
+        border: 0;
+        border-radius: 4px;
+        color: #fff;
+        background: #087f68;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:hover { background: #066b58; }
+      button:disabled { cursor: wait; opacity: 0.65; }
+      button.secondary {
+        color: #075f51;
+        border: 1px solid #87a49a;
+        background: #fff;
+      }
+      button.secondary:hover { background: #e8f0ed; }
+      button.compact { min-height: 36px; padding: 0 12px; }
+      esp-web-install-button {
+        --esp-tools-button-color: #087f68;
+        --esp-tools-button-text-color: #fff;
+        --esp-tools-button-border-radius: 4px;
+      }
+      esp-web-install-button button {
+        min-height: 44px;
+        padding: 0 18px;
+        border: 0;
+        border-radius: 4px;
+        color: #fff;
+        background: #087f68;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      esp-web-install-button button:hover { background: #066b58; }
+      .status { min-height: 22px; color: #53635d; }
+      .status.error { color: #a33724; }
+      .download {
+        display: inline-block;
+        margin-top: 16px;
+        color: #075f51;
+        font-weight: 600;
+      }
+      .back { display: inline-block; margin-bottom: 20px; color: #075f51; font-weight: 600; }
+      .muted { color: #53635d; font-size: 14px; }
+      code { font-family: "SFMono-Regular", Consolas, monospace; }
+      @media (max-width: 560px) {
+        main { margin-top: 24px; }
+        .installer { padding: 18px; }
+        .identity-row { grid-template-columns: 1fr; }
+        .identity-row button { justify-self: start; }
+      }
+    </style>
+  </head>
+  <body>
+    <header><strong>Zmartify Service</strong></header>
+    <main>
+      <a class="back" href="../index.html">Tilbage til alle controllere</a>
+      <h1>AHC9000 USB Recovery</h1>
+      <p>Geninstaller firmwaren og nulstil gemt Wi-Fi, MQTT og onboarding. Brug kun denne procedure, når controlleren skal flyttes til et andet Wi-Fi eller ikke længere kan forbindes.</p>
+
+      <div class="warning">
+        <strong>Alle lokale konfigurationsdata slettes.</strong>
+        <p>Afbryd controllerens eksterne strømforsyning, før USB tilsluttes. Waveshare-boardet må ikke strømforsynes via terminalblokken og USB samtidigt.</p>
+      </div>
+
+      <h2>Før du starter</h2>
+      <ol>
+        <li>Brug Chrome eller Edge på en computer og et USB-datakabel.</li>
+        <li>Afbryd controllerens eksterne strøm.</li>
+        <li>Forbind controllerens USB-C-port direkte til computeren.</li>
+        <li>Vælg <strong>Læs controller-ID</strong>, vælg controllerens USB-port, og gem ID'et til onboarding.</li>
+        <li>Vælg derefter <strong>Installer recovery-firmware</strong> og den samme USB-port.</li>
+      </ol>
+
+      <div class="installer">
+        <section class="identity" aria-labelledby="identity-heading">
+          <h2 id="identity-heading">Controller-identitet</h2>
+          <p>Læs controllerens permanente MAC-adresse via USB før installationen. USB-porten frigives automatisk bagefter.</p>
+          <div><button class="secondary" id="read-identity" type="button">Læs controller-ID</button></div>
+          <p class="status" id="identity-status" role="status" aria-live="polite"></p>
+          <div class="identity-result" id="identity-result" hidden>
+            <div class="identity-row">
+              <div><span class="muted">MAC-adresse</span><code class="identity-value" id="controller-mac"></code></div>
+              <button class="secondary compact" type="button" data-copy-target="controller-mac">Kopiér MAC</button>
+            </div>
+            <div class="identity-row">
+              <div><span class="muted">Enheds-ID til onboarding</span><code class="identity-value" id="controller-device-id"></code></div>
+              <button class="secondary compact" type="button" data-copy-target="controller-device-id">Kopiér ID</button>
+            </div>
+          </div>
+        </section>
+        <esp-web-install-button manifest="manifest.json">
+          <button slot="activate">Installer recovery-firmware</button>
+          <span slot="unsupported">Browseren understøtter ikke Web Serial. Brug Chrome eller Edge på en computer.</span>
+          <span slot="not-allowed">USB-flash kræver, at siden åbnes via HTTPS.</span>
+        </esp-web-install-button>
+        <br />
+        <a class="download" id="firmware-download" href="manifest.json">Download factory-image manuelt</a>
+      </div>
+
+      <h2>Hvis USB-porten ikke vises</h2>
+      <p>Hold <strong>BOOT</strong> inde, tryk kort på <strong>RESET</strong>, slip RESET og slip derefter BOOT. Start installationen igen.</p>
+
+      <h2>Efter installationen</h2>
+      <ol>
+        <li>Vent på beskeden om, at installationen er færdig.</li>
+        <li>Fjern USB-kablet.</li>
+        <li>Tilslut controllerens normale strømforsyning.</li>
+        <li>Gennemfør onboarding med ESPTouch V2 og <code>app.zmartify.dk</code>.</li>
+      </ol>
+      <p class="muted">Recovery-image: version <span id="firmware-version">indlæses...</span>. Normal firmwareopdatering udføres via OTA og nulstiller ikke Wi-Fi.</p>
+    </main>
+    <script type="module">
+      import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.5.4/bundle.js';
+
+      const readButton = document.querySelector('#read-identity');
+      const status = document.querySelector('#identity-status');
+      const result = document.querySelector('#identity-result');
+
+      readButton.addEventListener('click', async () => {
+        if (!('serial' in navigator)) {
+          status.textContent = 'Browseren understøtter ikke Web Serial. Brug Chrome eller Edge på en computer.';
+          status.classList.add('error');
+          return;
+        }
+
+        let transport;
+        readButton.disabled = true;
+        result.hidden = true;
+        status.classList.remove('error');
+        status.textContent = 'Vælg controllerens USB-port...';
+
+        try {
+          const port = await navigator.serial.requestPort();
+          transport = new Transport(port);
+          const loader = new ESPLoader({ transport, baudrate: 115200 });
+          status.textContent = 'Forbinder til controlleren...';
+          await loader.detectChip();
+          if (loader.chip?.CHIP_NAME !== 'ESP32-S3') {
+            throw new Error(`Den valgte enhed er ${loader.chip?.CHIP_NAME || 'ukendt'}, ikke ESP32-S3.`);
+          }
+
+          const mac = String(await loader.chip.readMac(loader)).toUpperCase();
+          const macHex = mac.replace(/[^0-9A-F]/g, '').toLowerCase();
+          if (!/^[0-9a-f]{12}$/.test(macHex)) throw new Error('Controllerens MAC-adresse kunne ikke læses.');
+
+          document.querySelector('#controller-mac').textContent = mac;
+          document.querySelector('#controller-device-id').textContent = `zmartify-hvac-ahc9000-${macHex}`;
+          result.hidden = false;
+          status.textContent = 'Controller-ID læst. Vælg den samme USB-port igen under installationen.';
+        } catch (error) {
+          if (error?.name === 'NotFoundError') {
+            status.textContent = 'Ingen USB-port blev valgt.';
+          } else {
+            status.textContent = error instanceof Error ? error.message : 'Controller-ID kunne ikke læses.';
+          }
+          status.classList.add('error');
+        } finally {
+          if (transport) {
+            try { await transport.disconnect(); } catch { /* Port may already be closed after USB reset. */ }
+          }
+          readButton.disabled = false;
+        }
+      });
+
+      document.querySelectorAll('[data-copy-target]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const value = document.querySelector(`#${button.dataset.copyTarget}`).textContent;
+          await navigator.clipboard.writeText(value);
+          const previousText = button.textContent;
+          button.textContent = 'Kopieret';
+          setTimeout(() => { button.textContent = previousText; }, 1500);
+        });
+      });
+    </script>
+    <script type="module">
+      const response = await fetch('manifest.json', { cache: 'no-store' });
+      const manifest = await response.json();
+      const firmwarePath = manifest.builds?.[0]?.parts?.[0]?.path;
+      document.querySelector('#firmware-version').textContent = manifest.version || 'ukendt';
+      if (firmwarePath) {
+        const download = document.querySelector('#firmware-download');
+        download.href = firmwarePath;
+        download.setAttribute('download', '');
+      }
+    </script>
+  </body>
+</html>

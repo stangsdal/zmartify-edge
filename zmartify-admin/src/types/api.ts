@@ -133,6 +133,22 @@ export interface DeviceFreshness {
   }>;
 }
 
+export interface DeviceBootstrapStageRequest {
+  device_id: string;
+  claim_token: string;
+  domain_id: number;
+  site_id: number;
+  display_name: string;
+  mac?: string;
+  product_type: 'hvac';
+}
+
+export interface DeviceBootstrapStage {
+  device: Device;
+  expires_at: string;
+  state: 'staged';
+}
+
 export interface NilanHvacState {
   device_id: string;
   available: boolean;

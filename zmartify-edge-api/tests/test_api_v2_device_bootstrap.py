@@ -25,7 +25,7 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
-def test_api_v2_device_bootstrap_stage_requires_site_configure_access(monkeypatch, tmp_path: Path):
+def test_api_v2_device_bootstrap_stage_requires_site_owner(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     administrator_headers = {"Authorization": "Bearer emergency-token"}
 
@@ -72,3 +72,35 @@ def test_api_v2_device_bootstrap_stage_requires_site_configure_access(monkeypatc
         },
     )
     assert staged.status_code == 403
+
+    with get_connection() as conn:
+        conn.execute("UPDATE site_memberships SET role = 'owner' WHERE id = ?", (membership_id,))
+        conn.commit()
+
+    access_context = client.get("/api/v2/me/context", headers=viewer_headers)
+    assert access_context.status_code == 200
+    assert access_context.json()["sites"] == [
+        {
+            "id": site.json()["id"],
+            "uuid": site.json()["uuid"],
+            "name": "Bootstrap Site",
+            "domain_id": domain.json()["id"],
+            "domain_name": "Bootstrap Domain",
+            "role": "owner",
+            "products": [],
+        }
+    ]
+
+    staged = client.post(
+        "/api/v2/devices/bootstrap/stage",
+        headers=viewer_headers,
+        json={
+            "device_id": "hvac-bootstrap-authorization01",
+            "claim_token": "123456",
+            "domain_id": domain.json()["id"],
+            "site_id": site.json()["id"],
+            "display_name": "Bootstrap Authorization",
+            "product_type": "hvac",
+        },
+    )
+    assert staged.status_code == 201

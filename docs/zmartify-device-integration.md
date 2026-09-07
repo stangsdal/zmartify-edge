@@ -38,11 +38,10 @@ The Edge server must not connect into the device's private LAN. The preferred
 production sequence is:
 
 1. Create the domain and site in the admin API.
-2. Scan the device QR code in the Zmartify app and authenticate an existing
-   user or create a user account.
-3. Prepare/stage the device claim for the selected site.
-4. Connect the device to local Wi-Fi. The unclaimed device generates a short-
-   lived claim token and polls the public bootstrap endpoint over HTTPS.
+2. Enter the controller MAC/device ID in the Zmartify app and select its site.
+3. Stage the six-digit claim code shown by the app.
+4. Use ESPTouch V2 to send the Wi-Fi credentials and the same claim code as
+  reserved Custom Data.
 5. The Edge returns the device-admin token and MQTT credentials; the device
    connects outbound to `mqtt.zmartify.dk:8883` and starts telemetry.
 6. Verify the device is online in the app.
@@ -50,9 +49,9 @@ production sequence is:
 Local `/identity`, `/claim-token`, and `/onboarding/status` calls are bench and
 diagnostic tools only. They are not required for a customer installation.
 
-The current legacy admin screen still exposes local discovery/claim and must
-not be used as the production QR flow until it is replaced by the staged QR
-flow described above.
+The active AHC9000 admin flow stages the public bootstrap claim and checks
+freshness through the backend. It does not discover, claim, configure, or poll
+the controller over its local HTTP API.
 
 Before treating onboarding as ready, verify that the customer's network allows
 the gateway's outbound DNS and HTTPS traffic to `api.zmartify.dk` (TCP 443)
@@ -62,13 +61,15 @@ reachable from a technician's local workstation while still being unable to
 complete onboarding if its own VLAN has no Internet egress or blocks these
 destinations.
 
-The current AHC9000 firmware generates its short-lived claim token locally;
-the existing device QR material is not yet a cryptographic device-pairing
-secret. The temporary bench procedure can stage that token after local
-diagnostics, but a production QR flow should be completed by provisioning a
-factory pairing secret (or an equivalent authenticated enrollment mechanism)
-and having the device present it to the public bootstrap endpoint. A QR code
-containing only the device ID must not be treated as proof of device ownership.
+The AHC9000 firmware receives the six-digit claim code in ESPTouch V2 reserved
+data and presents it to the public bootstrap endpoint. The backend stores only
+its SHA-256 hash, binds it to the device ID, expires it after 10 minutes, and
+deletes it after use. The code is a short-lived installation credential, not a
+factory device-ownership secret; a future factory pairing secret would provide
+stronger possession proof.
+
+See [onboarding-ahc9000-esptouch-da.md](onboarding-ahc9000-esptouch-da.md) for
+the installer procedure.
 
 Example discovery request:
 

@@ -146,17 +146,19 @@ def access_context(user: AuthenticatedUser) -> dict:
         if administrator:
             memberships = conn.execute(
                 """
-                SELECT s.id, s.uuid, s.name, 'administrator' AS role
+                SELECT s.id, s.uuid, s.name, s.domain_id, d.name AS domain_name, 'administrator' AS role
                 FROM sites s
+                JOIN domains d ON d.id = s.domain_id
                 ORDER BY s.name, s.id
                 """
             ).fetchall()
         else:
             memberships = conn.execute(
                 """
-                SELECT s.id, s.uuid, s.name, sm.id AS membership_id, sm.role
+                SELECT s.id, s.uuid, s.name, s.domain_id, d.name AS domain_name, sm.id AS membership_id, sm.role
                 FROM site_memberships sm
                 JOIN sites s ON s.id = sm.site_id
+                JOIN domains d ON d.id = s.domain_id
                 WHERE sm.user_id = ? AND sm.status = 'active'
                 ORDER BY s.name, s.id
                 """,
@@ -194,6 +196,8 @@ def access_context(user: AuthenticatedUser) -> dict:
                     "id": site_id,
                     "uuid": membership["uuid"],
                     "name": membership["name"],
+                    "domain_id": int(membership["domain_id"]),
+                    "domain_name": membership["domain_name"],
                     "role": role,
                     "products": [
                         {

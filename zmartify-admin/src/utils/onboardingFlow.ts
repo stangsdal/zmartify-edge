@@ -2,6 +2,8 @@ import { DeviceDiscovery } from '../types/api';
 
 export interface OnboardingFlowState {
   baseUrl: string;
+  deviceId?: string;
+  mac?: string;
   discovery?: DeviceDiscovery;
   mode?: 'new' | 'reclaim';
   claimToken?: string;
@@ -9,6 +11,8 @@ export interface OnboardingFlowState {
   selectedDomainId?: number;
   selectedSiteId?: number;
   claimResult?: any;
+  stagedAt?: string;
+  expiresAt?: string;
 }
 
 const KEY = 'zmartify_onboarding_flow_v1';

@@ -1,0 +1,13 @@
+{
+  "controllers": [
+    {
+      "id": "ahc9000",
+      "name": "Zmartify AHC9000",
+      "category": "Gulvvarme-controller",
+      "description": "USB recovery-firmware til ESP32-S3-controlleren. Installationen nulstiller Wi-Fi, MQTT og onboarding.",
+      "installer": "ahc9000/index.html",
+      "manifest": "ahc9000/manifest.json",
+      "checksum": "ahc9000/SHA256SUMS"
+    }
+  ]
+}

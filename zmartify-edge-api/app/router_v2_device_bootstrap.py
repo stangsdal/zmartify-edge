@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthError, AuthenticatedUser, audit_action
 from app.db import get_connection
-from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_permission
+from app.permissions import require_global_admin, require_site_role
 from app.registry import (
     RegistryConflictError,
     RegistryNotFoundError,
@@ -56,37 +56,31 @@ def _token_hash(token: str) -> str:
 def create_device_bootstrap_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-device-bootstrap"])
 
-    def require_target_site_configure(payload: DeviceBootstrapStageIn, request: Request) -> None:
+    def require_target_site_owner(payload: DeviceBootstrapStageIn, request: Request) -> None:
         auth_user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
         if auth_user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
         try:
-            require_site_permission(
-                auth_user,
-                payload.site_id,
-                product_type=payload.product_type,
-                permission="configure",
-            )
+            require_site_role(auth_user, payload.site_id, {"owner"})
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-    def require_existing_device_configure(device: dict, request: Request) -> None:
+    def require_existing_device_owner(device: dict, request: Request) -> None:
         auth_user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
         if auth_user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
         site_id = device.get("site_id")
-        product_type = str(device.get("product_type") or "")
         try:
-            if site_id is None or product_type not in PRODUCT_TYPES:
+            if site_id is None:
                 require_global_admin(auth_user)
             else:
-                require_site_permission(auth_user, int(site_id), product_type=product_type, permission="configure")  # type: ignore[arg-type]
+                require_site_role(auth_user, int(site_id), {"owner"})
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     @router.post("/devices/bootstrap/stage", status_code=status.HTTP_201_CREATED)
     def stage_device_bootstrap(payload: DeviceBootstrapStageIn, request: Request) -> dict:
-        require_target_site_configure(payload, request)
+        require_target_site_owner(payload, request)
         existing_device = False
         try:
             device = create_device(
@@ -100,7 +94,7 @@ def create_device_bootstrap_v2_router() -> APIRouter:
             existing_device = True
             try:
                 device = get_device(payload.device_id)
-                require_existing_device_configure(device, request)
+                require_existing_device_owner(device, request)
             except RegistryNotFoundError as exc:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

@@ -85,6 +85,7 @@ export function App() {
   );
   const isAdmin = isAdministrator;
   const canManageMembers = isAdministrator || context?.sites.some((site) => site.role === 'owner') === true;
+  const canUseOwnerTools = canManageMembers;
   const selectedSite = context?.sites.find((site) => site.id === selectedSiteId);
   const selectedSiteBase = selectedSite ? `${appBase}/sites/${selectedSite.uuid || selectedSite.id}` : `${appBase}/home`;
   const selectedHasIrrigation = selectedSite?.products.some((product) => product.type === 'irrigation' && product.allowed) === true;
@@ -312,22 +313,22 @@ export function App() {
           <Route
             exact
             path={`${appBase}/onboarding/discover`}
-              render={() => requireAuth(<OnboardingDiscoverPage />)}
+              render={() => requireCapability(<OnboardingDiscoverPage />, canUseOwnerTools)}
           />
           <Route
             exact
             path={`${appBase}/onboarding/claim`}
-              render={() => requireAuth(<OnboardingClaimPage />)}
+              render={() => requireCapability(<OnboardingClaimPage />, canUseOwnerTools)}
           />
           <Route
             exact
             path={`${appBase}/onboarding/assign-site`}
-              render={() => requireAuth(<OnboardingAssignSitePage />)}
+              render={() => requireCapability(<OnboardingAssignSitePage />, canUseOwnerTools)}
           />
           <Route
             exact
             path={`${appBase}/onboarding/complete`}
-              render={() => requireAuth(<OnboardingCompletePage />)}
+              render={() => requireCapability(<OnboardingCompletePage />, canUseOwnerTools)}
           />
           <Route
             exact

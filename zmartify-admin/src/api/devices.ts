@@ -8,6 +8,8 @@ import {
   DeviceControllerSettingsUpdate,
   DeviceDiscovery,
   DeviceFreshness,
+  DeviceBootstrapStage,
+  DeviceBootstrapStageRequest,
   NilanCommand,
   NilanCommandResponse,
   NilanHvacState,
@@ -24,6 +26,9 @@ export const deviceApi = {
 
   getFreshness: (deviceId: string): Promise<DeviceFreshness> =>
     apiClient.get(`/mobile/devices/${deviceId}/freshness`),
+
+  stageBootstrap: (payload: DeviceBootstrapStageRequest): Promise<DeviceBootstrapStage> =>
+    apiClient.post('/api/v2/devices/bootstrap/stage', payload),
 
   getNilanState: (deviceId: string): Promise<NilanHvacState> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/hvac/nilan`),

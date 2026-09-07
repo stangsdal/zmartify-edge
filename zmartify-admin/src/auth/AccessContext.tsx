@@ -14,6 +14,8 @@ type SiteAccess = {
   id: number;
   uuid: string;
   name: string;
+  domain_id: number;
+  domain_name: string;
   role: 'administrator' | 'owner' | 'user' | 'viewer';
   products: ProductAccess[];
 };

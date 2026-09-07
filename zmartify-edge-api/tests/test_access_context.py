@@ -61,6 +61,8 @@ def test_access_context_resolves_site_role_and_product_allow_list(monkeypatch, t
             "id": site_id,
             "uuid": body["sites"][0]["uuid"],
             "name": "Context Site",
+                "domain_id": domain_id,
+                "domain_name": "Context Domain",
             "role": "user",
             "products": [
                 {"type": "hvac", "allowed": True, "permissions": {"read": True, "operate": True, "configure": False, "administer": False}},
