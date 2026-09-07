@@ -22,7 +22,7 @@ Optional edge-assisted checks (twin-shape + command-feedback smoke):
 ```bash
 RUN_LIVE_HVAC=1 \
 LIVE_HVAC_BASE_URL=http://192.168.10.57 \
-LIVE_EDGE_BASE_URL=https://pilot.zmartify.dk \
+LIVE_EDGE_BASE_URL=https://api.zmartify.dk \
 LIVE_EDGE_BEARER_TOKEN=<token> \
 LIVE_EDGE_DEVICE_ID=<device_id> \
 LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 \
@@ -190,7 +190,7 @@ Helper script:
 - Notes: enforce mode is now the production default; the twin-push regression existed since the v0.2.0 OTA (~90 min) and HVAC state freshness was stale during that window.
 
 - Date: 2026-07-12 (full edge-assisted live suite — Phase 7 completion)
-- Command: `RUN_LIVE_HVAC=1 LIVE_HVAC_BASE_URL=http://192.168.10.57 LIVE_EDGE_BASE_URL=https://pilot.zmartify.dk LIVE_EDGE_BEARER_TOKEN=<ephemeral> LIVE_EDGE_DEVICE_ID=hvac-gateway-1cdbd47a254c LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 pytest zmartify-edge-api/tests/test_live_hvac_contract.py`
+- Command: `RUN_LIVE_HVAC=1 LIVE_HVAC_BASE_URL=http://192.168.10.57 LIVE_EDGE_BASE_URL=https://api.zmartify.dk LIVE_EDGE_BEARER_TOKEN=<ephemeral> LIVE_EDGE_DEVICE_ID=hvac-gateway-1cdbd47a254c LIVE_EDGE_ENABLE_COMMAND_FEEDBACK_TEST=1 pytest zmartify-edge-api/tests/test_live_hvac_contract.py`
 - Result: 5 passed (previously always 3 passed / 2 skipped) — twin-shape v2 adapter and command-feedback sequence smoke both green against production and firmware v0.2.1.
 - Notes: ephemeral `live-test` admin account used for the bearer token; token disabled and account deactivated immediately after the run (revocation verified with 403).
 
@@ -200,6 +200,6 @@ Helper script:
 - Notes: controller now supports at most two enabled zones in the same run group. Firmware host tests passed 17/17; irrigation API tests passed 8/8; the admin build passed.
 
 - Date: 2026-08-03 (irrigation lifecycle and program authoring handoff)
-- Delivered: shared site-level zone run state; consistent Start/Stop controls across Manual, Zone Detail, and Setup; group-first program authoring with one shared runtime per group and up to three concurrent zones; explicit visible Run now availability; stop-all durable output reconciliation; and explicit Vite vendor chunks. The latest admin assets were copied to production and verified against `https://pilot.zmartify.dk/app/` by matching SHA-256 hashes.
+- Delivered: shared site-level zone run state; consistent Start/Stop controls across Manual, Zone Detail, and Setup; group-first program authoring with one shared runtime per group and up to three concurrent zones; explicit visible Run now availability; stop-all durable output reconciliation; and explicit Vite vendor chunks. The latest admin assets were copied to production and verified against `https://api.zmartify.dk/app/` by matching SHA-256 hashes.
 - Controller state: sent MQTT `irrigation.stop_all`, then authenticated `POST /reboot` to `192.168.10.113`; health returned `uptime_s: 1`, confirming reboot. The controller needs normal post-boot MQTT/time recovery before test commands.
 - Resume live validation: verify Zone 13 physically actuates for a short manual run and that its UI state matches controller output; test Start/Stop from Manual, Zone Detail, and Setup; test Run now plus sequential group progression and three-zone concurrent groups; confirm stop-all clears all zone UI state. The direct program-zone schema currently prevents reusing a zone later in the same program (`UNIQUE(program_id, zone_id)`); implement a schema/API change before offering repeated-zone program steps.

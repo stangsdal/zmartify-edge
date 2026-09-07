@@ -501,6 +501,9 @@ export const mobileApi = {
       ...(setpointMode == null ? {} : { setpoint_mode: setpointMode }),
     }),
 
+  setZoneMode: (zoneRef: string, zoneMode: number): Promise<{ zone_id: number; zone_mode: number; pending: boolean; command_state: string; command_id: string }> =>
+    apiClient.post(`/mobile/zones/${encodeURIComponent(zoneRef)}/mode`, { zone_mode: zoneMode }),
+
   configureZone: (
     zoneRef: string,
     payload: MobileZoneConfiguration & { setpoint_profiles?: Record<string, number> },

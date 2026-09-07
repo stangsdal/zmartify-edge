@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run from an authenticated terminal after sourcing scripts/edge_admin_login.sh.
-BASE_URL="${LIVE_EDGE_BASE_URL:-https://pilot.zmartify.dk}"
+BASE_URL="${LIVE_EDGE_BASE_URL:-https://api.zmartify.dk}"
 DEVICE_ID="${LIVE_EDGE_DEVICE_ID:-zmartify-irrigation-01}"
 DURATION_SECONDS="${IRRIGATION_TEST_DURATION_SECONDS:-60}"
 LOG_FILE="${IRRIGATION_TEST_LOG:-/tmp/irrigation-three-zone-capacity.log}"

@@ -68,6 +68,7 @@ def _ensure_hvac_projection_schema(conn: Any) -> None:
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS floor_temperature_c DOUBLE PRECISION",
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS configuration_json TEXT",
             "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS setpoint_profiles_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS zone_mode INTEGER",
         ):
             conn.execute(sql)
     else:
@@ -80,6 +81,7 @@ def _ensure_hvac_projection_schema(conn: Any) -> None:
             "ALTER TABLE zone_state ADD COLUMN floor_temperature_c DOUBLE PRECISION",
             "ALTER TABLE zone_state ADD COLUMN configuration_json TEXT",
             "ALTER TABLE zone_state ADD COLUMN setpoint_profiles_json TEXT",
+            "ALTER TABLE zone_state ADD COLUMN zone_mode INTEGER",
         ):
             try:
                 conn.execute(sql)
@@ -697,7 +699,7 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                    zs.current_temperature, zs.battery_percent, zs.target_temperature, zs.demand, zs.active, zs.fault,
                    zs.rssi_element_dbm, zs.rssi_control_unit_dbm,
                    zs.floor_temperature_c,
-                   zs.configuration_json, zs.setpoint_profiles_json,
+                   zs.configuration_json, zs.setpoint_profiles_json, zs.zone_mode,
                    zs.source_timestamp, zs.updated_at,
                    ds.online AS device_online
             FROM zone_metadata zm
@@ -780,6 +782,7 @@ def list_device_zones(device_external_id: str, *, optimistic_setpoint: bool = Tr
                 "floor_temperature_c": row["floor_temperature_c"],
                 "configuration": json.loads(row["configuration_json"]) if row["configuration_json"] else None,
                 "setpoint_profiles": json.loads(row["setpoint_profiles_json"]) if row["setpoint_profiles_json"] else {},
+                "setpoint_mode": row["zone_mode"],
                 "target_temperature_c": displayed_target_c,
                 "demand": None if row["demand"] is None else bool(row["demand"]),
                 "active": None if row["active"] is None else bool(row["active"]),
@@ -1306,6 +1309,10 @@ def ingest_device_twin_snapshot(
             previous_target_c = None
         zone_demand = zone.get("demand")
         zone_active = zone.get("active")
+        if zone_demand is None and zone.get("heating") is not None:
+            zone_demand = bool(zone["heating"])
+        if zone_active is None and zone.get("heating") is not None:
+            zone_active = bool(zone["heating"])
         if zone_demand is None and zone_active is not None:
             zone_demand = bool(zone_active)
         persisted_zone = upsert_zone_state(
@@ -1314,6 +1321,7 @@ def ingest_device_twin_snapshot(
             current_temperature=zone.get("current_temperature_c"),
             battery_percent=zone.get("battery_percent"),
             target_temperature=zone.get("target_temperature_c"),
+            zone_mode=zone.get("zone_mode"),
             demand=zone_demand,
             active=zone_active,
             fault=zone.get("fault"),
@@ -1326,7 +1334,11 @@ def ingest_device_twin_snapshot(
             rssi_control_unit_dbm=zone.get("rssi_control_unit_dbm"),
             floor_temperature_c=zone.get("floor_temperature_c"),
             configuration=zone.get("configuration"),
-            setpoint_profiles=zone.get("setpoint_profiles"),
+            setpoint_profiles=(
+                zone["setpoint_profiles"]
+                if zone.get("setpoint_profiles")
+                else None
+            ),
         )
         if publish_zone_state_update_hook is not None:
             publish_zone_state_update_hook(device_external_id, persisted_zone)
@@ -1888,6 +1900,7 @@ def upsert_zone_state(
     current_temperature: float | None = None,
     battery_percent: int | None = None,
     target_temperature: float | None = None,
+    zone_mode: int | None = None,
     demand: bool | None = None,
     active: bool | None = None,
     fault: str | None = None,
@@ -1908,13 +1921,14 @@ def upsert_zone_state(
         _ensure_hvac_projection_schema(conn)
         device = _resolve_device(conn, device_external_id)
         row = conn.execute(
-            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, rssi_element_dbm, rssi_control_unit_dbm, floor_temperature_c, configuration_json, setpoint_profiles_json, source_timestamp, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
+            "SELECT current_temperature, battery_percent, target_temperature, demand, active, fault, rssi_element_dbm, rssi_control_unit_dbm, floor_temperature_c, configuration_json, setpoint_profiles_json, zone_mode, source_timestamp, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json FROM zone_state WHERE device_id = ? AND zone_id = ?",
             (device["id"], zone_id),
         ).fetchone()
 
         persisted_current_temperature = row["current_temperature"] if current_temperature is None and row is not None else current_temperature
         persisted_battery_percent = row["battery_percent"] if battery_percent is None and row is not None else battery_percent
         persisted_target_temperature = row["target_temperature"] if target_temperature is None and row is not None else target_temperature
+        persisted_zone_mode = row["zone_mode"] if zone_mode is None and row is not None else zone_mode
         persisted_demand = row["demand"] if demand is None and row is not None else (None if demand is None else int(bool(demand)))
         persisted_active = row["active"] if active is None and row is not None else (None if active is None else int(bool(active)))
         persisted_fault = row["fault"] if fault is None and row is not None else fault
@@ -1922,7 +1936,12 @@ def upsert_zone_state(
         persisted_rssi_control_unit_dbm = rssi_control_unit_dbm if rssi_control_unit_dbm is not None else (row["rssi_control_unit_dbm"] if row is not None else None)
         persisted_floor_temperature_c = floor_temperature_c if floor_temperature_c is not None else (row["floor_temperature_c"] if row is not None else None)
         persisted_configuration = json.dumps(configuration, separators=(",", ":")) if configuration is not None else (row["configuration_json"] if row is not None else None)
-        persisted_setpoint_profiles = json.dumps(setpoint_profiles, separators=(",", ":")) if setpoint_profiles is not None else (row["setpoint_profiles_json"] if row is not None else "{}")
+        if setpoint_profiles is not None:
+            existing_profiles = json.loads(row["setpoint_profiles_json"] or "{}") if row is not None and row["setpoint_profiles_json"] else {}
+            existing_profiles.update(setpoint_profiles)
+            persisted_setpoint_profiles = json.dumps(existing_profiles, separators=(",", ":"))
+        else:
+            persisted_setpoint_profiles = row["setpoint_profiles_json"] if row is not None else "{}"
         persisted_source_timestamp = source_timestamp if source_timestamp is not None else (row["source_timestamp"] if row is not None else now)
         persisted_thermostat_element_id = thermostat_element_id if thermostat_element_id is not None else (row["thermostat_element_id"] if row is not None else None)
         persisted_controlled_element_ids = json.dumps(controlled_element_ids, separators=(",", ":")) if controlled_element_ids is not None else (row["controlled_element_ids_json"] if row is not None else "[]")
@@ -1930,8 +1949,8 @@ def upsert_zone_state(
 
         conn.execute(
             """
-            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, rssi_element_dbm, rssi_control_unit_dbm, floor_temperature_c, configuration_json, setpoint_profiles_json, source_timestamp, updated_at, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO zone_state(device_id, zone_id, thermostat_element_id, controlled_element_ids_json, assigned_channel_ids_json, current_temperature, battery_percent, target_temperature, demand, active, fault, rssi_element_dbm, rssi_control_unit_dbm, floor_temperature_c, configuration_json, setpoint_profiles_json, zone_mode, source_timestamp, updated_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id, zone_id) DO UPDATE SET
                 thermostat_element_id = excluded.thermostat_element_id,
                 controlled_element_ids_json = excluded.controlled_element_ids_json,
@@ -1947,6 +1966,7 @@ def upsert_zone_state(
                 floor_temperature_c = excluded.floor_temperature_c,
                 configuration_json = excluded.configuration_json,
                 setpoint_profiles_json = excluded.setpoint_profiles_json,
+                zone_mode = excluded.zone_mode,
                 source_timestamp = excluded.source_timestamp,
                 updated_at = excluded.updated_at,
                 source = excluded.source
@@ -1968,6 +1988,7 @@ def upsert_zone_state(
                 persisted_floor_temperature_c,
                 persisted_configuration,
                 persisted_setpoint_profiles,
+                persisted_zone_mode,
                 persisted_source_timestamp,
                 now,
                 source,

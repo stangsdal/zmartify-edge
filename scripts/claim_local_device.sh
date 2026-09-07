@@ -4,7 +4,7 @@ set -euo pipefail
 # Claim a LAN device when the public Edge API cannot reach the private LAN.
 # Credentials and claim tokens are kept in memory and never printed.
 
-EDGE_BASE_URL="${EDGE_BASE_URL:-https://pilot.zmartify.dk}"
+EDGE_BASE_URL="${EDGE_BASE_URL:-https://api.zmartify.dk}"
 DEVICE_BASE_URL="${DEVICE_BASE_URL:-http://192.168.10.142}"
 DOMAIN_ID="${DOMAIN_ID:-1}"
 SITE_ID="${SITE_ID:-1}"

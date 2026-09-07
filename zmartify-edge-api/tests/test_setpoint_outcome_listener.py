@@ -97,6 +97,28 @@ def test_on_message_routes_irrigation_outcome_and_reported_state():
     assert states[0][1]["hydraulics"]["flow_lpm"] == 12.0
 
 
+def test_on_message_ingests_nilan_hvac_state_before_returning():
+    states = []
+    listener = SetpointOutcomeMqttListener(
+        list_devices_fn=lambda: [],
+        get_device_mqtt_credentials_fn=lambda _device_id: {},
+        ingest_setpoint_command_outcome_fn=lambda *args, **kwargs: None,
+        mqtt_client_module=None,
+        ingest_reported_state_fn=lambda device_id, data: states.append((device_id, data)),
+    )
+
+    listener._on_message(
+        None,
+        None,
+        _Msg(
+            "zmartify/v2/devices/zmartify-hvac-nilan-01/state/hvac",
+            b'{"schema_version":"2.0","source_timestamp":"2026-09-07T08:50:00Z","hvac":{"nilan":{"inlet_speed":23,"exhaust_speed":25}}}',
+        ),
+    )
+
+    assert states == [("zmartify-hvac-nilan-01", {"schema_version": "2.0", "source_timestamp": "2026-09-07T08:50:00Z", "hvac": {"nilan": {"inlet_speed": 23, "exhaust_speed": 25}}})]
+
+
 def test_reported_state_queue_keeps_only_latest_snapshot_per_device():
     started = threading.Event()
     release = threading.Event()
@@ -127,6 +149,39 @@ def test_reported_state_queue_keeps_only_latest_snapshot_per_device():
 
     listener._reported_state_executor.shutdown(wait=True)
     assert seen == ["first", "latest"]
+
+
+def test_reported_state_worker_recovers_after_unexpected_failure():
+    seen = []
+    failed = threading.Event()
+
+    listener = SetpointOutcomeMqttListener(
+        list_devices_fn=lambda: [],
+        get_device_mqtt_credentials_fn=lambda _device_id: {},
+        ingest_setpoint_command_outcome_fn=lambda *_args, **_kwargs: None,
+        mqtt_client_module=None,
+        ingest_reported_state_fn=lambda *_args: None,
+    )
+
+    def ingest(_device_id, data):
+        if not failed.is_set():
+            failed.set()
+            raise RuntimeError("worker failure")
+        seen.append(data["source_timestamp"])
+
+    listener._ingest_reported_state_async = ingest
+    listener._queue_reported_state("device-a", {"source_timestamp": "failed"})
+    deadline = time.monotonic() + 1.0
+    while not failed.is_set() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    listener._queue_reported_state("device-a", {"source_timestamp": "recovered"})
+    deadline = time.monotonic() + 1.0
+    while not seen and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    listener._reported_state_executor.shutdown(wait=True)
+    assert seen == ["recovered"]
 
 
 def test_on_message_logs_v2_reported_state_ingest(caplog):

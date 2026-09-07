@@ -279,7 +279,7 @@ def publish_setpoint_command(
     *,
     setpoint_mode: int | None = None,
     command_id: str | None = None,
-) -> None:
+) -> dict:
     legacy_payload = f"{float(target_temperature_c):.1f}"
     parameters = {"target_temperature_c": float(target_temperature_c)}
     if setpoint_mode is not None:
@@ -299,6 +299,7 @@ def publish_setpoint_command(
             v2_payload if _is_v2_command_topic(topic) else legacy_payload,
             retain=False,
         )
+    return {"command_id": json.loads(v2_payload)["command_id"], "status": "published"}
 
 
 def publish_zone_name_command(device_id: str, zone_id: int, zone_name: str) -> None:
@@ -319,6 +320,12 @@ def publish_nilan_command(device_id: str, command: str, value: int) -> dict:
         "ventilation": ("commands/hvac/ventilation", "hvac.set_ventilation_level", "level", 1, 4),
         "inlet_speed": ("commands/hvac/inlet-speed", "hvac.set_inlet_speed", "inlet_pct", 0, 100),
         "exhaust_speed": ("commands/hvac/exhaust-speed", "hvac.set_exhaust_speed", "exhaust_pct", 0, 100),
+        "run_set": ("commands/hvac/run-set", "hvac.set_run", "run_set", 0, 1),
+        "mode_set": ("commands/hvac/mode-set", "hvac.set_mode", "mode_set", 0, 3),
+        "vent_set": ("commands/hvac/vent-set", "hvac.set_ventilation_level", "vent_set", 0, 4),
+        "temp_set": ("commands/hvac/temp-set", "hvac.set_temperature", "temp_set", 0, 100),
+        "service_mode": ("commands/hvac/service-mode", "hvac.set_service_mode", "service_mode", 0, 8),
+        "service_pct": ("commands/hvac/service-pct", "hvac.set_service_pct", "service_pct", 0, 100),
     }
     definition = definitions.get(command)
     if definition is None:

@@ -9,7 +9,8 @@ from app.registry import RegistryNotFoundError
 
 _FIELDS = (
     "online", "controller_online", "freshness_age_ms", "run", "ventilation_level",
-    "actual_inlet_level", "actual_exhaust_level", "room_temperature_c",
+    "actual_inlet_level", "actual_exhaust_level", "inlet_speed", "exhaust_speed",
+    "run_set", "mode_set", "vent_set", "temp_set", "service_mode", "service_pct", "room_temperature_c",
     "inlet_temperature_c", "outlet_temperature_c", "extract_temperature_c",
     "humidity_pct", "co2_ppm", "filter_days_remaining", "status",
     "poll_requests", "poll_responses",

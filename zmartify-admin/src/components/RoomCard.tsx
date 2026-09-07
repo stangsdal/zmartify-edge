@@ -36,6 +36,9 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onAdvancedSettings
   const signalQuality = rssiQuality(zone);
   const signalLabel = signalQuality === null ? 'Signal unavailable' : `Signal quality ${signalQuality} of 4`;
   const modes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'HOLIDAY', 'STANDBY', 'PARTY'];
+  const closeMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.closest('details')?.removeAttribute('open');
+  };
   return (
     <motion.div
       whileHover={{ y: -2 }}
@@ -76,10 +79,10 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onAdvancedSettings
               <IonIcon icon={ellipsisVerticalOutline} aria-hidden="true" />
             </summary>
             <div className="absolute right-0 top-12 z-10 min-w-[150px] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-              <button type="button" className="menu-action" onClick={onOpen}>Open thermostat</button>
-              <button type="button" className="menu-action" onClick={onHistory}>History</button>
-              {canConfigure ? <button type="button" className="menu-action" onClick={onRename}>Rename zone</button> : null}
-              {canConfigure ? <button type="button" className="menu-action" onClick={onAdvancedSettings}>Advanced settings</button> : null}
+              <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onOpen(); }}>Open thermostat</button>
+              <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onHistory(); }}>History</button>
+              {canConfigure ? <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onRename(); }}>Rename zone</button> : null}
+              {canConfigure ? <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onAdvancedSettings(); }}>Advanced settings</button> : null}
             </div>
           </details>
         </div>

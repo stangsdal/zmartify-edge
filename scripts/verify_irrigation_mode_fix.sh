@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL_DEFAULT="https://pilot.zmartify.dk"
+BASE_URL_DEFAULT="https://api.zmartify.dk"
 BASE_URL="${LIVE_EDGE_BASE_URL:-$BASE_URL_DEFAULT}"
 DEVICE_HINT="${LIVE_EDGE_DEVICE_ID:-}"
 
@@ -9,7 +9,7 @@ if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
   bash scripts/verify_irrigation_mode_fix.sh
-  bash scripts/verify_irrigation_mode_fix.sh --base-url https://pilot.zmartify.dk
+  bash scripts/verify_irrigation_mode_fix.sh --base-url https://api.zmartify.dk
   bash scripts/verify_irrigation_mode_fix.sh --device-id zmartify-irrigation-01
 
 What it does:

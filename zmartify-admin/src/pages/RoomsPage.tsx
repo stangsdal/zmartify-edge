@@ -28,6 +28,8 @@ export function RoomsPage() {
   const socketReconnectTimersRef = useRef<Map<string, number>>(new Map());
   const setpointTimersRef = useRef<Map<string, number>>(new Map());
   const desiredSetpointsRef = useRef<Map<string, number>>(new Map());
+  const desiredModesRef = useRef<Map<string, number>>(new Map());
+  const desiredConfigurationsRef = useRef<Map<string, NonNullable<MobileZone['configuration']>>>(new Map());
   const emptyResponseStreakRef = useRef(0);
 
   const blurActiveElement = () => {
@@ -68,11 +70,13 @@ export function RoomsPage() {
 
   const handleModeChange = async (room: RoomWithRef, mode: HvacZoneMode) => {
     if (!room.zone_ref) return;
-    const target = room.target_temperature_c ?? 20;
+    const requestedMode = SETPOINT_MODE_BY_NAME[mode];
+    desiredModesRef.current.set(room.zone_ref, requestedMode);
+    setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, setpoint_mode: requestedMode } : r)));
     try {
-      await mobileApi.setZoneSetpoint(room.zone_ref, target, SETPOINT_MODE_BY_NAME[mode]);
-      setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, setpoint_mode: SETPOINT_MODE_BY_NAME[mode] } : r)));
+      await mobileApi.setZoneMode(room.zone_ref, requestedMode);
     } catch (error) {
+      desiredModesRef.current.delete(room.zone_ref);
       console.error('mode change failed', error);
     }
   };
@@ -135,10 +139,15 @@ export function RoomsPage() {
           const nextZone = desiredTarget !== undefined && !confirmsDesired && !commandFailed
             ? { ...incomingZone, target_temperature_c: desiredTarget }
             : incomingZone;
+          const desiredConfiguration = desiredConfigurationsRef.current.get(zoneRef);
+          const desiredMode = desiredModesRef.current.get(zoneRef);
+          if (desiredMode !== undefined && nextZone.setpoint_mode === desiredMode) {
+            desiredModesRef.current.delete(zoneRef);
+          }
           setRooms((prev) =>
             prev.map((room) =>
               room.zone_ref === zoneRef
-                ? { ...room, ...nextZone }
+                ? { ...room, ...nextZone, setpoint_mode: desiredMode ?? nextZone.setpoint_mode, configuration: desiredConfiguration || nextZone.configuration }
                 : room
             )
           );
@@ -187,7 +196,19 @@ export function RoomsPage() {
         for (const zone of device.zones || []) {
           const identity = roomIdentity(device.device_id, zone.zone_id);
           if (!uniqueRooms.has(identity)) {
-            uniqueRooms.set(identity, { ...zone, zone_ref: identity });
+            const zoneRef = zone.zone_uuid || identity;
+            const desiredConfiguration = desiredConfigurationsRef.current.get(zoneRef);
+            const desiredMode = desiredModesRef.current.get(zoneRef);
+            if (desiredMode !== undefined && zone.setpoint_mode === desiredMode) {
+              desiredModesRef.current.delete(zoneRef);
+            }
+            uniqueRooms.set(identity, {
+              ...zone,
+              device_id: zone.device_id || device.device_id,
+              zone_ref: zoneRef,
+              setpoint_mode: desiredMode ?? zone.setpoint_mode,
+              configuration: desiredConfiguration || zone.configuration,
+            });
           }
         }
       }
@@ -207,9 +228,9 @@ export function RoomsPage() {
         if (!prev.length) return nextRooms;
 
         const nextRoomKeys = new Set(nextRooms.map((room) => room.zone_ref));
-        const nextDeviceIds = new Set(nextRooms.map((room) => room.zone_ref.split(':')[0]));
+        const nextDeviceIds = new Set(nextRooms.map((room) => room.device_id).filter((deviceId): deviceId is string => Boolean(deviceId)));
         const temporarilyMissing = prev.filter((room) => (
-          nextDeviceIds.has(room.zone_ref.split(':')[0]) && !nextRoomKeys.has(room.zone_ref)
+          room.device_id !== undefined && nextDeviceIds.has(room.device_id) && !nextRoomKeys.has(room.zone_ref)
         ));
         return [...nextRooms, ...temporarilyMissing];
       });
@@ -253,6 +274,7 @@ export function RoomsPage() {
       setpointTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       setpointTimersRef.current.clear();
       desiredSetpointsRef.current.clear();
+      desiredConfigurationsRef.current.clear();
       socketsRef.current.forEach((socket) => socket?.close());
       socketsRef.current.clear();
       socketPingTimersRef.current.forEach((timer) => window.clearInterval(timer));
@@ -351,6 +373,9 @@ export function RoomsPage() {
             isOpen={advancedRoom !== null}
             onDismiss={() => setAdvancedRoom(null)}
             onSaved={(updatedZone) => {
+              if (advancedRoom?.zone_ref && updatedZone.configuration) {
+                desiredConfigurationsRef.current.set(advancedRoom.zone_ref, updatedZone.configuration);
+              }
               setRooms((prev) => prev.map((room) => room.zone_ref === advancedRoom?.zone_ref ? { ...room, ...updatedZone } : room));
             }}
           />

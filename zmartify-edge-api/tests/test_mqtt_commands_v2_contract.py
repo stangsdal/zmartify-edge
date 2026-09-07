@@ -60,6 +60,24 @@ def test_publish_nilan_command_uses_firmware_compact_payload(monkeypatch):
     assert "parameters" not in command
 
 
+def test_publish_nilan_vent_set_allows_off_and_uses_vent_set_payload(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setenv("ZMART_EDGE_MQTT_TOPIC_STYLE", "v2")
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(
+        mqtt_commands.subprocess,
+        "run",
+        lambda cmd, capture_output, text, timeout: calls.append(list(cmd)) or _Result(),
+    )
+
+    result = mqtt_commands.publish_nilan_command("nilan-1", "vent_set", 0)
+
+    command = json.loads(calls[0][calls[0].index("-m") + 1])
+    assert calls[0][calls[0].index("-t") + 1] == "zmartify/v2/devices/nilan-1/commands/hvac/vent-set"
+    assert command["command_id"] == result["command_id"]
+    assert command["vent_set"] == 0
+
+
 def test_publish_setpoint_command_preserves_supplied_command_id(monkeypatch):
     calls: list[list[str]] = []
 

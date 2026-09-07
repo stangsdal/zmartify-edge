@@ -5,7 +5,7 @@ set -euo pipefail
 # This script prompts for admin credentials, fetches an Edge bearer token,
 # and exports LIVE_EDGE_BASE_URL and LIVE_EDGE_BEARER_TOKEN in the current shell.
 
-DEFAULT_BASE_URL="https://pilot.zmartify.dk"
+DEFAULT_BASE_URL="https://api.zmartify.dk"
 BASE_URL="${LIVE_EDGE_BASE_URL:-$DEFAULT_BASE_URL}"
 
 if [[ "${1:-}" == "--base-url" ]]; then
@@ -20,7 +20,7 @@ if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
   source scripts/edge_admin_login.sh
-  source scripts/edge_admin_login.sh --base-url https://pilot.zmartify.dk
+  source scripts/edge_admin_login.sh --base-url https://api.zmartify.dk
 
 Prompts for:
   - admin username

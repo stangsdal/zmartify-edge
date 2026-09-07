@@ -205,7 +205,11 @@ class SetpointOutcomeMqttListener:
                 if kind == "irrigation_outcome" and self._ingest_irrigation_outcome is not None:
                     self._ingest_irrigation_outcome(device_id, data)
                 elif kind == "reported_state" and self._ingest_reported_state is not None:
-                    self._queue_reported_state(device_id, data)
+                    hvac = data.get("hvac")
+                    if topic.endswith("/state/hvac") and isinstance(hvac, dict) and isinstance(hvac.get("nilan"), dict):
+                        self._ingest_reported_state_async(device_id, data)
+                    else:
+                        self._queue_reported_state(device_id, data)
                 logger.info("Ingested MQTT v2 %s for %s from %s", kind, device_id, topic)
             except ContractValidationError:
                 logger.warning("Rejected MQTT v2 %s for %s due to contract validation", kind, device_id)
@@ -231,16 +235,27 @@ class SetpointOutcomeMqttListener:
             if device_id in self._reported_state_active:
                 return
             self._reported_state_active.add(device_id)
-        self._reported_state_executor.submit(self._drain_reported_state, device_id)
+        try:
+            self._reported_state_executor.submit(self._drain_reported_state, device_id)
+        except Exception:
+            with self._reported_state_lock:
+                self._reported_state_active.discard(device_id)
+            logger.exception("Failed scheduling MQTT v2 reported_state for %s", device_id)
 
     def _drain_reported_state(self, device_id: str) -> None:
-        while True:
+        try:
+            while True:
+                with self._reported_state_lock:
+                    data = self._reported_state_pending.pop(device_id, None)
+                    if data is None:
+                        return
+                try:
+                    self._ingest_reported_state_async(device_id, data)
+                except Exception:
+                    logger.exception("Unexpected reported_state worker failure for %s", device_id)
+        finally:
             with self._reported_state_lock:
-                data = self._reported_state_pending.pop(device_id, None)
-                if data is None:
-                    self._reported_state_active.discard(device_id)
-                    return
-            self._ingest_reported_state_async(device_id, data)
+                self._reported_state_active.discard(device_id)
 
     def _ingest_reported_state_async(self, device_id: str, data: dict[str, Any]) -> None:
         try:

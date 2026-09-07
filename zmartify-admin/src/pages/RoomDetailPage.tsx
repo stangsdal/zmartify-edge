@@ -319,6 +319,9 @@ export function RoomDetailPage() {
   const zoneKey = zone?.zone_key || (zone ? `zone-${zone.zone_id}` : 'Room');
   const displayName = zone?.name && zone.name !== zoneKey ? zone.name : zoneKey;
   const supportedModes: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'HOLIDAY', 'STANDBY', 'PARTY'];
+  const closeOptionsMenu = (event: React.SyntheticEvent<HTMLElement>) => {
+    event.currentTarget.closest('details')?.removeAttribute('open');
+  };
 
   return (
     <IonPage>
@@ -353,7 +356,7 @@ export function RoomDetailPage() {
                   <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted">Display</p>
                   <label className="menu-choice">
                     <span>Theme</span>
-                    <select value={thermostatTheme} onChange={(event) => setThermostatTheme(event.target.value as 'classical' | 'gunmalmg')}>
+                    <select value={thermostatTheme} onChange={(event) => { setThermostatTheme(event.target.value as 'classical' | 'gunmalmg'); closeOptionsMenu(event); }}>
                       <option value="classical">Classical</option>
                       <option value="gunmalmg">Gunmalmg</option>
                     </select>
@@ -367,7 +370,7 @@ export function RoomDetailPage() {
                     placeholder={zoneKey}
                     maxLength={64}
                   />
-                  <button type="button" className="menu-action menu-action--primary mt-2" onClick={() => { void handleRename(); }} disabled={renaming || !renameValue.trim() || renameValue.trim() === (zone?.name || '').trim()}>
+                  <button type="button" className="menu-action menu-action--primary mt-2" onClick={(event) => { closeOptionsMenu(event); void handleRename(); }} disabled={renaming || !renameValue.trim() || renameValue.trim() === (zone?.name || '').trim()}>
                     {renaming ? 'Saving...' : 'Save name'}
                   </button>
                   {renameError ? <p className="px-2 pt-2 text-xs text-rose-600">{renameError}</p> : null}

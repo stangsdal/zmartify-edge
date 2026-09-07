@@ -69,7 +69,7 @@ def test_api_v2_device_discover_claim_and_push(monkeypatch, tmp_path: Path):
         lambda _base_url: {
             "state": "claimed",
             "device_id": "hvac-gateway-v2lifecycle01",
-            "edge_url": "https://pilot.zmartify.dk",
+            "edge_url": "https://api.zmartify.dk",
             "mqtt_configured": True,
             "mqtt_connected": True,
             "last_error": None,
@@ -167,7 +167,7 @@ def test_api_v2_device_controller_settings_proxy(monkeypatch, tmp_path: Path):
         lambda _base_url: {
             "state": "claimed",
             "device_id": "zmartify-irrigation-settings01",
-            "edge_url": "https://pilot.zmartify.dk",
+            "edge_url": "https://api.zmartify.dk",
             "mqtt_configured": True,
             "mqtt_connected": True,
             "last_error": None,
@@ -191,7 +191,7 @@ def test_api_v2_device_controller_settings_proxy(monkeypatch, tmp_path: Path):
         lifecycle,
         "get_remote_network_config",
         lambda _base_url: {
-            "mqtt_broker_uri": "mqtts://pilot.zmartify.dk:8883",
+            "mqtt_broker_uri": "mqtts://mqtt.zmartify.dk:8883",
             "mqtt_port": 8883,
             "mqtt_username": "device_zmartify-irrigation-settings01",
             "mqtt_password_configured": True,
@@ -262,7 +262,7 @@ def test_api_v2_device_sd_card_status_and_initialize(monkeypatch, tmp_path: Path
         lambda _base_url: {
             "state": "claimed",
             "device_id": "zmartify-irrigation-sdcard01",
-            "edge_url": "https://pilot.zmartify.dk",
+            "edge_url": "https://api.zmartify.dk",
             "mqtt_configured": True,
             "mqtt_connected": True,
             "last_error": None,
@@ -394,7 +394,7 @@ def test_api_v2_device_controller_mode_and_reboot(monkeypatch, tmp_path: Path):
         lambda _base_url: {
             "state": "claimed",
             "device_id": "zmartify-irrigation-control01",
-            "edge_url": "https://pilot.zmartify.dk",
+            "edge_url": "https://api.zmartify.dk",
             "mqtt_configured": True,
             "mqtt_connected": True,
             "last_error": None,
@@ -489,7 +489,7 @@ def test_api_v2_lifecycle_requires_the_claimed_product_access(monkeypatch, tmp_p
         lambda _base_url: {
             "state": "claimed",
             "device_id": "zmartify-irrigation-product-access01",
-            "edge_url": "https://pilot.zmartify.dk",
+            "edge_url": "https://api.zmartify.dk",
             "mqtt_configured": True,
             "mqtt_connected": True,
             "last_error": None,

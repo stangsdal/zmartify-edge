@@ -242,7 +242,7 @@ def _token_ttl_hours() -> int:
 
 
 def _invite_app_login_url() -> str:
-    return os.getenv("ZMART_EDGE_PILOT_APP_LOGIN_URL", "https://pilot.zmartify.dk/app/login").strip()
+    return os.getenv("ZMART_EDGE_APP_LOGIN_URL", "https://api.zmartify.dk/app/login").strip()
 
 
 def _invite_default_ttl_hours() -> int:

@@ -54,7 +54,7 @@ from app.schemas import (
 
 
 _REQUIRED_PUBLIC_EDGE_URL = "https://api.zmartify.dk"
-_REQUIRED_PUBLIC_MQTT_URI = "mqtts://pilot.zmartify.dk:8883"
+_REQUIRED_PUBLIC_MQTT_URI = "mqtts://mqtt.zmartify.dk:8883"
 
 
 def _edge_public_base_url() -> str:

@@ -141,8 +141,8 @@ def test_outbound_bootstrap_claim_is_one_time(monkeypatch, tmp_path: Path):
         json={"device_id": "hvac-gateway-aabbccddeeff", "claim_token": "123456"},
     )
     assert config.status_code == 200
-    assert config.json()["edge_url"] == "https://pilot.zmartify.dk"
-    assert config.json()["mqtt_uri"] == "mqtts://pilot.zmartify.dk:8883"
+    assert config.json()["edge_url"] == "https://api.zmartify.dk"
+    assert config.json()["mqtt_uri"] == "mqtts://mqtt.zmartify.dk:8883"
     assert config.json()["device_admin_token"]
     assert config.json()["mqtt_password"]
 

@@ -32,7 +32,7 @@ def _validate(role: str, product_types: list[str]) -> None:
 
 
 def invitation_url(token: str) -> str:
-    base_url = os.environ.get("ZMART_EDGE_PILOT_APP_LOGIN_URL", "https://pilot.zmartify.dk/app/login").strip()
+    base_url = os.environ.get("ZMART_EDGE_APP_LOGIN_URL", "https://api.zmartify.dk/app/login").strip()
     parsed = urlsplit(base_url)
     params = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "site_invitation_token"]
     params.append(("site_invitation_token", token))

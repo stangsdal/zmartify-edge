@@ -15,7 +15,15 @@ from app.registry import RegistryNotFoundError
 
 
 class NilanCommandIn(BaseModel):
-    command: Literal["ventilation", "inlet_speed", "exhaust_speed"]
+    command: Literal[
+        "ventilation", "inlet_speed", "exhaust_speed", "run_set", "mode_set",
+        "vent_set", "temp_set", "service_mode", "service_pct",
+    ]
+    value: int
+
+
+class NilanControlIn(BaseModel):
+    control: Literal["RunSet", "ModeSet", "VentSet", "TempSet", "ServiceMode", "ServicePct"]
     value: int
 
 
@@ -49,6 +57,48 @@ def create_nilan_v2_router(resolve_device_site_pk_id: Callable[[str], int | None
         try:
             require_site_permission(auth_user, site_id, product_type="hvac", permission="operate")
             return publish_nilan_command(device_id, payload.command, payload.value)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except MqttCommandError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.get("/devices/{device_id}/hvac/nilan/control")
+    def v2_nilan_controls(device_id: str, request: Request) -> dict:
+        site_id = resolve_device_site_pk_id(device_id)
+        if site_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+        auth_user = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_site_permission(auth_user, site_id, product_type="hvac", permission="read")
+            state = get_nilan_state(device_id)
+            return {key: state.get(key) for key in ("run_set", "mode_set", "vent_set", "temp_set", "service_mode", "service_pct")}
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except RegistryNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.post("/devices/{device_id}/hvac/nilan/control")
+    def v2_nilan_control(device_id: str, payload: NilanControlIn, request: Request) -> dict:
+        command_by_control = {
+            "RunSet": "run_set", "ModeSet": "mode_set", "VentSet": "vent_set",
+            "TempSet": "temp_set", "ServiceMode": "service_mode", "ServicePct": "service_pct",
+        }
+        command = command_by_control[payload.control]
+        if command == "mode_set" and payload.value == 4:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ModeSet=4 is read-only; use ServiceMode")
+        site_id = resolve_device_site_pk_id(device_id)
+        if site_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
+        auth_user = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_site_permission(auth_user, site_id, product_type="hvac", permission="operate")
+            return publish_nilan_command(device_id, command, payload.value)
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         except MqttCommandError as exc:

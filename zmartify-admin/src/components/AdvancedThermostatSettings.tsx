@@ -32,6 +32,7 @@ const profiles: Array<{ mode: HvacZoneMode; label: string }> = [
 ];
 
 const numberValue = (value: number | null | undefined): string => value == null ? '' : String(value);
+const halfDegree = (value: number): number => Math.round(value * 2) / 2;
 
 export function AdvancedThermostatSettings({ zone, zoneRef, isOpen, onDismiss, onSaved }: AdvancedThermostatSettingsProps) {
   const [values, setValues] = useState<Record<string, string>>({});
@@ -70,7 +71,7 @@ export function AdvancedThermostatSettings({ zone, zoneRef, isOpen, onDismiss, o
       const numeric = (key: string): number | undefined => {
         const raw = values[key]?.trim();
         if (!raw) return undefined;
-        const parsed = Number(raw);
+        const parsed = halfDegree(Number(raw));
         if (!Number.isFinite(parsed)) throw new Error(`${key} must be a number`);
         return parsed;
       };
@@ -131,7 +132,7 @@ export function AdvancedThermostatSettings({ zone, zoneRef, isOpen, onDismiss, o
         {[['min_temperature_c', 'Minimum room temperature'], ['max_temperature_c', 'Maximum room temperature'], ['hysteresis_c', 'Heating hysteresis']].map(([key, label]) => (
           <IonItem key={key} lines="full">
             <IonLabel>{label}</IonLabel>
-            <IonInput slot="end" type="number" inputMode="decimal" step="0.1" value={values[key] || ''} onIonInput={(event) => setValue(key, String(event.detail.value ?? ''))} />
+            <IonInput slot="end" type="number" inputMode="decimal" step="0.5" value={values[key] || ''} onIonInput={(event) => setValue(key, String(event.detail.value ?? ''))} />
           </IonItem>
         ))}
         {hasFloorSensor ? (
@@ -140,7 +141,7 @@ export function AdvancedThermostatSettings({ zone, zoneRef, isOpen, onDismiss, o
             {[['floor_min_temperature_c', 'Minimum floor temperature'], ['floor_max_temperature_c', 'Maximum floor temperature']].map(([key, label]) => (
               <IonItem key={key} lines="full">
                 <IonLabel>{label}</IonLabel>
-                <IonInput slot="end" type="number" inputMode="decimal" step="0.1" value={values[key] || ''} onIonInput={(event) => setValue(key, String(event.detail.value ?? ''))} />
+                <IonInput slot="end" type="number" inputMode="decimal" step="0.5" value={values[key] || ''} onIonInput={(event) => setValue(key, String(event.detail.value ?? ''))} />
               </IonItem>
             ))}
           </>

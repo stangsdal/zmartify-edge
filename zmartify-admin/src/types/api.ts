@@ -144,6 +144,14 @@ export interface NilanHvacState {
   ventilation_level?: number | null;
   actual_inlet_level?: number | null;
   actual_exhaust_level?: number | null;
+  inlet_speed?: number | null;
+  exhaust_speed?: number | null;
+  run_set?: number | null;
+  mode_set?: number | null;
+  vent_set?: number | null;
+  temp_set?: number | null;
+  service_mode?: number | null;
+  service_pct?: number | null;
   room_temperature_c?: number | null;
   inlet_temperature_c?: number | null;
   outlet_temperature_c?: number | null;
@@ -156,7 +164,7 @@ export interface NilanHvacState {
   poll_responses?: number | null;
 }
 
-export type NilanCommand = 'ventilation' | 'inlet_speed' | 'exhaust_speed';
+export type NilanCommand = 'ventilation' | 'vent_set' | 'inlet_speed' | 'exhaust_speed';
 
 export interface NilanCommandResponse {
   command_id: string;
