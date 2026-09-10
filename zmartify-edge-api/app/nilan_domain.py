@@ -9,10 +9,14 @@ from app.registry import RegistryNotFoundError
 
 _FIELDS = (
     "online", "controller_online", "freshness_age_ms", "run", "ventilation_level",
+    "run_actual", "mode_actual", "bypass_open", "bypass_close",
     "actual_inlet_level", "actual_exhaust_level", "inlet_speed", "exhaust_speed",
     "run_set", "mode_set", "vent_set", "temp_set", "service_mode", "service_pct", "room_temperature_c",
     "inlet_temperature_c", "outlet_temperature_c", "extract_temperature_c",
-    "humidity_pct", "co2_ppm", "filter_days_remaining", "status",
+    "t1_intake_c", "t2_inlet_c", "t3_exhaust_c", "t4_outlet_c",
+    "t7_inlet_c", "t8_outdoor_c", "t9_heater_c", "controller_board_temperature_c",
+    "bus_version", "app_version_major", "app_version_minor", "app_version_release",
+    "humidity_pct", "co2_ppm", "filter_days_remaining", "filter_interval_days", "status",
     "poll_requests", "poll_responses",
 )
 
@@ -30,6 +34,9 @@ def upsert_nilan_state(device_external_id: str, payload: dict[str, Any], *, sour
     values["online"] = None if values["online"] is None else int(bool(values["online"]))
     values["controller_online"] = None if values["controller_online"] is None else int(bool(values["controller_online"]))
     values["run"] = None if values["run"] is None else int(bool(values["run"]))
+    values["run_actual"] = None if values["run_actual"] is None else int(bool(values["run_actual"]))
+    values["bypass_open"] = None if values["bypass_open"] is None else int(bool(values["bypass_open"]))
+    values["bypass_close"] = None if values["bypass_close"] is None else int(bool(values["bypass_close"]))
     values["poll_requests"] = int(values["poll_requests"] or 0)
     values["poll_responses"] = int(values["poll_responses"] or 0)
     values["source_timestamp"] = source_timestamp or now
@@ -67,5 +74,8 @@ def get_nilan_state(device_external_id: str) -> dict[str, Any]:
     result["online"] = None if result["online"] is None else bool(result["online"])
     result["controller_online"] = None if result["controller_online"] is None else bool(result["controller_online"])
     result["run"] = None if result["run"] is None else bool(result["run"])
+    result["run_actual"] = None if result["run_actual"] is None else bool(result["run_actual"])
+    result["bypass_open"] = None if result["bypass_open"] is None else bool(result["bypass_open"])
+    result["bypass_close"] = None if result["bypass_close"] is None else bool(result["bypass_close"])
     result.pop("device_id", None)
     return {"device_id": device_external_id, **result}

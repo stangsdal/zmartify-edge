@@ -1,4 +1,4 @@
-import { IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonIcon } from '@ionic/react';
+import { IonHeader, IonToolbar, IonButtons, IonButton, IonIcon } from '@ionic/react';
 import { settingsOutline } from 'ionicons/icons';
 
 interface AppHeaderProps {
@@ -14,7 +14,7 @@ export function AppHeader({ title, subtitle, onSettings }: AppHeaderProps) {
         <div className="px-4 py-2">
           <div className="flex items-center justify-between">
             <div>
-              <IonTitle className="!px-0 !text-2xl !font-bold">{title}</IonTitle>
+              <h1 className="m-0 text-2xl font-bold leading-tight">{title}</h1>
               {subtitle ? <p className="text-sm text-muted mt-1">{subtitle}</p> : null}
             </div>
             {onSettings ? (

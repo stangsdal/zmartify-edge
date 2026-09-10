@@ -62,6 +62,7 @@ def _mark_device_commandable(device_id: str) -> None:
 
 
 def test_v2_mqtt_reported_state_ingest_updates_hvac_and_irrigation(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_CONTRACT_VALIDATION_MODE", "enforce")
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}
     device_id = _seed_device(client, headers, suffix="v2mi01")
@@ -74,7 +75,13 @@ def test_v2_mqtt_reported_state_ingest_updates_hvac_and_irrigation(monkeypatch, 
             "source_timestamp": "2026-07-12T15:00:00Z",
             "firmware_version": "2.1.0",
             "hvac": {
-                "zones": [{"zone_id": 1, "target_temperature_c": 22.5}],
+                "zones": [{
+                    "zone_id": 1,
+                    "zone_mode": 3,
+                    "floor_temperature_c": 24.0,
+                    "target_temperature_c": 22.5,
+                    "setpoint_profiles": {"0": 21.0, "1": 22.5, "2": 19.0, "3": 16.0, "4": 12.0, "5": 23.0},
+                }],
                 "channels": [{"channel_id": 1, "active": True}],
             },
             "irrigation": {
@@ -98,6 +105,23 @@ def test_v2_mqtt_reported_state_ingest_updates_hvac_and_irrigation(monkeypatch, 
     assert reported.status_code == 200
     body = reported.json()
     assert body["hvac"]["applied"] is True
+    zone = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert zone["setpoint_mode"] == 3
+    assert zone["floor_temperature_c"] == 24.0
+    assert zone["setpoint_profiles"]["1"] == 22.5
+
+    without_floor_sensor = client.post(
+        f"/api/v2/devices/{device_id}/ingest/mqtt/reported-state",
+        headers=headers,
+        json={
+            "schema_version": "2.0",
+            "source_timestamp": "2026-07-12T15:01:00Z",
+            "hvac": {"zones": [{"zone_id": 1, "floor_temperature_c": None}]},
+        },
+    )
+    assert without_floor_sensor.status_code == 200
+    zone_without_floor = client.get(f"/mobile/devices/{device_id}", headers=headers).json()["zones"][0]
+    assert zone_without_floor["floor_temperature_c"] is None
     assert body["irrigation"]["outputs_updated"] == 2
     assert body["irrigation"]["hydraulics_updated"] is True
     assert body["irrigation"]["power_updated"] is True

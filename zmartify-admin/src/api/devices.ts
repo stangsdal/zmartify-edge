@@ -79,13 +79,12 @@ export const deviceApi = {
   initializeSdCard: (deviceId: string, format = true): Promise<DeviceSdCardStatus> =>
     apiClient.post(`/api/v2/devices/${deviceId}/storage/sd-card/initialize`, { format }),
 
-  stageFirmware: (deviceId: string, firmware: Blob, force = false, notes?: string): Promise<DeviceOtaStage> =>
-    apiClient.upload(
-      `/api/v2/devices/${encodeURIComponent(deviceId)}/ota/stage?force=${force}${notes ? `&notes=${encodeURIComponent(notes)}` : ''}`,
-      firmware,
-      'application/octet-stream',
-      { 'X-Firmware-Filename': firmware instanceof File ? firmware.name : '' },
-    ),
+  stageCatalogFirmware: (deviceId: string, catalogId: string, version: string, force = false): Promise<DeviceOtaStage> =>
+    apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/ota/stage-catalog`, {
+      catalog_id: catalogId,
+      version,
+      force,
+    }),
 
   triggerFirmwareOta: (deviceId: string): Promise<DeviceOtaTrigger> =>
     apiClient.post(`/api/v2/devices/${encodeURIComponent(deviceId)}/ota/trigger`, {}),

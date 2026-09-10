@@ -1,6 +1,6 @@
 {
   "name": "Zmartify AHC9000 USB Recovery",
-  "version": "0.3.52",
+  "version": "0.3.54",
   "new_install_prompt_erase": false,
   "new_install_improv_wait_time": 0,
   "builds": [
@@ -8,7 +8,7 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "zmartify-hvac-ahc9000-0.3.52.factory.bin",
+          "path": "zmartify-hvac-ahc9000-0.3.54.factory.bin",
           "offset": 0
         }
       ]

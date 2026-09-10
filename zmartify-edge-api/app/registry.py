@@ -377,10 +377,12 @@ def list_devices() -> list[dict[str, Any]]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-                 SELECT id, uuid, device_id, display_name, mac, firmware_version, site_id, local_url,
-                     device_type, product_type, integration_mode, created_at, last_seen_at
-            FROM devices
-            ORDER BY id
+                 SELECT d.id, d.uuid, d.device_id, d.display_name, d.mac, d.firmware_version,
+                     d.site_id, d.local_url, d.device_type, d.product_type, d.integration_mode,
+                     d.created_at, d.last_seen_at, ds.online, ds.mqtt_connected
+            FROM devices d
+            LEFT JOIN device_state ds ON ds.device_id = d.id
+            ORDER BY d.id
             """
         ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]

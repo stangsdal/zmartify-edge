@@ -26,6 +26,13 @@
               "current_temperature_c": { "type": ["number", "null"] },
               "floor_temperature_c": { "type": ["number", "null"] },
               "target_temperature_c": { "type": ["number", "null"] },
+              "setpoint_profiles": {
+                "type": ["object", "null"],
+                "patternProperties": {
+                  "^[0-5]$": { "type": "number" }
+                },
+                "additionalProperties": false
+              },
               "rssi_element_dbm": { "type": ["number", "null"] },
               "rssi_control_unit_dbm": { "type": ["number", "null"] },
               "configuration": { "type": ["object", "null"] }

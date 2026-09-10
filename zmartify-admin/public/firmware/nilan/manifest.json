@@ -1,0 +1,17 @@
+{
+  "name": "Zmartify NILAN USB Recovery",
+  "version": "0.3.7",
+  "new_install_prompt_erase": false,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "zmartify-hvac-nilan-0.3.7.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

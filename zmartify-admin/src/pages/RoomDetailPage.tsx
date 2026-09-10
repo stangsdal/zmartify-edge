@@ -7,7 +7,7 @@ import { ThermostatDial } from '../components/ThermostatDial';
 import { apiClient } from '../api/client';
 import { mobileApi, MobileSetpointResponse, MobileZone } from '../api/mobile';
 import { freshnessFromAgeMs } from '../utils/freshness';
-import { displaySetpointMode, HvacZoneMode, SETPOINT_MODE_BY_NAME } from '../utils/hvacMode';
+import { displaySetpointMode, HvacZoneMode, SETPOINT_MODE_BY_NAME, ZONE_MODE_BY_NAME } from '../utils/hvacMode';
 
 interface RouteParams {
   zoneRef: string;
@@ -245,7 +245,7 @@ export function RoomDetailPage() {
                   // Manual is an explicit controller profile. Omitting the
                   // field means "whatever profile is active per channel", so
                   // it can leave a multi-channel zone with mixed targets.
-                  setpoint_mode: SETPOINT_MODE_BY_NAME[selectedMode],
+                  setpoint_mode: ZONE_MODE_BY_NAME[selectedMode],
                   setpoint_command_state: result.command_state,
                   setpoint_command_id: result.command_id ?? null,
                   setpoint_requested_target_c: target,

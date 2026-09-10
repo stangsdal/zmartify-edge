@@ -5,13 +5,14 @@ export default {
     extend: {
       colors: {
         brand: {
-          primary: '#301E96',
-          secondary: '#67FBFF',
-          accent: '#7D85FF',
-          neutral: '#F1F2F2',
+          primary: '#164C68',
+          secondary: '#20B9D5',
+          accent: '#0BB7AE',
+          positive: '#22CF71',
+          neutral: '#F5F8FA',
           surface: '#FFFFFF',
-          darkBg: '#121212',
-          darkCard: '#1E1E1E',
+          darkBg: '#0E3449',
+          darkCard: '#123E53',
         },
         alert: {
           critical: '#b42318',
@@ -26,7 +27,7 @@ export default {
         xl2: '1.1rem',
       },
       boxShadow: {
-        soft: '0 10px 30px rgba(48, 30, 150, 0.14)',
+        soft: '0 10px 30px rgba(14, 52, 73, 0.12)',
       },
     },
   },

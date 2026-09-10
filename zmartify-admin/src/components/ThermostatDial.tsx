@@ -56,9 +56,9 @@ export function ThermostatDial({
   const measuredTemp = typeof currentTemperature === 'number' ? currentTemperature : value;
   const clampedMeasuredTemp = clamp(measuredTemp, min, max);
   const clampedSetpoint = clamp(value, min, max);
-  const primaryColor = heating ? '#FF6A2B' : '#67FBFF';
+  const primaryColor = heating ? '#EA580C' : '#20B9D5';
   const secondaryColor = heating ? '#ffb08f' : 'rgba(255,255,255,0.65)';
-  const deltaColor = clampedSetpoint >= clampedMeasuredTemp ? '#FF6A2B' : '#67FBFF';
+  const deltaColor = clampedSetpoint >= clampedMeasuredTemp ? '#EA580C' : '#20B9D5';
   const markerTemps = [5, 10, 15, 20, 25, 30, 35];
   const modeLabel = displayHvacMode(thermostatMode, heating);
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -129,6 +130,13 @@ from app.schemas import (
 )
 
 app = FastAPI(title="Zmartify Edge API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["capacitor://localhost", "https://localhost"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 _DEFAULT_PUBLIC_EDGE_URL = "https://api.zmartify.dk"
 _DEFAULT_PUBLIC_MQTT_URI = "mqtts://mqtt.zmartify.dk:8883"

@@ -157,6 +157,10 @@ export interface NilanHvacState {
   controller_online?: boolean | null;
   freshness_age_ms?: number | null;
   run?: boolean | null;
+  run_actual?: boolean | null;
+  mode_actual?: number | null;
+  bypass_open?: boolean | null;
+  bypass_close?: boolean | null;
   ventilation_level?: number | null;
   actual_inlet_level?: number | null;
   actual_exhaust_level?: number | null;
@@ -172,15 +176,28 @@ export interface NilanHvacState {
   inlet_temperature_c?: number | null;
   outlet_temperature_c?: number | null;
   extract_temperature_c?: number | null;
+  t1_intake_c?: number | null;
+  t2_inlet_c?: number | null;
+  t3_exhaust_c?: number | null;
+  t4_outlet_c?: number | null;
+  t7_inlet_c?: number | null;
+  t8_outdoor_c?: number | null;
+  t9_heater_c?: number | null;
+  controller_board_temperature_c?: number | null;
+  bus_version?: number | null;
+  app_version_major?: string | null;
+  app_version_minor?: string | null;
+  app_version_release?: string | null;
   humidity_pct?: number | null;
   co2_ppm?: number | null;
   filter_days_remaining?: number | null;
+  filter_interval_days?: number | null;
   status?: string | null;
   poll_requests?: number | null;
   poll_responses?: number | null;
 }
 
-export type NilanCommand = 'ventilation' | 'vent_set' | 'inlet_speed' | 'exhaust_speed';
+export type NilanCommand = 'ventilation' | 'vent_set' | 'mode_set' | 'inlet_speed' | 'exhaust_speed' | 'filter_interval' | 'filter_reset';
 
 export interface NilanCommandResponse {
   command_id: string;

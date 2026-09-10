@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { navigationForLayout, type NavigationContext } from './navigationManifest';
+import { activeNavigationItemId, navigationForLayout, type NavigationContext } from './navigationManifest';
 
 const context = (overrides: Partial<NavigationContext> = {}): NavigationContext => ({
   appBase: '/app',
@@ -25,5 +25,28 @@ describe('navigation manifest', () => {
     const ids = navigationForLayout(context({ hasHvac: true }), 'desktop').map((item) => item.id);
     expect(ids).toContain('hvac');
     expect(ids).not.toContain('irrigation');
+  });
+
+  it.each([
+    ['/app/sites/site-one', 'home'],
+    ['/app/sites/site-one/hvac', 'single-hvac'],
+    ['/app/sites/site-one/alerts', 'alerts'],
+    ['/app/more', 'more'],
+  ])('selects only the matching mobile item for %s', (pathname, expectedId) => {
+    const items = navigationForLayout(context({ hasHvac: true }), 'mobile');
+
+    expect(activeNavigationItemId(pathname, items)).toBe(expectedId);
+  });
+
+  it('selects the most specific matching desktop item', () => {
+    const items = navigationForLayout(context({ isAdministrator: true }), 'desktop');
+
+    expect(activeNavigationItemId('/app/more/controllers', items)).toBe('devices');
+  });
+
+  it('keeps More active for nested tools without a dedicated mobile item', () => {
+    const items = navigationForLayout(context({ isAdministrator: true }), 'mobile');
+
+    expect(activeNavigationItemId('/app/more/controllers', items)).toBe('more');
   });
 });

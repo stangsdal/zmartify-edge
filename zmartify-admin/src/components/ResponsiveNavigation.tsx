@@ -1,13 +1,11 @@
 import { IonIcon } from '@ionic/react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAccess } from '../auth/AccessContext';
-import { navigationForLayout } from './navigationManifest';
+import { activeNavigationItemId, navigationForLayout } from './navigationManifest';
 
 interface ResponsiveNavigationProps {
   appBase: string;
 }
-
-const isActive = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
 export function ResponsiveNavigation({ appBase }: ResponsiveNavigationProps) {
   const location = useLocation();
@@ -21,17 +19,24 @@ export function ResponsiveNavigation({ appBase }: ResponsiveNavigationProps) {
   const navigationContext = { appBase, siteBase, isAdministrator, hasHvac, hasIrrigation };
   const mobileItems = navigationForLayout(navigationContext, 'mobile');
   const desktopItems = navigationForLayout(navigationContext, 'desktop');
+  const mobileActiveItemId = activeNavigationItemId(location.pathname, mobileItems);
+  const desktopActiveItemId = activeNavigationItemId(location.pathname, desktopItems);
 
   return (
     <>
       <nav className="mobile-nav" aria-label="Mobile navigation">
         {mobileItems.map((item) => {
-          const active = isActive(location.pathname, item.path);
+          const active = item.id === mobileActiveItemId;
           return (
-            <NavLink key={item.label} to={item.path} className={`mobile-nav-item${active ? ' active' : ''}`}>
+            <Link
+              key={item.label}
+              to={item.path}
+              className={`mobile-nav-item${active ? ' active' : ''}`}
+              aria-current={active ? 'page' : undefined}
+            >
               <IonIcon icon={item.icon} />
               <span>{item.label}</span>
-            </NavLink>
+            </Link>
           );
         })}
       </nav>
@@ -39,12 +44,18 @@ export function ResponsiveNavigation({ appBase }: ResponsiveNavigationProps) {
       <aside className="tablet-nav" aria-label="Tablet navigation">
         <div className="tablet-nav-list">
           {desktopItems.map((item) => {
-            const active = isActive(location.pathname, item.path);
+            const active = item.id === desktopActiveItemId;
             return (
-              <NavLink key={item.label} to={item.path} className={`tablet-nav-item${active ? ' active' : ''}`} title={item.label}>
+              <Link
+                key={item.label}
+                to={item.path}
+                className={`tablet-nav-item${active ? ' active' : ''}`}
+                title={item.label}
+                aria-current={active ? 'page' : undefined}
+              >
                 <IonIcon icon={item.icon} />
                 <span>{item.label}</span>
-              </NavLink>
+              </Link>
             );
           })}
         </div>
@@ -52,17 +63,25 @@ export function ResponsiveNavigation({ appBase }: ResponsiveNavigationProps) {
 
       <aside className="desktop-nav" aria-label="Desktop navigation">
         <div className="desktop-nav-brand">
-          <p className="desktop-nav-kicker">Zmartify Edge</p>
-          <h2>Control Plane</h2>
+          <img
+            src={`${import.meta.env.MODE === 'native' ? '/' : import.meta.env.BASE_URL}brand/zmartify-lockup-transparent.png`}
+            alt="Zmartify"
+          />
+          <p className="desktop-nav-kicker">HVAC control</p>
         </div>
         <div className="desktop-nav-list">
           {desktopItems.map((item) => {
-            const active = isActive(location.pathname, item.path);
+            const active = item.id === desktopActiveItemId;
             return (
-              <NavLink key={item.label} to={item.path} className={`desktop-nav-item${active ? ' active' : ''}`}>
+              <Link
+                key={item.label}
+                to={item.path}
+                className={`desktop-nav-item${active ? ' active' : ''}`}
+                aria-current={active ? 'page' : undefined}
+              >
                 <IonIcon icon={item.icon} />
                 <span>{item.label}</span>
-              </NavLink>
+              </Link>
             );
           })}
         </div>

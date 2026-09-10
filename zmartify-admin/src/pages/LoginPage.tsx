@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { CSSProperties, useEffect, useState } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import {
   IonContent,
@@ -14,7 +14,11 @@ import {
 } from '@ionic/react';
 import { apiClient } from '../api/client';
 import { authApi, SiteInvitationValidateResponse } from '../api/auth';
+import { useAccess } from '../auth/AccessContext';
 import { InviteValidateResponse } from '../types/api';
+
+const isNativeBuild = import.meta.env.MODE === 'native';
+const brandAssetUrl = (fileName: string) => `${isNativeBuild ? '/' : import.meta.env.BASE_URL}brand/${fileName}`;
 
 function formatLoginError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error || '');
@@ -23,12 +27,18 @@ function formatLoginError(error: unknown): string {
     return 'Please enter both username and password.';
   }
 
-  if (/401|invalid credentials|unauthorized/i.test(msg)) {
+  if (/\b401\b|invalid credentials|invalid username or password|unauthorized/i.test(msg)) {
     return 'Invalid username or password.';
   }
 
+  if (/secure storage|keychain|oserror/i.test(msg)) {
+    return 'Unable to save the secure session. Please restart the app and try again.';
+  }
+
   if (/network error while calling|failed to fetch|network request failed/i.test(msg)) {
-    return 'Unable to reach the server. Check API Base URL and your network connection.';
+    return isNativeBuild
+      ? 'Unable to reach Zmartify. Check your network connection and try again.'
+      : 'Unable to reach the server. Check API Base URL and your network connection.';
   }
 
   if (/403/.test(msg)) {
@@ -58,7 +68,10 @@ export function LoginPage() {
   const [siteInviteState, setSiteInviteState] = useState<SiteInvitationValidateResponse | null>(null);
   const [isInviteLoading, setIsInviteLoading] = useState(false);
   const history = useHistory();
-  const inviteOriginBaseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://app.zmartify.dk';
+  const { isAuthenticated, refresh } = useAccess();
+  const inviteOriginBaseUrl = isNativeBuild
+    ? baseUrl
+    : typeof window !== 'undefined' ? window.location.origin : 'https://app.zmartify.dk';
 
   const navigateToHome = () => {
     history.replace(`${appBase}/home`);
@@ -68,6 +81,12 @@ export function LoginPage() {
       }
     }, 200);
   };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigateToHome();
+    }
+  }, [isAuthenticated]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -126,7 +145,7 @@ export function LoginPage() {
   useEffect(() => {
     let canceled = false;
 
-    const stored = localStorage.getItem('admin_api_token');
+    const stored = apiClient.getAuthToken();
     if (!stored) {
       return () => {
         canceled = true;
@@ -141,7 +160,7 @@ export function LoginPage() {
         }
       } catch {
         // Stale token: keep user on login page and let them sign in again.
-        apiClient.clearAuthToken();
+        await apiClient.clearAuthToken();
       }
     };
 
@@ -154,7 +173,7 @@ export function LoginPage() {
 
   const handleLogin = async () => {
     const user = username.trim();
-    const pass = password.trim();
+    const pass = password;
 
     if (!user && !pass) {
       setMessageTone('error');
@@ -180,11 +199,11 @@ export function LoginPage() {
       setMessage('Spinning up...');
       apiClient.setBaseUrl(baseUrl);
       const data = await authApi.login(user, pass);
-      apiClient.setAuthToken(data.access_token);
+      await apiClient.setAuthToken(data.access_token);
       if (siteInviteToken) {
         await authApi.acceptSiteInvitation(siteInviteToken);
       }
-      navigateToHome();
+      await refresh();
     } catch (e) {
       setMessageTone('error');
       setMessage(formatLoginError(e));
@@ -197,7 +216,7 @@ export function LoginPage() {
     const token = inviteToken.trim();
     const siteToken = siteInviteToken.trim();
     const user = username.trim();
-    const pass = password.trim();
+    const pass = password;
     const name = displayName.trim();
     const mail = email.trim();
 
@@ -241,8 +260,8 @@ export function LoginPage() {
           password: pass,
           email: mail || undefined,
         });
-      apiClient.setAuthToken(data.access_token);
-      navigateToHome();
+      await apiClient.setAuthToken(data.access_token);
+      await refresh();
     } catch (e) {
       setMessageTone('error');
       const msg = e instanceof Error ? e.message : String(e || '');
@@ -263,31 +282,47 @@ export function LoginPage() {
   const handleClearToken = () => {
     setUsername('');
     setPassword('');
-    apiClient.clearAuthToken();
+    void apiClient.clearAuthToken();
     setMessageTone('info');
     setMessage('Token cleared');
   };
 
   return (
-    <IonPage>
-      <IonHeader>
+    <IonPage className="login-page">
+      <IonHeader className="login-header">
         <IonToolbar>
-            <IonTitle>Zmartify Admin - Login</IonTitle>
+          <IonTitle>Zmartify HVAC</IonTitle>
         </IonToolbar>
       </IonHeader>
-      <IonContent className="ion-padding">
-        <IonCard>
-          <div style={{ padding: '16px' }}>
-            <h2>API Configuration</h2>
-            <IonLabel>API Base URL</IonLabel>
-            <IonInput
-              value={baseUrl}
-              onIonChange={(e) => setBaseUrl(e.detail.value || '')}
-              placeholder="https://api.zmartify.dk"
-            />
+      <IonContent
+        fullscreen
+        className="login-content"
+        style={{ '--login-pattern': `url("${brandAssetUrl('zmartify-pattern-light.png')}")` } as CSSProperties}
+      >
+        <main className="login-shell">
+          <section className="login-brand" aria-label="Zmartify HVAC">
+            <img src={brandAssetUrl('zmartify-lockup-transparent.png')} alt="Zmartify" />
+            <p>HVAC control</p>
+          </section>
+          <IonCard className="login-card">
+          <div className="login-card__content">
+            <div className="login-card__heading">
+              <p>Welcome back</p>
+              <h1>Sign in</h1>
+            </div>
+            {!isNativeBuild && (
+              <div className="login-api-config">
+                <IonLabel>API Base URL</IonLabel>
+                <IonInput
+                  value={baseUrl}
+                  onIonInput={(e) => setBaseUrl(e.detail.value || '')}
+                  placeholder="https://api.zmartify.dk"
+                />
+              </div>
+            )}
 
             {!!inviteToken && (
-              <div style={{ marginTop: '16px', padding: '10px', borderRadius: '8px', background: '#f6f8ff' }}>
+              <div className="login-notice">
                 <strong>QR Invite</strong>
                 {isInviteLoading && <p style={{ margin: '6px 0 0' }}>Validating invite...</p>}
                 {!isInviteLoading && inviteState?.valid && (
@@ -304,7 +339,7 @@ export function LoginPage() {
             )}
 
             {!!siteInviteToken && (
-              <div style={{ marginTop: '16px', padding: '10px', borderRadius: '8px', background: '#f6f8ff' }}>
+              <div className="login-notice">
                 <strong>Site invitation</strong>
                 {isInviteLoading && <p style={{ margin: '6px 0 0' }}>Validating invitation...</p>}
                 {!isInviteLoading && siteInviteState?.valid && (
@@ -320,49 +355,52 @@ export function LoginPage() {
               </div>
             )}
 
-            <IonLabel style={{ marginTop: '16px', display: 'block' }}>
+            <IonLabel className="login-label">
               Username
             </IonLabel>
             <IonInput
               value={username}
-              onIonChange={(e) => setUsername(e.detail.value || '')}
+              onIonInput={(e) => setUsername(e.detail.value || '')}
               placeholder="admin"
+              autocomplete="username"
+              autocapitalize="off"
             />
 
             {!!(inviteToken || siteInviteToken) && (
               <>
-                <IonLabel style={{ marginTop: '16px', display: 'block' }}>
+                <IonLabel className="login-label">
                   Display Name
                 </IonLabel>
                 <IonInput
                   value={displayName}
-                  onIonChange={(e) => setDisplayName(e.detail.value || '')}
+                  onIonInput={(e) => setDisplayName(e.detail.value || '')}
                   placeholder="Your full name"
                 />
 
-                {!!inviteToken && <IonLabel style={{ marginTop: '16px', display: 'block' }}>
+                {!!inviteToken && <IonLabel className="login-label">
                   Email (optional)
                 </IonLabel>}
                 {!!inviteToken && <IonInput
                   value={email}
-                  onIonChange={(e) => setEmail(e.detail.value || '')}
+                  onIonInput={(e) => setEmail(e.detail.value || '')}
                   placeholder="name@example.com"
                   type="email"
                 />}
               </>
             )}
 
-            <IonLabel style={{ marginTop: '16px', display: 'block' }}>
+            <IonLabel className="login-label">
               Password
             </IonLabel>
             <IonInput
               value={password}
-              onIonChange={(e) => setPassword(e.detail.value || '')}
+              onIonInput={(e) => setPassword(e.detail.value || '')}
               placeholder="Your password"
               type="password"
+              autocomplete="current-password"
             />
 
-            <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+            <div className="login-actions">
               <IonButton onClick={handleLogin} expand="block" disabled={isLoggingIn || isRegistering}>
                 {isLoggingIn ? <IonSpinner name="crescent" /> : 'Login'}
               </IonButton>
@@ -382,12 +420,13 @@ export function LoginPage() {
             </div>
 
             {message && (
-              <p style={{ color: messageTone === 'error' ? '#b00020' : 'green', marginTop: '8px' }}>
+              <p className={`login-message login-message--${messageTone}`}>
                 {message}
               </p>
             )}
           </div>
-        </IonCard>
+          </IonCard>
+        </main>
       </IonContent>
     </IonPage>
   );

@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { authApi } from '../api/auth';
+import { apiClient } from '../api/client';
 
 export type ProductType = 'hvac' | 'irrigation' | 'weather' | 'energy';
 type Permission = 'read' | 'operate' | 'configure' | 'administer';
@@ -54,7 +55,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   const [siteSelectionVersion, setSiteSelectionVersion] = useState(0);
 
   const refresh = async () => {
-    if (!localStorage.getItem('admin_api_token')) {
+    if (!apiClient.getAuthToken()) {
       setContext(null);
       setIsLoading(false);
       return;
@@ -68,7 +69,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       const selectedSite = nextContext.sites.find((site) => site.id === persistedSiteId) || nextContext.sites[0];
       setSelectedSiteId(selectedSite?.id ?? null);
     } catch {
-      localStorage.removeItem('admin_api_token');
+      await apiClient.clearAuthToken();
       setContext(null);
     } finally {
       setIsLoading(false);

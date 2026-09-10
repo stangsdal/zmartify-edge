@@ -64,7 +64,7 @@ export const navigationManifest: NavigationItem[] = [
     id: 'platform-systems', label: 'Systems', icon: hardwareChipOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/systems`, visibleWhen: (context) => context.isAdministrator,
   },
   {
-    id: 'devices', label: 'Devices', icon: hardwareChipOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/admin/devices`, visibleWhen: (context) => context.isAdministrator,
+    id: 'devices', label: 'Controllers', icon: hardwareChipOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/more/controllers`, visibleWhen: (context) => context.isAdministrator,
   },
   {
     id: 'automations', label: 'Automations', icon: constructOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/automations`, visibleWhen: (context) => context.isAdministrator,
@@ -87,4 +87,17 @@ export function navigationForLayout(context: NavigationContext, layout: Navigati
   return navigationManifest
     .filter((item) => item.layouts.includes(layout) && item.visibleWhen(context))
     .map((item) => ({ ...item, path: item.route(context) }));
+}
+
+export function isNavigationItemActive(pathname: string, item: Pick<NavigationItem, 'id'> & { path: string }): boolean {
+  return pathname === item.path || (item.id !== 'home' && pathname.startsWith(`${item.path}/`));
+}
+
+export function activeNavigationItemId(
+  pathname: string,
+  items: Array<Pick<NavigationItem, 'id'> & { path: string }>,
+): string | undefined {
+  return items
+    .filter((item) => isNavigationItemActive(pathname, item))
+    .sort((left, right) => right.path.length - left.path.length)[0]?.id;
 }

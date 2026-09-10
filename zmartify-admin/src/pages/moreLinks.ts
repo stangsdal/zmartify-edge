@@ -12,14 +12,12 @@ const personalLinks: MoreLink[] = [
 ];
 
 const ownerLinks: MoreLink[] = [
-  { label: 'Controller onboarding', description: 'Connect and assign a new controller', path: '/app/onboarding/discover' },
-  { label: 'Firmware library', description: 'Latest firmware for Zmartify controllers', path: '/app/firmware/index.html', document: true },
-  { label: 'AHC9000 USB installer', description: 'Recover or reset an AHC9000 controller over USB', path: '/app/firmware/ahc9000/index.html', document: true },
+  { label: 'Controllers', description: 'Onboarding, fleet operations and firmware releases', path: '/app/more/controllers' },
+  { label: 'Firmware library', description: 'Published OTA and USB recovery releases', path: '/app/more/firmware' },
   { label: 'Site members', description: 'Manage roles and product access for your sites', path: '/app/more/members' },
 ];
 
 const administratorLinks: MoreLink[] = [
-  { label: 'Devices', description: 'Device inventory and details', path: '/app/more/devices' },
   { label: 'Users', description: 'Platform accounts and global administration', path: '/app/more/users' },
   { label: 'Integrations', description: 'MQTT and external integrations', path: '/app/more/integrations' },
   { label: 'System', description: 'Diagnostics, health and platform status', path: '/app/more/system' },

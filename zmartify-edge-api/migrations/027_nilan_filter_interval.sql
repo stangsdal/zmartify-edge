@@ -1,0 +1,1 @@
+ALTER TABLE nilan_hvac_state ADD COLUMN filter_interval_days INTEGER;

@@ -11,7 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DomainsPage } from './pages/DomainsPage';
 import { SitesPage } from './pages/SitesPage';
-import { DevicesPage } from './pages/DevicesPage';
+import { ControllersPage } from './pages/ControllersPage';
 import { DeviceHistoryPage } from './pages/DeviceHistoryPage';
 import { UsersPage } from './pages/UsersPage';
 import { InvitesPage } from './pages/InvitesPage';
@@ -31,6 +31,7 @@ import { IrrigationZoneDetailPage } from './pages/IrrigationZoneDetailPage';
 import { InsightsWaterPage } from './pages/InsightsWaterPage';
 import { InsightsEnergyPage } from './pages/InsightsEnergyPage';
 import { MorePage } from './pages/MorePage';
+import { FirmwareLibraryPage } from './pages/FirmwareLibraryPage';
 import { SiteMembersPage } from './pages/SiteMembersPage';
 import { OnboardingDiscoverPage } from './pages/OnboardingDiscoverPage';
 import { OnboardingClaimPage } from './pages/OnboardingClaimPage';
@@ -422,8 +423,18 @@ export function App() {
           />
           <Route
             exact
+            path={`${appBase}/more/controllers`}
+              render={() => requireCapability(<ControllersPage canManageFleet={isAdmin} />, canUseOwnerTools)}
+          />
+          <Route
+            exact
+            path={`${appBase}/more/firmware`}
+              render={() => requireCapability(<FirmwareLibraryPage />, canUseOwnerTools)}
+          />
+          <Route
+            exact
             path={`${appBase}/more/devices`}
-              render={() => requireAuth(isAdmin ? <DevicesPage /> : <HomePage />)}
+              render={() => <Redirect to={`${appBase}/more/controllers`} />}
           />
           <Route
             exact
@@ -459,7 +470,7 @@ export function App() {
           <Route
             exact
             path={`${appBase}/devices`}
-              render={() => <Redirect to={`${appBase}/admin/devices`} />}
+              render={() => <Redirect to={`${appBase}/more/controllers`} />}
           />
           <Route
             exact
@@ -514,7 +525,7 @@ export function App() {
           <Route
             exact
             path={`${appBase}/admin/devices`}
-              render={() => requireAdmin(<DevicesPage />)}
+              render={() => <Redirect to={`${appBase}/more/controllers`} />}
           />
           <Route
             exact

@@ -122,14 +122,18 @@ then calls the public `POST /api/v2/device-bootstrap/config` endpoint. A valid
 claim returns Edge URL, device-admin token, and MQTT credentials once; the stored
 claim token is SHA-256 hashed, expires after 10 minutes, and is deleted on use.
 
-For field OTA, stage a firmware binary with:
+For field OTA, stage an exact release from the server-side firmware catalog:
 
-```text
-POST /api/v2/devices/{device_id}/ota/stage?version={version}&force={false|true}
+```http
+POST /api/v2/devices/{device_id}/ota/stage-catalog
+Content-Type: application/json
+
+{"catalog_id":"ahc9000","version":"0.3.54","force":false}
 ```
 
-The response includes `sha256` and `size_bytes`, which must be checked against
-the local artifact. A dedicated management MQTT principal then publishes payload
+The server resolves the artifact, validates controller compatibility and SHA-256,
+and returns `sha256` and `size_bytes`. Raw firmware upload routes return `410 Gone`.
+A dedicated management MQTT principal then publishes payload
 `1`, QoS 1, non-retained, to:
 
 ```text

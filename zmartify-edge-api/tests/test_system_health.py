@@ -38,6 +38,24 @@ def test_health_live_is_public(monkeypatch, tmp_path: Path):
     assert response.json() == {"ok": True, "service": "zmartify-edge-api"}
 
 
+def test_capacitor_ios_origins_are_allowed(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+
+    for origin in ("capacitor://localhost", "https://localhost"):
+        response = client.options(
+            "/auth/login",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+        assert "Authorization" in response.headers["access-control-allow-headers"]
+
+
 def test_health_ready_reports_checks(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
 

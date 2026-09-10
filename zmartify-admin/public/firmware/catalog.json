@@ -5,9 +5,30 @@
       "name": "Zmartify AHC9000",
       "category": "Gulvvarme-controller",
       "description": "USB recovery-firmware til ESP32-S3-controlleren. Installationen nulstiller Wi-Fi, MQTT og onboarding.",
+      "artifact_prefix": "zmartify-hvac-ahc9000",
+      "device_id_patterns": [
+        "ahc9000"
+      ],
+      "latest": "0.3.54",
+      "releases": "ahc9000/releases.json",
       "installer": "ahc9000/index.html",
       "manifest": "ahc9000/manifest.json",
       "checksum": "ahc9000/SHA256SUMS"
+    },
+    {
+      "id": "nilan",
+      "name": "Zmartify NILAN",
+      "category": "Ventilations-controller",
+      "description": "Firmware til ESP32-S3-gatewayen for NILAN Comfort og CTS602.",
+      "artifact_prefix": "zmartify-hvac-nilan",
+      "device_id_patterns": [
+        "nilan"
+      ],
+      "latest": "0.3.7",
+      "releases": "nilan/releases.json",
+      "installer": "nilan/index.html",
+      "manifest": "nilan/manifest.json",
+      "checksum": "nilan/SHA256SUMS"
     }
   ]
 }

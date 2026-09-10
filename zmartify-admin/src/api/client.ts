@@ -1,7 +1,33 @@
+import { Capacitor } from '@capacitor/core';
+import { SecureStorage } from '@aparajita/capacitor-secure-storage';
+
 // Configure API base URL and token
 const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL
   || (typeof window !== 'undefined' ? window.location.origin : 'https://api.zmartify.dk');
 const PUBLIC_APP_HOSTS = new Set(['app.zmartify.dk', 'admin.zmartify.dk']);
+const AUTH_TOKEN_KEY = 'admin_api_token';
+const isNativePlatform = Capacitor.isNativePlatform();
+let nativeAuthToken: string | null = null;
+
+export async function initializeAuthToken(): Promise<void> {
+  if (!isNativePlatform) {
+    return;
+  }
+
+  try {
+    const legacyToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    const storedToken = await SecureStorage.getItem(AUTH_TOKEN_KEY);
+    nativeAuthToken = storedToken ?? legacyToken;
+
+    if (!storedToken && legacyToken) {
+      await SecureStorage.setItem(AUTH_TOKEN_KEY, legacyToken);
+    }
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch (error) {
+    nativeAuthToken = null;
+    console.warn('[Auth] Unable to initialize secure token storage:', error);
+  }
+}
 
 const normalizeApiBaseUrl = (raw: string): string => {
   const trimmed = (raw || '').trim();
@@ -40,7 +66,7 @@ const getApiBaseUrl = (): string => {
 };
 
 const getAuthToken = (): string | null => {
-  return localStorage.getItem('admin_api_token');
+  return isNativePlatform ? nativeAuthToken : localStorage.getItem(AUTH_TOKEN_KEY);
 };
 
 export class ApiClient {
@@ -55,13 +81,31 @@ export class ApiClient {
     localStorage.setItem('api_base_url', this.baseUrl);
   }
 
-  setAuthToken(token: string): void {
-    localStorage.setItem('admin_api_token', token);
+  async setAuthToken(token: string): Promise<void> {
+    if (isNativePlatform) {
+      nativeAuthToken = token;
+      try {
+        await SecureStorage.setItem(AUTH_TOKEN_KEY, token);
+      } catch (error) {
+        console.warn('[Auth] Unable to persist token in secure storage:', error);
+      }
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+    } else {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+    }
     window.dispatchEvent(new Event('zmartify-auth-changed'));
   }
 
-  clearAuthToken(): void {
-    localStorage.removeItem('admin_api_token');
+  async clearAuthToken(): Promise<void> {
+    nativeAuthToken = null;
+    if (isNativePlatform) {
+      try {
+        await SecureStorage.removeItem(AUTH_TOKEN_KEY);
+      } catch (error) {
+        console.warn('[Auth] Unable to remove token from secure storage:', error);
+      }
+    }
+    localStorage.removeItem(AUTH_TOKEN_KEY);
     window.dispatchEvent(new Event('zmartify-auth-changed'));
   }
 

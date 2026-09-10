@@ -78,6 +78,53 @@ def test_publish_nilan_vent_set_allows_off_and_uses_vent_set_payload(monkeypatch
     assert command["vent_set"] == 0
 
 
+def test_publish_nilan_mode_set_uses_controller_mode_payload(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setenv("ZMART_EDGE_MQTT_TOPIC_STYLE", "v2")
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(
+        mqtt_commands.subprocess,
+        "run",
+        lambda cmd, capture_output, text, timeout: calls.append(list(cmd)) or _Result(),
+    )
+
+    result = mqtt_commands.publish_nilan_command("nilan-1", "mode_set", 3)
+
+    command = json.loads(calls[0][calls[0].index("-m") + 1])
+    assert calls[0][calls[0].index("-t") + 1] == "zmartify/v2/devices/nilan-1/commands/hvac/mode-set"
+    assert command["command_id"] == result["command_id"]
+    assert command["mode_set"] == 3
+
+
+def test_publish_nilan_filter_commands_use_supported_intervals(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setenv("ZMART_EDGE_MQTT_TOPIC_STYLE", "v2")
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(
+        mqtt_commands.subprocess,
+        "run",
+        lambda cmd, capture_output, text, timeout: calls.append(list(cmd)) or _Result(),
+    )
+
+    mqtt_commands.publish_nilan_command("nilan-1", "filter_interval", 274)
+    mqtt_commands.publish_nilan_command("nilan-1", "filter_reset", 274)
+
+    topics = [call[call.index("-t") + 1] for call in calls]
+    payloads = [json.loads(call[call.index("-m") + 1]) for call in calls]
+    assert topics == [
+        "zmartify/v2/devices/nilan-1/commands/hvac/filter-interval",
+        "zmartify/v2/devices/nilan-1/commands/hvac/filter-reset",
+    ]
+    assert [payload["filter_interval_days"] for payload in payloads] == [274, 274]
+
+    try:
+        mqtt_commands.publish_nilan_command("nilan-1", "filter_interval", 200)
+    except mqtt_commands.MqttCommandError as exc:
+        assert "183, 274 or 365" in str(exc)
+    else:
+        raise AssertionError("unsupported filter interval was accepted")
+
+
 def test_publish_setpoint_command_preserves_supplied_command_id(monkeypatch):
     calls: list[list[str]] = []
 

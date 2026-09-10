@@ -15,6 +15,7 @@ import '@ionic/react/css/display.css';
 import './main.css';
 import './mobile-ui.css';
 import App from './App';
+import { initializeAuthToken } from './api/client';
 import { AccessProvider } from './auth/AccessContext';
 
 setupIonicReact();
@@ -29,7 +30,7 @@ if (storedTheme === 'dark') {
 }
 
 // Register service worker for offline support
-if ('serviceWorker' in navigator) {
+if (import.meta.env.MODE !== 'native' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     const swVersion = '20260906-1';
     const swUrl = `/app/sw.js?v=${swVersion}`;
@@ -62,14 +63,19 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <IonApp>
-      <IonReactRouter>
-        <AccessProvider>
-          <App />
-        </AccessProvider>
-      </IonReactRouter>
-    </IonApp>
-  </React.StrictMode>
-);
+async function renderApp() {
+  await initializeAuthToken();
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <IonApp>
+        <IonReactRouter>
+          <AccessProvider>
+            <App />
+          </AccessProvider>
+        </IonReactRouter>
+      </IonApp>
+    </React.StrictMode>
+  );
+}
+
+void renderApp();

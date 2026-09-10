@@ -107,17 +107,3 @@ input, select, textarea {
     opacity: 0;
   }
 }
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .ion-card {
-    background-color: #1e1e1e;
-    color: #fff;
-  }
-
-  input, select, textarea {
-    background-color: #2d2d2d;
-    color: #fff;
-    border-color: #444;
-  }
-}

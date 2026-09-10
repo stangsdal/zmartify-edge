@@ -1,12 +1,13 @@
 import { motion } from 'framer-motion';
 import { IonIcon } from '@ionic/react';
-import { batteryFullOutline, ellipsisVerticalOutline, wifiOutline } from 'ionicons/icons';
+import { batteryFullOutline, ellipsisVerticalOutline, flameOutline, wifiOutline } from 'ionicons/icons';
 import { TemperatureBadge } from './TemperatureBadge';
 import { MobileZone } from '../api/mobile';
 import { displaySetpointMode, HvacZoneMode } from '../utils/hvacMode';
 
 interface RoomCardProps {
   zone: MobileZone;
+  controllerLabel?: string;
   onOpen: () => void;
   onHistory: () => void;
   onRename: () => void;
@@ -29,9 +30,14 @@ function rssiQuality(zone: MobileZone): number | null {
   return 0;
 }
 
-export function RoomCard({ zone, onOpen, onHistory, onRename, onAdvancedSettings, onSetpointChange, onModeChange, canOperate, canConfigure }: RoomCardProps) {
+export function RoomCard({ zone, controllerLabel, onOpen, onHistory, onRename, onAdvancedSettings, onSetpointChange, onModeChange, canOperate, canConfigure }: RoomCardProps) {
   const zoneKey = zone.zone_key || `zone-${zone.zone_id}`;
-  const displayName = zone.name && zone.name !== zoneKey ? zone.name : zoneKey;
+  const hasDescriptiveName = Boolean(zone.name && zone.name !== zoneKey);
+  const displayName = hasDescriptiveName ? zone.name! : [controllerLabel, zoneKey].filter(Boolean).join(' ');
+  const channelIds = zone.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone.controlled_element_ids;
+  const displayLabel = !hasDescriptiveName && channelIds?.length
+    ? `${displayName} [${channelIds.join(',')}]`
+    : displayName;
   const mode = displaySetpointMode(zone.setpoint_mode);
   const signalQuality = rssiQuality(zone);
   const signalLabel = signalQuality === null ? 'Signal unavailable' : `Signal quality ${signalQuality} of 4`;
@@ -44,15 +50,9 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onAdvancedSettings
       whileHover={{ y: -2 }}
       className="thermostat-card thermostat-card--gunmalmg thermostat-card--overview w-full text-left"
     >
-      <div className="w-full text-left flex items-start justify-between gap-3">
-        <div>
-          <p className="text-base font-semibold">
-            {displayName}{(zone.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone.controlled_element_ids)?.length
-              ? ` [${(zone.assigned_channel_ids?.length ? zone.assigned_channel_ids : zone.controlled_element_ids)?.join(',')}]`
-              : ''}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="w-full text-left flex items-center justify-between gap-2">
+        <p className="thermostat-card__title text-base font-semibold" title={displayLabel}>{displayLabel}</p>
+        <div className="flex shrink-0 items-center gap-2">
           <div className="thermostat-card__overview-status">
             <div className="thermostat-card__connection" title={signalLabel} aria-label={signalLabel}>
               <IonIcon icon={wifiOutline} aria-hidden="true" />
@@ -60,9 +60,13 @@ export function RoomCard({ zone, onOpen, onHistory, onRename, onAdvancedSettings
                 {[1, 2, 3, 4].map((level) => <i key={level} className={signalQuality !== null && level <= signalQuality ? 'is-active' : ''} />)}
               </span>
             </div>
-            <div className="thermostat-card__signal" aria-label={zone.demand === true ? 'Heating on' : 'Heating off'}>
-              <span className={zone.demand === true ? 'is-active' : ''} />{zone.demand === true ? 'ON' : 'OFF'}
-            </div>
+            <span
+              className={`thermostat-card__heat-status ${zone.demand === true ? 'is-active' : ''}`}
+              aria-label={zone.demand === true ? 'Heating on' : 'Heating off'}
+              title={zone.demand === true ? 'Heating on' : 'Heating off'}
+            >
+              <IonIcon icon={flameOutline} aria-hidden="true" />
+            </span>
           </div>
           {typeof zone.battery_percent === 'number' ? (
             <span

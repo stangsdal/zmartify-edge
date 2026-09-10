@@ -136,7 +136,6 @@ def upsert_hvac_element_state(device_external_id: str, element: dict[str, Any], 
              json.dumps(element.get("assigned_channel_ids") or [], separators=(",", ":")), source_timestamp, now),
         )
 
-
 def _find_pending_setpoint_command_id(
     conn: Any,
     *,
@@ -169,7 +168,6 @@ def _find_pending_setpoint_command_id(
         if command_id and _floats_close(requested, confirmed_target_c):
             return str(command_id)
     return None
-
 
 def _setpoint_command_timeout_ms() -> int:
     raw = os.getenv("ZMART_EDGE_SETPOINT_PENDING_TIMEOUT_S", "45").strip()
@@ -1333,6 +1331,7 @@ def ingest_device_twin_snapshot(
             rssi_element_dbm=zone.get("rssi_element_dbm"),
             rssi_control_unit_dbm=zone.get("rssi_control_unit_dbm"),
             floor_temperature_c=zone.get("floor_temperature_c"),
+            floor_temperature_provided="floor_temperature_c" in zone,
             configuration=zone.get("configuration"),
             setpoint_profiles=(
                 zone["setpoint_profiles"]
@@ -1912,6 +1911,7 @@ def upsert_zone_state(
     rssi_element_dbm: float | None = None,
     rssi_control_unit_dbm: float | None = None,
     floor_temperature_c: float | None = None,
+    floor_temperature_provided: bool = False,
     configuration: dict[str, float] | None = None,
     setpoint_profiles: dict[str, float] | None = None,
 ) -> dict[str, Any]:
@@ -1934,7 +1934,11 @@ def upsert_zone_state(
         persisted_fault = row["fault"] if fault is None and row is not None else fault
         persisted_rssi_element_dbm = rssi_element_dbm if rssi_element_dbm is not None else (row["rssi_element_dbm"] if row is not None else None)
         persisted_rssi_control_unit_dbm = rssi_control_unit_dbm if rssi_control_unit_dbm is not None else (row["rssi_control_unit_dbm"] if row is not None else None)
-        persisted_floor_temperature_c = floor_temperature_c if floor_temperature_c is not None else (row["floor_temperature_c"] if row is not None else None)
+        persisted_floor_temperature_c = (
+            floor_temperature_c
+            if floor_temperature_provided or floor_temperature_c is not None
+            else (row["floor_temperature_c"] if row is not None else None)
+        )
         persisted_configuration = json.dumps(configuration, separators=(",", ":")) if configuration is not None else (row["configuration_json"] if row is not None else None)
         if setpoint_profiles is not None:
             existing_profiles = json.loads(row["setpoint_profiles_json"] or "{}") if row is not None and row["setpoint_profiles_json"] else {}

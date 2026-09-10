@@ -1,0 +1,16 @@
+ALTER TABLE nilan_hvac_state ADD COLUMN run_actual INTEGER;
+ALTER TABLE nilan_hvac_state ADD COLUMN mode_actual INTEGER;
+ALTER TABLE nilan_hvac_state ADD COLUMN bypass_open INTEGER;
+ALTER TABLE nilan_hvac_state ADD COLUMN bypass_close INTEGER;
+ALTER TABLE nilan_hvac_state ADD COLUMN t1_intake_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN t2_inlet_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN t3_exhaust_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN t4_outlet_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN t7_inlet_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN t8_outdoor_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN t9_heater_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN controller_board_temperature_c REAL;
+ALTER TABLE nilan_hvac_state ADD COLUMN bus_version INTEGER;
+ALTER TABLE nilan_hvac_state ADD COLUMN app_version_major TEXT;
+ALTER TABLE nilan_hvac_state ADD COLUMN app_version_minor TEXT;
+ALTER TABLE nilan_hvac_state ADD COLUMN app_version_release TEXT;

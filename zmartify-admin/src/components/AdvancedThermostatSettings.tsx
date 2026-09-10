@@ -75,8 +75,15 @@ export function AdvancedThermostatSettings({ zone, zoneRef, isOpen, onDismiss, o
         if (!Number.isFinite(parsed)) throw new Error(`${key} must be a number`);
         return parsed;
       };
+      const hasFloorSensor = zone.floor_temperature_c != null;
+      const configurationKeys = [
+        'min_temperature_c',
+        'max_temperature_c',
+        'hysteresis_c',
+        ...(hasFloorSensor ? ['floor_min_temperature_c', 'floor_max_temperature_c'] : []),
+      ];
       const configuration = Object.fromEntries(
-        ['min_temperature_c', 'max_temperature_c', 'floor_min_temperature_c', 'floor_max_temperature_c', 'hysteresis_c']
+        configurationKeys
           .filter((key) => values[key] !== initialValues[key])
           .map((key) => [key, numeric(key)])
           .filter(([, value]) => value !== undefined),

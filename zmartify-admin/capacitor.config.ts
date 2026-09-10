@@ -1,12 +1,12 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.hvacgateway.admin',
-  appName: 'HVAC Gateway Admin',
+  appId: 'com.zmartify.hvac',
+  appName: 'Zmartify HVAC',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    iosScheme: 'https',
+    iosScheme: 'capacitor',
   },
   plugins: {
     SplashScreen: {

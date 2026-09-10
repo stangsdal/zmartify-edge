@@ -315,7 +315,7 @@ export function SitesPage() {
                   <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
                     Name
                     <input
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm normal-case tracking-normal"
                       value={(siteDrafts[site.id] || { name: site.name, address: site.address || '' }).name}
                       onChange={(event) => updateSiteDraft(site.id, { name: event.target.value })}
                     />
@@ -323,7 +323,7 @@ export function SitesPage() {
                   <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
                     Address
                     <input
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm normal-case tracking-normal"
                       value={(siteDrafts[site.id] || { name: site.name, address: site.address || '' }).address}
                       onChange={(event) => updateSiteDraft(site.id, { address: event.target.value })}
                       placeholder="No address set"

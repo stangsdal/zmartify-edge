@@ -1,10 +1,22 @@
 {
-  "name": "HVAC Admin",
-  "short_name": "HVAC",
+  "name": "Zmartify HVAC",
+  "short_name": "Zmartify",
   "start_url": "/app/",
   "scope": "/app/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#ffffff",
-  "theme_color": "#1976d2"
+  "background_color": "#f5f8fa",
+  "theme_color": "#0e3449",
+  "icons": [
+    {
+      "src": "brand/zmartify-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "brand/zmartify-app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

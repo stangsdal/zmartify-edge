@@ -18,6 +18,7 @@ class NilanCommandIn(BaseModel):
     command: Literal[
         "ventilation", "inlet_speed", "exhaust_speed", "run_set", "mode_set",
         "vent_set", "temp_set", "service_mode", "service_pct",
+        "filter_interval", "filter_reset",
     ]
     value: int
 

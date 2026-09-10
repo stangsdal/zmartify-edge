@@ -12,7 +12,7 @@ export function ProfilePage() {
   const [error, setError] = useState('');
 
   const logout = async () => {
-    apiClient.clearAuthToken();
+    await apiClient.clearAuthToken();
     try {
       await authApi.logout();
     } catch {

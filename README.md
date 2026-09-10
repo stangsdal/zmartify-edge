@@ -1,6 +1,6 @@
 # zmartify-edge
 
-Edge control-plane repository for Zmartify HVAC.
+Edge control-plane repository for Zmartify HVAC and irrigation.
 
 This repository contains:
 - Public Edge API (FastAPI)
@@ -8,6 +8,8 @@ This repository contains:
 - PostgreSQL/TimescaleDB runtime storage
 - MQTT broker configuration
 - Docker Compose deployment setup
+- Versioned firmware catalog with OTA and USB recovery artifacts
+- Ionic web, iOS, and Android application targets
 
 ## Repository Structure
 
@@ -18,6 +20,20 @@ This repository contains:
 - scripts/backup_edge_db.sh: PostgreSQL backup and restore-drill helper
 - docs/: operations and setup guides
 - docker-compose.yml: production-oriented service orchestration
+
+## Current Platform Capabilities
+
+- Site-scoped roles and product access for HVAC and irrigation installations.
+- MQTT v2 reported-state ingest, command outcomes, retained state, and enforced
+	JSON contracts.
+- Controller fleet management, onboarding, online status, and catalog-only OTA
+	staging from the admin application.
+- AHC9000 firmware `0.3.54` and Nilan CTS602 firmware `0.3.7` in the public
+	firmware catalog, including immutable OTA and USB recovery artifacts.
+- Responsive Ionic application with explicit light/dark theme handling and
+	Capacitor packaging for iOS and Android.
+- PostgreSQL/TimescaleDB production storage with SQLite retained for local
+	development and tests.
 
 ## Requirements
 
@@ -60,6 +76,25 @@ docker compose up -d --build
 curl -k https://localhost/health
 curl -k https://localhost/health/ready
 curl -k https://localhost/registry/status
+```
+
+## Local Validation
+
+Frontend:
+
+```bash
+cd zmartify-admin
+npm install
+npm test
+npm run lint
+npm run build
+```
+
+Backend:
+
+```bash
+cd zmartify-edge-api
+PYTHONPATH=. ../.venv/bin/pytest -q
 ```
 
 ## Core Environment Variables

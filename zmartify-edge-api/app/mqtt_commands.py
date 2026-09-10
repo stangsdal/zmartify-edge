@@ -326,6 +326,8 @@ def publish_nilan_command(device_id: str, command: str, value: int) -> dict:
         "temp_set": ("commands/hvac/temp-set", "hvac.set_temperature", "temp_set", 0, 100),
         "service_mode": ("commands/hvac/service-mode", "hvac.set_service_mode", "service_mode", 0, 8),
         "service_pct": ("commands/hvac/service-pct", "hvac.set_service_pct", "service_pct", 0, 100),
+        "filter_interval": ("commands/hvac/filter-interval", "hvac.set_filter_interval", "filter_interval_days", 183, 365),
+        "filter_reset": ("commands/hvac/filter-reset", "hvac.reset_filter", "filter_interval_days", 183, 365),
     }
     definition = definitions.get(command)
     if definition is None:
@@ -333,6 +335,8 @@ def publish_nilan_command(device_id: str, command: str, value: int) -> dict:
     topic_suffix, command_type, parameter_name, minimum, maximum = definition
     if value < minimum or value > maximum:
         raise MqttCommandError(f"{command} must be between {minimum} and {maximum}")
+    if command in {"filter_interval", "filter_reset"} and value not in {183, 274, 365}:
+        raise MqttCommandError(f"{command} must be one of 183, 274 or 365")
     command_id = f"cmd-{uuid.uuid4().hex[:16]}"
     # Nilan firmware consumes the compact command shape directly from these topics.
     payload = json.dumps(

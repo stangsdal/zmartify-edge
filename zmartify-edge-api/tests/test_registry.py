@@ -85,6 +85,28 @@ def test_domain_site_device_crud(monkeypatch, tmp_path):
     assert len(list_domains()) == 0
 
 
+def test_list_devices_includes_connectivity_state(monkeypatch, tmp_path):
+    _set_db(monkeypatch, tmp_path)
+    online_device = create_device(
+        device_id="ahc9000-online", display_name="Online", mac=None, firmware_version="1.0.0"
+    )
+    create_device(
+        device_id="ahc9000-unknown", display_name="Unknown", mac=None, firmware_version="1.0.0"
+    )
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO device_state(device_id, online, mqtt_connected) VALUES (?, ?, ?)",
+            (online_device["id"], 1, 1),
+        )
+
+    devices = {device["device_id"]: device for device in list_devices()}
+    assert devices["ahc9000-online"]["online"] == 1
+    assert devices["ahc9000-online"]["mqtt_connected"] == 1
+    assert devices["ahc9000-unknown"]["online"] is None
+    assert devices["ahc9000-unknown"]["mqtt_connected"] is None
+
+
 def test_conflicts_and_not_found(monkeypatch, tmp_path):
     _set_db(monkeypatch, tmp_path)
 

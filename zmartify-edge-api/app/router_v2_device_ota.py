@@ -8,15 +8,81 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
 
 from app.auth import AuthError, AuthenticatedUser, audit_action
-from app.device_onboarding import DeviceOnboardingError, push_remote_firmware, trigger_remote_reboot
 from app.mqtt_commands import MqttCommandError, publish_device_ota_check, publish_irrigation_command
 from app.permissions import PRODUCT_TYPES, require_global_admin, require_site_permission
 from app.registry import RegistryNotFoundError, get_device_admin_token, get_device_onboarding_context
-from app.schemas import DeviceOtaOut, DeviceOtaPollOut, DeviceOtaStageOut
+from app.schemas import DeviceOtaPollOut, DeviceOtaStageOut
 
 _REQUIRED_PUBLIC_EDGE_URL = "https://api.zmartify.dk"
+
+
+class CatalogOtaStageIn(BaseModel):
+    catalog_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    version: str = Field(min_length=5, max_length=64, pattern=r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
+    force: bool = False
+
+
+def _firmware_catalog_root() -> Path:
+    configured = os.getenv("ZMART_EDGE_FIRMWARE_CATALOG_DIR", "").strip()
+    candidates = [
+        Path(configured) if configured else None,
+        Path("/zmartify-admin/dist/firmware"),
+        Path(__file__).resolve().parents[2] / "zmartify-admin" / "public" / "firmware",
+    ]
+    for candidate in candidates:
+        if candidate is not None and (candidate / "catalog.json").is_file():
+            return candidate.resolve()
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="firmware catalog is unavailable")
+
+
+def _catalog_child(root: Path, relative_path: str, label: str) -> Path:
+    candidate = (root / relative_path).resolve()
+    if root not in candidate.parents or not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid catalog {label}")
+    return candidate
+
+
+def _load_catalog_ota(catalog_id: str, requested_version: str, device: dict) -> tuple[bytes, str, str]:
+    root = _firmware_catalog_root()
+    try:
+        catalog = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="firmware catalog is invalid") from exc
+
+    controller = next((item for item in catalog.get("controllers", []) if item.get("id") == catalog_id), None)
+    if controller is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="firmware catalog release not found")
+
+    patterns = controller.get("device_id_patterns") or [catalog_id]
+    identity = " ".join(str(device.get(key) or "") for key in ("device_id", "display_name", "device_type", "product_type")).lower()
+    if not any(str(pattern).lower() in identity for pattern in patterns):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware release is incompatible with this controller")
+
+    releases_path = _catalog_child(root, str(controller.get("releases") or ""), "release index")
+    try:
+        release_index = json.loads(releases_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="firmware release index is invalid") from exc
+    release = next((item for item in release_index.get("releases", []) if item.get("version") == requested_version), None)
+    if release is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="firmware catalog version not found")
+    version = str(release.get("version") or "").strip()
+    ota = release.get("ota")
+    if not isinstance(ota, dict):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="catalog release has no OTA artifact")
+    expected_sha256 = str(ota.get("sha256") or "").lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="firmware catalog OTA checksum is invalid")
+
+    ota_path = _catalog_child(releases_path.parent, str(ota.get("path") or ""), "OTA artifact")
+    firmware_bytes = ota_path.read_bytes()
+    actual_sha256 = hashlib.sha256(firmware_bytes).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="firmware catalog OTA checksum mismatch")
+    return firmware_bytes, version, expected_sha256
 
 
 def _ota_stage_root() -> Path:
@@ -96,13 +162,6 @@ def _version_parts(value: str | None) -> tuple[int, int, int] | None:
     return tuple((numbers + [0, 0, 0])[:3])
 
 
-def _version_from_filename(filename: str | None) -> str | None:
-    """Extract the release version from the uploaded artifact name."""
-    name = Path(str(filename or "")).name
-    match = re.search(r"(?:^|[-_])v?(\d+\.\d+\.\d+)(?:[-_.]|$)", name, flags=re.IGNORECASE)
-    return match.group(1) if match else None
-
-
 def create_device_ota_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-device-ota"])
 
@@ -126,93 +185,43 @@ def create_device_ota_v2_router() -> APIRouter:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         return device
 
-    @router.post("/devices/{device_id}/ota", response_model=DeviceOtaOut)
-    async def v2_device_ota(device_id: str, request: Request, reboot: bool = False) -> dict:
+    @router.post("/devices/{device_id}/ota")
+    def v2_device_ota_upload_disabled(device_id: str, request: Request) -> None:
+        _ = require_device_configure(device_id, request)
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="firmware upload is disabled; stage an exact firmware catalog release",
+        )
+
+    @router.post("/devices/{device_id}/ota/stage")
+    def v2_device_ota_stage_upload_disabled(device_id: str, request: Request) -> None:
+        _ = require_device_configure(device_id, request)
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="firmware upload is disabled; stage an exact firmware catalog release",
+        )
+
+    @router.post("/devices/{device_id}/ota/stage-catalog", response_model=DeviceOtaStageOut)
+    def v2_device_ota_stage_catalog(device_id: str, payload: CatalogOtaStageIn, request: Request) -> dict:
         try:
             device = require_device_configure(device_id, request)
-            local_url = device.get("local_url")
-            if not local_url:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device local_url not set")
-
-            firmware_bytes = await request.body()
-            if not firmware_bytes:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware payload is empty")
-
-            ota_response = push_remote_firmware(local_url, firmware_bytes)
-
-            reboot_triggered = False
-            reboot_response = None
-            reboot_error = None
-            if reboot:
-                try:
-                    reboot_response = trigger_remote_reboot(local_url)
-                    reboot_triggered = bool(reboot_response.get("ok", True))
-                except DeviceOnboardingError as exc:
-                    reboot_error = str(exc)
-
-            written_bytes = None
-            if isinstance(ota_response, dict):
-                raw_written = ota_response.get("written_bytes")
-                if isinstance(raw_written, int):
-                    written_bytes = raw_written
-
-            audit_action(
-                actor_user_id=request.state.auth_user.user_id,
-                action="device_ota",
-                resource_type="device",
-                resource_id=device_id,
-                metadata={
-                    "base_url": local_url,
-                    "reboot": reboot,
-                    "payload_bytes": len(firmware_bytes),
-                    "written_bytes": written_bytes,
-                    "reboot_error": reboot_error,
-                },
+            firmware_bytes, version, catalog_sha256 = _load_catalog_ota(payload.catalog_id, payload.version, device)
+            staged = _ota_save_stage(
+                device_id,
+                firmware_bytes,
+                version=version,
+                force=payload.force,
+                notes=f"Firmware catalog release {payload.catalog_id} {version}",
             )
-
-            return {
-                "device_id": device_id,
-                "local_url": local_url,
-                "ota_response": ota_response,
-                "written_bytes": written_bytes,
-                "reboot_requested": reboot,
-                "reboot_triggered": reboot_triggered,
-                "reboot_response": reboot_response,
-                "reboot_error": reboot_error,
-            }
-        except RegistryNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        except DeviceOnboardingError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    @router.post("/devices/{device_id}/ota/stage", response_model=DeviceOtaStageOut)
-    async def v2_device_ota_stage(
-        device_id: str,
-        request: Request,
-        version: str | None = None,
-        force: bool = False,
-        notes: str | None = None,
-    ) -> dict:
-        try:
-            _ = require_device_configure(device_id, request)
-            firmware_bytes = await request.body()
-            if not firmware_bytes:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware payload is empty")
-
-            filename_version = _version_from_filename(request.headers.get("x-firmware-filename"))
-            resolved_version = filename_version or (version.strip() if version else None)
-            if not resolved_version or _version_parts(resolved_version) is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware version must be present in the filename, e.g. zmartify-hvac-ahc9000-0.3.12.bin")
-            if version and filename_version and _version_parts(version) != _version_parts(filename_version):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="firmware version does not match filename")
-
-            staged = _ota_save_stage(device_id, firmware_bytes, version=resolved_version, force=force, notes=notes)
+            if staged["sha256"] != catalog_sha256:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="staged firmware checksum mismatch")
             audit_action(
                 actor_user_id=request.state.auth_user.user_id,
-                action="stage_device_ota",
+                action="stage_catalog_device_ota",
                 resource_type="device",
                 resource_id=device_id,
                 metadata={
+                    "catalog_id": payload.catalog_id,
                     "version": staged["version"],
                     "sha256": staged["sha256"],
                     "size_bytes": staged["size_bytes"],

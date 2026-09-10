@@ -106,6 +106,8 @@ class DeviceOut(BaseModel):
     integration_mode: str
     created_at: str
     last_seen_at: str | None
+    online: bool | None = None
+    mqtt_connected: bool | None = None
 
 
 class DeviceDiscoverIn(BaseModel):

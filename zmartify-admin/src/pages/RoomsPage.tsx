@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { IonContent, IonPage, useIonViewWillLeave } from '@ionic/react';
+import { IonContent, IonIcon, IonPage, useIonViewWillLeave } from '@ionic/react';
+import { cloudOfflineOutline, flameOutline } from 'ionicons/icons';
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
@@ -9,13 +10,16 @@ import { mobileApi, MobileSiteDevice, MobileZone } from '../api/mobile';
 import { NilanControlPanel } from '../components/NilanControlPanel';
 import { apiClient } from '../api/client';
 import { useAccess } from '../auth/AccessContext';
-import { HvacZoneMode, SETPOINT_MODE_BY_NAME } from '../utils/hvacMode';
+import { HvacZoneMode, mostCommonHvacMode, setpointForMode, ZONE_MODE_BY_NAME } from '../utils/hvacMode';
+import { reconcileDesiredSetpoint } from '../utils/optimisticSetpoint';
 
 interface RoomWithRef extends MobileZone {
   zone_ref: string;
+  controller_number: number;
 }
 
 const roomIdentity = (deviceId: string, zoneId: number) => `${deviceId}:${zoneId}`;
+const HVAC_ZONE_MODES: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'HOLIDAY', 'STANDBY', 'PARTY'];
 
 export function RoomsPage() {
   const { context, selectedSiteId, selectSite, can } = useAccess();
@@ -23,6 +27,8 @@ export function RoomsPage() {
   const [rooms, setRooms] = useState<RoomWithRef[]>([]);
   const [siteDevices, setSiteDevices] = useState<MobileSiteDevice[]>([]);
   const [advancedRoom, setAdvancedRoom] = useState<RoomWithRef | null>(null);
+  const [bulkModeBusy, setBulkModeBusy] = useState(false);
+  const [bulkModeError, setBulkModeError] = useState('');
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
   const socketPingTimersRef = useRef<Map<string, number>>(new Map());
   const socketReconnectTimersRef = useRef<Map<string, number>>(new Map());
@@ -70,15 +76,72 @@ export function RoomsPage() {
 
   const handleModeChange = async (room: RoomWithRef, mode: HvacZoneMode) => {
     if (!room.zone_ref) return;
-    const requestedMode = SETPOINT_MODE_BY_NAME[mode];
+    const requestedMode = ZONE_MODE_BY_NAME[mode];
+    const profileTarget = setpointForMode(room.setpoint_profiles, mode);
     desiredModesRef.current.set(room.zone_ref, requestedMode);
-    setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? { ...r, setpoint_mode: requestedMode } : r)));
+    if (profileTarget !== undefined) {
+      desiredSetpointsRef.current.set(room.zone_ref, profileTarget);
+    }
+    setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? {
+      ...r,
+      setpoint_mode: requestedMode,
+      target_temperature_c: profileTarget ?? r.target_temperature_c,
+    } : r)));
     try {
       await mobileApi.setZoneMode(room.zone_ref, requestedMode);
     } catch (error) {
       desiredModesRef.current.delete(room.zone_ref);
+      desiredSetpointsRef.current.delete(room.zone_ref);
+      setRooms((prev) => prev.map((r) => (r.zone_ref === room.zone_ref ? {
+        ...r,
+        setpoint_mode: room.setpoint_mode,
+        target_temperature_c: room.target_temperature_c,
+      } : r)));
       console.error('mode change failed', error);
     }
+  };
+
+  const handleAllModesChange = async (mode: HvacZoneMode) => {
+    const affectedRooms = sortedRooms.filter((room) => Boolean(room.zone_ref));
+    if (!affectedRooms.length) return;
+
+    const requestedMode = ZONE_MODE_BY_NAME[mode];
+    const previousRooms = new Map(affectedRooms.map((room) => [room.zone_ref, room]));
+    setBulkModeBusy(true);
+    setBulkModeError('');
+    for (const room of affectedRooms) {
+      desiredModesRef.current.set(room.zone_ref, requestedMode);
+      const profileTarget = setpointForMode(room.setpoint_profiles, mode);
+      if (profileTarget !== undefined) desiredSetpointsRef.current.set(room.zone_ref, profileTarget);
+    }
+    setRooms((previous) => previous.map((room) => {
+      if (!previousRooms.has(room.zone_ref)) return room;
+      const profileTarget = setpointForMode(room.setpoint_profiles, mode);
+      return {
+        ...room,
+        setpoint_mode: requestedMode,
+        target_temperature_c: profileTarget ?? room.target_temperature_c,
+      };
+    }));
+
+    const results = await Promise.allSettled(
+      affectedRooms.map((room) => mobileApi.setZoneMode(room.zone_ref, requestedMode))
+    );
+    const failedRefs = new Set(
+      results.flatMap((result, index) => result.status === 'rejected' ? [affectedRooms[index].zone_ref] : [])
+    );
+    if (failedRefs.size) {
+      for (const zoneRef of failedRefs) {
+        desiredModesRef.current.delete(zoneRef);
+        desiredSetpointsRef.current.delete(zoneRef);
+      }
+      setRooms((previous) => previous.map((room) => {
+        const snapshot = failedRefs.has(room.zone_ref) ? previousRooms.get(room.zone_ref) : undefined;
+        return snapshot ? { ...room, setpoint_mode: snapshot.setpoint_mode, target_temperature_c: snapshot.target_temperature_c } : room;
+      }));
+      setBulkModeError(`${failedRefs.size} of ${affectedRooms.length} zones could not be updated.`);
+    }
+    setBulkModeBusy(false);
   };
 
   const handleRename = async (room: RoomWithRef) => {
@@ -125,20 +188,11 @@ export function RoomsPage() {
         if (payload?.type === 'zone_update' && payload.zone) {
           const incomingZone = payload.zone as MobileZone;
           const desiredTarget = desiredSetpointsRef.current.get(zoneRef);
-          const incomingTarget = incomingZone.target_temperature_c;
-          const incomingRequestedTarget = incomingZone.setpoint_requested_target_c;
-          const commandState = String(incomingZone.setpoint_command_state || '');
-          const confirmsDesired = desiredTarget !== undefined && (
-            (commandState === 'confirmed' && typeof incomingTarget === 'number' && Math.abs(incomingTarget - desiredTarget) < 0.01)
-            || (incomingZone.setpoint_pending === true && typeof incomingRequestedTarget === 'number' && Math.abs(incomingRequestedTarget - desiredTarget) < 0.01)
-          );
-          const commandFailed = commandState.startsWith('failed');
-          if (confirmsDesired || commandFailed) {
+          const reconciledSetpoint = reconcileDesiredSetpoint(incomingZone, desiredTarget);
+          if (reconciledSetpoint.settled) {
             desiredSetpointsRef.current.delete(zoneRef);
           }
-          const nextZone = desiredTarget !== undefined && !confirmsDesired && !commandFailed
-            ? { ...incomingZone, target_temperature_c: desiredTarget }
-            : incomingZone;
+          const nextZone = reconciledSetpoint.zone;
           const desiredConfiguration = desiredConfigurationsRef.current.get(zoneRef);
           const desiredMode = desiredModesRef.current.get(zoneRef);
           if (desiredMode !== undefined && nextZone.setpoint_mode === desiredMode) {
@@ -192,20 +246,26 @@ export function RoomsPage() {
         mobileApi.getSite(selectedSite.uuid),
       ]);
       const uniqueRooms = new Map<string, RoomWithRef>();
-      for (const device of siteZones.devices || []) {
+      for (const [deviceIndex, device] of (siteZones.devices || []).entries()) {
         for (const zone of device.zones || []) {
           const identity = roomIdentity(device.device_id, zone.zone_id);
           if (!uniqueRooms.has(identity)) {
             const zoneRef = zone.zone_uuid || identity;
+            const desiredTarget = desiredSetpointsRef.current.get(zoneRef);
+            const reconciledSetpoint = reconcileDesiredSetpoint(zone, desiredTarget);
+            if (reconciledSetpoint.settled) {
+              desiredSetpointsRef.current.delete(zoneRef);
+            }
             const desiredConfiguration = desiredConfigurationsRef.current.get(zoneRef);
             const desiredMode = desiredModesRef.current.get(zoneRef);
             if (desiredMode !== undefined && zone.setpoint_mode === desiredMode) {
               desiredModesRef.current.delete(zoneRef);
             }
             uniqueRooms.set(identity, {
-              ...zone,
-              device_id: zone.device_id || device.device_id,
+              ...reconciledSetpoint.zone,
+              device_id: reconciledSetpoint.zone.device_id || device.device_id,
               zone_ref: zoneRef,
+              controller_number: deviceIndex + 1,
               setpoint_mode: desiredMode ?? zone.setpoint_mode,
               configuration: desiredConfiguration || zone.configuration,
             });
@@ -285,7 +345,9 @@ export function RoomsPage() {
   }, []);
 
   const sortedRooms = useMemo(() => {
-    return [...rooms].sort((a, b) => a.zone_id - b.zone_id);
+    return [...rooms].sort((a, b) => (
+      a.controller_number - b.controller_number || a.zone_id - b.zone_id
+    ));
   }, [rooms]);
 
   const avgTemp = useMemo(() => {
@@ -302,6 +364,10 @@ export function RoomsPage() {
   );
 
   const offlineRooms = useMemo(() => sortedRooms.filter((room) => room.online === false).length, [sortedRooms]);
+  const siteMode = useMemo(
+    () => mostCommonHvacMode(sortedRooms.map((room) => room.setpoint_mode)),
+    [sortedRooms]
+  );
   const canOperate = selectedSiteId != null && can(selectedSiteId, 'hvac', 'operate');
   const canConfigure = selectedSiteId != null && can(selectedSiteId, 'hvac', 'configure');
   const site = context?.sites.find((candidate) => candidate.id === selectedSiteId);
@@ -321,33 +387,49 @@ export function RoomsPage() {
             onChange={(siteId) => selectSite(Number(siteId))}
           />
 
-          <section className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--hvac">
-              <p className="text-xs uppercase tracking-wide text-muted">Average indoor</p>
-              <p className="text-2xl font-bold mt-1">{avgTemp === null ? '--' : `${avgTemp.toFixed(1)}°C`}</p>
+          <section className="hvac-summary-card app-surface shadow-soft">
+            <div>
+              <p className="text-xs uppercase text-muted">Average indoor</p>
+              <p className="hvac-summary-card__temperature">{avgTemp === null ? '--' : `${avgTemp.toFixed(1)}°C`}</p>
             </div>
-            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--irrigation">
-              <p className="text-xs uppercase tracking-wide text-muted">Heating now</p>
-              <p className="text-2xl font-bold mt-1">{activeRooms}</p>
-            </div>
-            <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
-              <p className="text-xs uppercase tracking-wide text-muted">Offline zones</p>
-              <p className="text-2xl font-bold mt-1">{offlineRooms}</p>
+            <div className="hvac-summary-card__controls">
+              <label className="hvac-summary-card__mode">
+                <span>All zones</span>
+                <select
+                  aria-label="Mode for all zones"
+                  value={siteMode}
+                  disabled={!canOperate || bulkModeBusy || !sortedRooms.length}
+                  onChange={(event) => void handleAllModesChange(event.target.value as HvacZoneMode)}
+                >
+                  {HVAC_ZONE_MODES.map((mode) => (
+                    <option key={mode} value={mode}>{mode === 'KOMFORT' ? 'Comfort' : mode}</option>
+                  ))}
+                </select>
+                {bulkModeError ? <small role="alert">{bulkModeError}</small> : null}
+              </label>
+              <div className="hvac-summary-card__status">
+                <span className={activeRooms > 0 ? 'is-heating' : ''} title={`${activeRooms} zones heating`}>
+                  <IonIcon icon={flameOutline} aria-hidden="true" />
+                  <strong>{activeRooms}</strong>
+                  <small>heating</small>
+                </span>
+                <span className={offlineRooms > 0 ? 'is-offline' : ''} title={`${offlineRooms} zones offline`}>
+                  <IonIcon icon={cloudOfflineOutline} aria-hidden="true" />
+                  <strong>{offlineRooms}</strong>
+                  <small>offline</small>
+                </span>
+              </div>
             </div>
           </section>
 
           <NilanControlPanel devices={siteDevices} canOperate={canOperate} />
-
-          <div className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
-            <h2 className="text-lg font-semibold">Zones</h2>
-            <p className="text-sm text-muted mt-1">Tap a zone to inspect details, change setpoint and open trend history.</p>
-          </div>
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {sortedRooms.map((room) => (
               <RoomCard
                 key={room.zone_ref}
                 zone={room}
+                controllerLabel={`C${room.controller_number}`}
                 onOpen={() => navigateWithBlur(`${siteBase}/hvac/zones/${encodeURIComponent(room.zone_ref)}`)}
                 onHistory={() => navigateWithBlur(`${siteBase}/hvac/history?zoneRef=${encodeURIComponent(room.zone_ref)}`)}
                 onRename={() => {

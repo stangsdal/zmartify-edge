@@ -69,9 +69,44 @@ def test_canonical_nilan_v2_envelope_is_ingested(monkeypatch, tmp_path: Path):
             "firmware_version": "0.3.0",
             "online": True,
             "mqtt_connected": True,
-            "hvac": {"zones": [], "channels": [], "nilan": {"controller_online": True, "ventilation_level": 3, "co2_ppm": None}},
+            "hvac": {"zones": [], "channels": [], "nilan": {
+                "controller_online": True,
+                "ventilation_level": 3,
+                "run_actual": True,
+                "mode_actual": 3,
+                "bypass_open": True,
+                "bypass_close": False,
+                "t1_intake_c": 8.5,
+                "t2_inlet_c": 17.2,
+                "t3_exhaust_c": 21.4,
+                "t4_outlet_c": 10.1,
+                "t7_inlet_c": 19.8,
+                "t8_outdoor_c": 7.9,
+                "t9_heater_c": 24.6,
+                "controller_board_temperature_c": 31.5,
+                "bus_version": 21,
+                "app_version_major": "02",
+                "app_version_minor": "13",
+                "app_version_release": "04",
+                "co2_ppm": None,
+                "filter_days_remaining": 283,
+                "filter_interval_days": 365,
+            }},
         },
     )
     assert response.status_code == 200
     assert response.json()["nilan"]["applied"] is True
-    assert client.get(f"/api/v2/devices/{device_id}/hvac/nilan", headers=headers).json()["ventilation_level"] == 3
+    state = client.get(f"/api/v2/devices/{device_id}/hvac/nilan", headers=headers).json()
+    assert state["ventilation_level"] == 3
+    assert state["filter_days_remaining"] == 283
+    assert state["filter_interval_days"] == 365
+    assert state["run_actual"] is True
+    assert state["mode_actual"] == 3
+    assert state["bypass_open"] is True
+    assert state["bypass_close"] is False
+    assert state["t1_intake_c"] == 8.5
+    assert state["t7_inlet_c"] == 19.8
+    assert state["t9_heater_c"] == 24.6
+    assert state["controller_board_temperature_c"] == 31.5
+    assert state["bus_version"] == 21
+    assert [state["app_version_major"], state["app_version_minor"], state["app_version_release"]] == ["02", "13", "04"]

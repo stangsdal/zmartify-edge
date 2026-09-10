@@ -17,7 +17,7 @@ interface HistoryChartProps {
 export function HistoryChart({
   title,
   points,
-  color = '#301E96',
+  color = '#164C68',
   mode = 'line',
   smooth = false,
   binary = false,

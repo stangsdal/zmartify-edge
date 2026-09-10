@@ -36,7 +36,7 @@ interface DeviceHealthRow {
 export function SettingsPage() {
   const history = useHistory();
   const { selectedSiteId, selectSite } = useAccess();
-  const [darkMode, setDarkMode] = useState<boolean>(() => localStorage.getItem('theme_mode') === 'dark');
+  const [darkMode, setDarkMode] = useState<boolean>(() => document.body.classList.contains('dark-mode'));
   const [sites, setSites] = useState<Array<{ site_id: string; site_name: string }>>([]);
   const activeSite = selectedSiteId ? String(selectedSiteId) : '';
   const [profileLabel, setProfileLabel] = useState('Unknown');
@@ -170,7 +170,7 @@ export function SettingsPage() {
 
   const logout = async () => {
     // Always clear local session first so logout works even if backend call fails.
-    apiClient.clearAuthToken();
+    await apiClient.clearAuthToken();
     try {
       await authApi.logout();
     } catch {
