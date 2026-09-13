@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "0.3.8",
+      "published_at": "2026-09-12T13:25:11.784Z",
+      "ota": {
+        "path": "zmartify-hvac-nilan-0.3.8.bin",
+        "filename": "zmartify-hvac-nilan-0.3.8.bin",
+        "sha256": "7476ebb6dd75170517fb91a5026fb2af9df5cd35b2c57e49dd465593f25b07d2"
+      },
+      "recovery": {
+        "path": "zmartify-hvac-nilan-0.3.8.factory.bin",
+        "sha256": "c2787f55a4ced3cf37c0cd2ca06ca6c61395fc288808d0c2751647695852dcf5"
+      }
+    },
+    {
       "version": "0.3.7",
       "published_at": "2026-09-10T10:39:44.546Z",
       "ota": {

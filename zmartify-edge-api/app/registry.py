@@ -18,6 +18,19 @@ from app.mqtt_users import (
 _PRODUCT_TYPES = frozenset({"hvac", "irrigation", "weather", "energy"})
 
 
+def _device_type(device_id: str, display_name: str, product_type: str) -> str:
+    identity = f"{device_id} {display_name}".lower().replace("-", "_")
+    if product_type == "hvac":
+        if "nilan" in identity or "cts602" in identity or "comfort_302" in identity:
+            return "hvac_nilan"
+        return "hvac_ahc9000"
+    return {
+        "irrigation": "irrigation_controller",
+        "weather": "weather_station",
+        "energy": "energy_meter",
+    }[product_type]
+
+
 class RegistryNotFoundError(ValueError):
     """Raised when a requested registry resource does not exist."""
 
@@ -344,14 +357,15 @@ def create_device(
     normalized_product_type = product_type.strip().lower()
     if normalized_product_type not in _PRODUCT_TYPES:
         raise RegistryOperationError("unsupported device product type")
+    device_type = _device_type(device_id, display_name, normalized_product_type)
     try:
         with get_connection() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO devices(uuid, device_id, display_name, mac, firmware_version, product_type)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO devices(uuid, device_id, display_name, mac, firmware_version, device_type, product_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (_new_uuid(), device_id, display_name, mac, firmware_version, normalized_product_type),
+                (_new_uuid(), device_id, display_name, mac, firmware_version, device_type, normalized_product_type),
             )
             row = conn.execute(
                 """
@@ -379,13 +393,31 @@ def list_devices() -> list[dict[str, Any]]:
             """
                  SELECT d.id, d.uuid, d.device_id, d.display_name, d.mac, d.firmware_version,
                      d.site_id, d.local_url, d.device_type, d.product_type, d.integration_mode,
-                     d.created_at, d.last_seen_at, ds.online, ds.mqtt_connected
+                     d.created_at, d.last_seen_at, ds.online, ds.mqtt_connected,
+                     s.name AS site_name, domains.name AS domain_name,
+                     u.username AS site_username, u.display_name AS site_user_display_name
             FROM devices d
             LEFT JOIN device_state ds ON ds.device_id = d.id
-            ORDER BY d.id
+            LEFT JOIN sites s ON s.id = d.site_id
+            LEFT JOIN domains ON domains.id = s.domain_id
+            LEFT JOIN site_memberships sm ON sm.site_id = s.id AND sm.status = 'active'
+            LEFT JOIN users u ON u.id = sm.user_id AND u.enabled = 1
+            ORDER BY d.id, u.display_name, u.username
             """
         ).fetchall()
-        return [_row_to_dict(row) or {} for row in rows]
+        devices: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            item = _row_to_dict(row) or {}
+            device_pk_id = int(item["id"])
+            if device_pk_id not in devices:
+                item["site_users"] = []
+                item.pop("site_username", None)
+                item.pop("site_user_display_name", None)
+                devices[device_pk_id] = item
+            user_label = row["site_user_display_name"] or row["site_username"]
+            if user_label and user_label not in devices[device_pk_id]["site_users"]:
+                devices[device_pk_id]["site_users"].append(str(user_label))
+        return list(devices.values())
 
 
 def get_device(device_id: str) -> dict[str, Any]:

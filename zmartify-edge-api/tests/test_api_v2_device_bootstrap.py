@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import uuid
 from pathlib import Path
 
@@ -23,6 +25,48 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     from main import app
 
     return TestClient(app)
+
+
+def test_factory_label_export_only_includes_never_connected_devices(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_FACTORY_PAIRING_KEY", "test-factory-pairing-key-with-at-least-32-bytes")
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+
+    from app.domain_model import upsert_device_state
+    from app.registry import create_device
+
+    pending_id = "zmartify-hvac-ahc9000-aabbccddeeff"
+    connected_id = "zmartify-hvac-ahc9000-112233445566"
+    create_device(
+        device_id=pending_id,
+        display_name="Pending Controller",
+        mac="AA:BB:CC:DD:EE:FF",
+        firmware_version="0.3.55",
+    )
+    create_device(
+        device_id=connected_id,
+        display_name="Connected Controller",
+        mac="11:22:33:44:55:66",
+        firmware_version="0.3.55",
+    )
+    upsert_device_state(connected_id, online=True, mqtt_connected=True, source="test")
+    upsert_device_state(connected_id, online=False, mqtt_connected=False, source="test")
+
+    response = client.get("/api/v2/devices/bootstrap/labels.csv", headers=headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert len(rows) == 1
+    assert rows[0]["device_id"] == pending_id
+    assert rows[0]["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert rows[0]["pairing_code"].count("-") == 3
+    assert rows[0]["pairing_code"] in rows[0]["qr_url"]
+    assert pending_id in rows[0]["qr_url"]
+    assert "test-factory-pairing-key" not in response.text
+
+    repeated = client.get("/api/v2/devices/bootstrap/labels.csv", headers=headers)
+    assert repeated.text == response.text
 
 
 def test_api_v2_device_bootstrap_stage_requires_site_owner(monkeypatch, tmp_path: Path):

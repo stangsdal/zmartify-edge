@@ -19,6 +19,7 @@ import {
 import {
   addOutline,
   cloudUploadOutline,
+  downloadOutline,
   openOutline,
   refreshOutline,
   trashOutline,
@@ -42,6 +43,13 @@ type ControllersPageProps = {
 };
 
 type ControllerView = 'fleet' | 'setup';
+
+type BulkDeployResult = {
+  deviceId: string;
+  displayName: string;
+  ok: boolean;
+  message: string;
+};
 
 const pageSize = 25;
 
@@ -150,6 +158,10 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [releases, setReleases] = useState<FirmwareCatalogRelease[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([]);
+  const [bulkReleaseId, setBulkReleaseId] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResults, setBulkResults] = useState<BulkDeployResult[]>([]);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<ControllerStatusFilter>('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -193,9 +205,82 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
   const currentPage = Math.min(page, pageCount);
   const visibleDevices = paginateControllers(filtered, currentPage, pageSize);
   const selectedDevice = devices.find((device) => device.device_id === selectedDeviceId) || null;
+  const selectedDevices = devices.filter((device) => selectedDeviceIds.includes(device.device_id));
+  const bulkDeployable = releases.filter((release) => (
+    release.otaUrl
+    && release.otaFilename
+    && selectedDevices.every((device) => compatibleReleases(device, [release]).length > 0)
+  ));
+  const selectedBulkRelease = bulkDeployable.find((release) => `${release.id}:${release.version}` === bulkReleaseId)
+    || bulkDeployable[0];
+  const allVisibleSelected = visibleDevices.length > 0
+    && visibleDevices.every((device) => selectedDeviceIds.includes(device.device_id));
   const onlineCount = devices.filter((device) => device.online === true).length;
 
   const resetPage = () => setPage(1);
+
+  const toggleSelectedDevice = (deviceId: string) => {
+    setSelectedDeviceIds((current) => current.includes(deviceId)
+      ? current.filter((id) => id !== deviceId)
+      : [...current, deviceId]);
+    setBulkReleaseId('');
+    setBulkResults([]);
+  };
+
+  const toggleVisibleDevices = () => {
+    const visibleIds = visibleDevices.map((device) => device.device_id);
+    setSelectedDeviceIds((current) => allVisibleSelected
+      ? current.filter((id) => !visibleIds.includes(id))
+      : Array.from(new Set([...current, ...visibleIds])));
+    setBulkReleaseId('');
+    setBulkResults([]);
+  };
+
+  const deploySelected = async () => {
+    if (!selectedBulkRelease || !selectedDevices.length) return;
+    setBulkBusy(true);
+    setBulkResults([]);
+    const results = await Promise.all(selectedDevices.map(async (device): Promise<BulkDeployResult> => {
+      try {
+        await deviceApi.stageCatalogFirmware(device.device_id, selectedBulkRelease.id, selectedBulkRelease.version);
+        const triggered = await deviceApi.triggerFirmwareOta(device.device_id);
+        return {
+          deviceId: device.device_id,
+          displayName: device.display_name,
+          ok: true,
+          message: `Controller poll ${triggered.status}`,
+        };
+      } catch (errorValue) {
+        return {
+          deviceId: device.device_id,
+          displayName: device.display_name,
+          ok: false,
+          message: errorValue instanceof Error ? errorValue.message : String(errorValue),
+        };
+      }
+    }));
+    setBulkResults(results);
+    setBulkBusy(false);
+  };
+
+  const downloadFactoryLabels = async () => {
+    try {
+      setBusy(true);
+      setError('');
+      const csvContent = await deviceApi.exportFactoryLabels();
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'zmartify-device-labels.csv';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (errorValue) {
+      setError(errorValue instanceof Error ? errorValue.message : String(errorValue));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const registerDevice = async () => {
     if (!newDeviceId.trim() || !newDisplayName.trim()) {
@@ -282,9 +367,35 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
                 <button type="button" className="controller-icon-button" onClick={() => { void fetchDevices(); }} title="Refresh controllers">
                   <IonIcon icon={refreshOutline} aria-hidden="true" />
                 </button>
+                <button type="button" className="controller-icon-button" onClick={() => { void downloadFactoryLabels(); }} title="Download labels for never-connected controllers">
+                  <IonIcon icon={downloadOutline} aria-hidden="true" />
+                </button>
               </section>
 
               {error ? <p className="controller-message controller-message--error">{error}</p> : null}
+              {selectedDevices.length ? (
+                <section className="controller-bulk-bar" aria-label="Bulk firmware update">
+                  <div>
+                    <strong>{selectedDevices.length} selected</strong>
+                    <span>Stage and deploy one compatible release to all selected controllers.</span>
+                  </div>
+                  {bulkDeployable.length ? (
+                    <label>Release<select value={selectedBulkRelease ? `${selectedBulkRelease.id}:${selectedBulkRelease.version}` : ''} onChange={(event) => { setBulkReleaseId(event.target.value); setBulkResults([]); }}>
+                      {bulkDeployable.map((release) => <option key={`${release.id}:${release.version}`} value={`${release.id}:${release.version}`}>{release.name} {release.version}</option>)}
+                    </select></label>
+                  ) : <p className="controller-message controller-message--error">No common OTA release matches every selected controller.</p>}
+                  <IonButton size="small" disabled={!selectedBulkRelease || bulkBusy} onClick={() => { void deploySelected(); }}>
+                    <IonIcon slot="start" icon={cloudUploadOutline} />
+                    {bulkBusy ? 'Deploying...' : `Update ${selectedDevices.length}`}
+                  </IonButton>
+                  <button type="button" className="controller-bulk-clear" onClick={() => { setSelectedDeviceIds([]); setBulkResults([]); }}>Clear</button>
+                  {bulkResults.length ? (
+                    <ul className="controller-bulk-results">
+                      {bulkResults.map((result) => <li key={result.deviceId} className={result.ok ? 'is-success' : 'is-error'}><strong>{result.displayName}</strong>: {result.message}</li>)}
+                    </ul>
+                  ) : null}
+                </section>
+              ) : null}
               <div className={`controller-fleet-layout${selectedDevice ? ' has-detail' : ''}`}>
                 <section className="controller-list-panel">
                   {loading ? <div className="controller-loading"><IonSpinner name="crescent" /> Loading controllers...</div> : null}
@@ -292,13 +403,23 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
                   {!loading && visibleDevices.length ? (
                     <div className="controller-table-wrap">
                       <table className="controller-table">
-                        <thead><tr><th>Controller</th><th>Status</th><th>Type</th><th>Site</th><th>Firmware</th></tr></thead>
+                        <thead><tr><th className="controller-select-cell"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleDevices} aria-label="Select all controllers on this page" /></th><th>Controller</th><th>Status</th><th>Type</th><th>Site</th><th>Firmware</th></tr></thead>
                         <tbody>{visibleDevices.map((device) => (
                           <tr key={device.device_id} className={selectedDeviceId === device.device_id ? 'is-selected' : ''} onClick={() => setSelectedDeviceId(device.device_id)}>
+                            <td className="controller-select-cell"><input type="checkbox" checked={selectedDeviceIds.includes(device.device_id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleSelectedDevice(device.device_id)} aria-label={`Select ${device.display_name}`} /></td>
                             <td><strong>{device.display_name}</strong><span>{device.device_id}</span></td>
                             <td><span className={`controller-status ${device.online ? 'is-online' : 'is-offline'}`}>{device.online ? 'Online' : 'Offline'}</span></td>
                             <td>{device.device_type || 'Unknown'}</td>
-                            <td>{device.site_id ?? 'Unassigned'}</td>
+                            <td>{device.site_id == null ? 'Unassigned' : (
+                              <span className="controller-site" tabIndex={0}>
+                                {device.site_id}
+                                <span className="controller-site__tooltip" role="tooltip">
+                                  <span><strong>Site</strong>{device.site_name || 'Unknown'}</span>
+                                  <span><strong>Domain</strong>{device.domain_name || 'Unknown'}</span>
+                                  <span><strong>User</strong>{device.site_users?.length ? device.site_users.join(', ') : 'None assigned'}</span>
+                                </span>
+                              </span>
+                            )}</td>
                             <td>{device.firmware_version || 'Unknown'}</td>
                           </tr>
                         ))}</tbody>

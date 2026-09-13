@@ -1,0 +1,65 @@
+diff --git a/node_modules/@general-galactic/capacitor-esp-idf-provisioning/Package.swift b/node_modules/@general-galactic/capacitor-esp-idf-provisioning/Package.swift
+new file mode 100644
+index 0000000..1651fe8
+--- /dev/null
++++ b/node_modules/@general-galactic/capacitor-esp-idf-provisioning/Package.swift
+@@ -0,0 +1,26 @@
++// swift-tools-version: 5.9
++import PackageDescription
++
++let package = Package(
++    name: "GeneralGalacticCapacitorEspIdfProvisioning",
++    platforms: [.iOS(.v15)],
++    products: [
++        .library(
++            name: "GeneralGalacticCapacitorEspIdfProvisioning",
++            targets: ["EspProvisioningPlugin"])
++    ],
++    dependencies: [
++        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "8.0.0"),
++        .package(url: "https://github.com/espressif/esp-idf-provisioning-ios.git", from: "2.1.2")
++    ],
++    targets: [
++        .target(
++            name: "EspProvisioningPlugin",
++            dependencies: [
++                .product(name: "Capacitor", package: "capacitor-swift-pm"),
++                .product(name: "ESPProvision", package: "esp-idf-provisioning-ios")
++            ],
++            path: "ios/Plugin",
++            exclude: ["EspProvisioningPlugin.h", "EspProvisioningPlugin.m", "Info.plist"])
++    ]
++)
+\ No newline at end of file
+diff --git a/node_modules/@general-galactic/capacitor-esp-idf-provisioning/ios/Plugin/EspProvisioningPlugin.swift b/node_modules/@general-galactic/capacitor-esp-idf-provisioning/ios/Plugin/EspProvisioningPlugin.swift
+index 5026dd8..0420f35 100644
+--- a/node_modules/@general-galactic/capacitor-esp-idf-provisioning/ios/Plugin/EspProvisioningPlugin.swift
++++ b/node_modules/@general-galactic/capacitor-esp-idf-provisioning/ios/Plugin/EspProvisioningPlugin.swift
+@@ -9,7 +9,26 @@ import CoreBluetooth
+  * here: https://capacitorjs.com/docs/plugins/ios
+  */
+ @objc(EspProvisioningPlugin)
+-public class EspProvisioningPlugin: CAPPlugin {
++public class EspProvisioningPlugin: CAPPlugin, CAPBridgedPlugin {
++
++    public let identifier = "EspProvisioningPlugin"
++    public let jsName = "EspProvisioning"
++    public let pluginMethods: [CAPPluginMethod] = [
++        CAPPluginMethod(name: "searchESPDevices", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "connect", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "scanWifiList", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "provision", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "openLocationSettings", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "openBluetoothSettings", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "enableLogging", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "disableLogging", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "sendCustomDataString", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "checkStatus", returnType: CAPPluginReturnPromise),
++    ]
+ 
+     private lazy var implementation = EspProvisioningBLE(self)
+ 

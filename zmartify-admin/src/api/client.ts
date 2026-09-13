@@ -162,7 +162,8 @@ export class ApiClient {
       return null;
     }
 
-    return response.json();
+    const contentType = response.headers.get('content-type') || '';
+    return contentType.includes('application/json') ? response.json() : response.text();
   }
 
   get(endpoint: string): Promise<any> {
@@ -187,6 +188,13 @@ export class ApiClient {
   put(endpoint: string, body?: any): Promise<any> {
     return this.fetch(endpoint, {
       method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  }
+
+  patch(endpoint: string, body?: any): Promise<any> {
+    return this.fetch(endpoint, {
+      method: 'PATCH',
       body: JSON.stringify(body),
     });
   }

@@ -19,11 +19,12 @@ This directory contains the initial backend scaffold for the Raspberry Pi edge m
 ## Local run (dev)
 
 ```bash
-cd edge/zmartify-edge-api
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8080
+cd edge
+brew install python@3.13
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r zmartify-edge-api/requirements-dev.txt
+cd zmartify-edge-api
+PYTHONPATH=. ../.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080
 ```
 
 ## Database configuration

@@ -14,6 +14,7 @@ from app.auth import (
     reset_user_password,
     set_user_enabled,
     set_user_roles,
+    update_user_profile,
 )
 from app.permissions import require_global_admin
 from app.schemas import (
@@ -21,6 +22,7 @@ from app.schemas import (
     UserCreateIn,
     UserOut,
     UserResetPasswordIn,
+    UserProfileUpdateIn,
     UserRoleUpdateIn,
 )
 
@@ -53,6 +55,7 @@ def create_legacy_auth_users_router(require_roles: Callable[[Request, set[str]],
                 password=payload.password,
                 email=payload.email,
                 roles=payload.roles,
+                phone=payload.phone,
             )
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -124,6 +127,21 @@ def create_legacy_auth_users_router(require_roles: Callable[[Request, set[str]],
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @router.patch("/users/{user_id}", response_model=UserOut)
+    def api_update_user(user_id: int, payload: UserProfileUpdateIn, request: Request) -> dict:
+        require_platform_administrator(request)
+        actor = request.state.auth_user
+        try:
+            return update_user_profile(
+                actor_user_id=actor.user_id,
+                user_id=user_id,
+                display_name=payload.display_name,
+                email=payload.email,
+                phone=payload.phone,
+            )
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     @router.get("/admin/audit-log", response_model=list[AuditLogOut])
     def api_audit_log(request: Request, limit: int = 200) -> list[dict]:

@@ -5,12 +5,7 @@ import { AppHeader } from '../components/AppHeader';
 import { AlertCard } from '../components/AlertCard';
 import { notificationsApi } from '../api/notifications';
 import { mobileApi, MobileEvent, subscribeRealtimeTopics } from '../api/mobile';
-
-function priorityFromEventType(eventType: string): 'critical' | 'warning' | 'info' {
-  if (eventType.includes('fault') || eventType.includes('failed') || eventType.includes('offline')) return 'critical';
-  if (eventType.includes('alarm') || eventType.includes('setpoint')) return 'warning';
-  return 'info';
-}
+import { priorityFromEventType } from '../utils/alertPriority';
 
 export function AlertsPage() {
   const history = useHistory();

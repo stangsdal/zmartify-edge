@@ -30,6 +30,9 @@ export const deviceApi = {
   stageBootstrap: (payload: DeviceBootstrapStageRequest): Promise<DeviceBootstrapStage> =>
     apiClient.post('/api/v2/devices/bootstrap/stage', payload),
 
+  exportFactoryLabels: (): Promise<string> =>
+    apiClient.get('/api/v2/devices/bootstrap/labels.csv'),
+
   getNilanState: (deviceId: string): Promise<NilanHvacState> =>
     apiClient.get(`/api/v2/devices/${encodeURIComponent(deviceId)}/hvac/nilan`),
 

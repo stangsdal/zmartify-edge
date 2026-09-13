@@ -82,7 +82,7 @@ export function RoomCard({ zone, controllerLabel, onOpen, onHistory, onRename, o
             <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-muted hover:bg-slate-100" aria-label={`More options for ${displayName}`}>
               <IonIcon icon={ellipsisVerticalOutline} aria-hidden="true" />
             </summary>
-            <div className="absolute right-0 top-12 z-10 min-w-[150px] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+            <div className="app-popover-menu absolute right-0 top-12 z-10 min-w-[150px] rounded-xl p-1 shadow-lg">
               <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onOpen(); }}>Open thermostat</button>
               <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onHistory(); }}>History</button>
               {canConfigure ? <button type="button" className="menu-action" onClick={(event) => { closeMenu(event); onRename(); }}>Rename zone</button> : null}

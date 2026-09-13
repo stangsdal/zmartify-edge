@@ -93,6 +93,9 @@ npm run build
 Backend:
 
 ```bash
+brew install python@3.13
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r zmartify-edge-api/requirements-dev.txt
 cd zmartify-edge-api
 PYTHONPATH=. ../.venv/bin/pytest -q
 ```

@@ -19,6 +19,9 @@ export interface Device {
   mac?: string;
   firmware_version?: string;
   site_id?: number;
+  site_name?: string | null;
+  domain_name?: string | null;
+  site_users?: string[];
   local_url?: string;
   device_type?: string;
   integration_mode?: string;
@@ -381,6 +384,7 @@ export interface User {
   id: number;
   username: string;
   email?: string;
+  phone?: string;
   display_name: string;
   enabled: number;
   created_at: string;

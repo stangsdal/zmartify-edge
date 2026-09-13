@@ -9,7 +9,7 @@
       "device_id_patterns": [
         "ahc9000"
       ],
-      "latest": "0.3.54",
+      "latest": "0.3.56",
       "releases": "ahc9000/releases.json",
       "installer": "ahc9000/index.html",
       "manifest": "ahc9000/manifest.json",
@@ -24,7 +24,7 @@
       "device_id_patterns": [
         "nilan"
       ],
-      "latest": "0.3.7",
+      "latest": "0.3.8",
       "releases": "nilan/releases.json",
       "installer": "nilan/index.html",
       "manifest": "nilan/manifest.json",

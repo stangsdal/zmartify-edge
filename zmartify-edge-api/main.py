@@ -142,7 +142,7 @@ _DEFAULT_PUBLIC_EDGE_URL = "https://api.zmartify.dk"
 _DEFAULT_PUBLIC_MQTT_URI = "mqtts://mqtt.zmartify.dk:8883"
 
 _PROTECTED_PREFIXES = ("/admin", "/domains", "/sites", "/devices", "/mqtt", "/users", "/mobile", "/events", "/api")
-_PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout"}
+_PROTECTED_EXACT_PATHS = {"/auth/me", "/auth/logout", "/auth/change-password", "/auth/profile"}
 
 
 def _allow_manual_firmware_refresh() -> bool:
@@ -1141,7 +1141,7 @@ def mobile_site_zones(site_id: str, request: Request) -> dict:
     devices_out = []
     device_zone_results: list[tuple[dict, list[dict]]] = []
     for item in site.get("devices", []):
-        if item.get("device_type") != "hvac_gateway":
+        if item.get("device_type") not in {"hvac_gateway", "hvac_ahc9000"}:
             continue
         device_identity = " ".join(
             str(item.get(field) or "")

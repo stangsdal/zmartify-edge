@@ -9,12 +9,12 @@ Kør release-scriptet fra det relevante firmware-repository:
 ```bash
 # AHC9000
 cd /Users/peter/zmartify-hvac-ahc9000
-source ~/.espressif/v6.0.1/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 ./ops/build_firmware_release.sh
 
 # NILAN
 cd /Users/peter/Dev/zmartify-hvac-nilan
-source ~/.espressif/v6.0.1/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 ./ops/build_firmware_release.sh
 ```
 

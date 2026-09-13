@@ -1,6 +1,32 @@
 {
   "releases": [
     {
+      "version": "0.3.56",
+      "published_at": "2026-09-12T13:24:18.565Z",
+      "ota": {
+        "path": "zmartify-hvac-ahc9000-0.3.56.bin",
+        "filename": "zmartify-hvac-ahc9000-0.3.56.bin",
+        "sha256": "fdb955208dddbe88192696f04f1c1e51e9ecabb071f0d550986efbc9e7af183a"
+      },
+      "recovery": {
+        "path": "zmartify-hvac-ahc9000-0.3.56.factory.bin",
+        "sha256": "032d58a2046dc118e67a9df31523258518c95a09034ef91d0f4c162ac0a49e6b"
+      }
+    },
+    {
+      "version": "0.3.55",
+      "published_at": "2026-09-11T05:57:57.037Z",
+      "ota": {
+        "path": "zmartify-hvac-ahc9000-0.3.55.bin",
+        "filename": "zmartify-hvac-ahc9000-0.3.55.bin",
+        "sha256": "6ee20e2f4f7dd463c8be3782f8531da7c7acff0d434a881d02fbf96b9f351760"
+      },
+      "recovery": {
+        "path": "zmartify-hvac-ahc9000-0.3.55.factory.bin",
+        "sha256": "657da072b4291fd2766c43da51fe690524252a3b178a2ed1eaf6f1f26a59d4a9"
+      }
+    },
+    {
       "version": "0.3.54",
       "published_at": "2026-09-10T10:37:41.444Z",
       "ota": {

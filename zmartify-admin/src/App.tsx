@@ -39,11 +39,10 @@ import { OnboardingAssignSitePage } from './pages/OnboardingAssignSitePage';
 import { OnboardingCompletePage } from './pages/OnboardingCompletePage';
 import { SystemsPage } from './pages/SystemsPage';
 import { SiteSystemsPage } from './pages/SiteSystemsPage';
-import { AutomationsPage } from './pages/AutomationsPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ResponsiveNavigation } from './components/ResponsiveNavigation';
 import { useAccess } from './auth/AccessContext';
-import { resolveSiteSelectionPath } from './auth/siteSelection';
+import { resolveSiteLandingPath, resolveSiteSelectionPath } from './auth/siteSelection';
 
 function SiteRouteGuard({ siteRef, product, permission, children }: { siteRef: string; product?: 'hvac' | 'irrigation'; permission?: 'operate' | 'configure' | 'administer'; children: ReactNode }) {
   const { context, isAuthenticated, isLoading, selectSite, can } = useAccess();
@@ -144,12 +143,21 @@ export function App() {
     <>
       <OfflineIndicator />
       <IonTabs className="app-layout-tabs">
-        <IonRouterOutlet className="app-router-outlet">
+        <IonRouterOutlet className={`app-router-outlet${isPublicRoute ? ' app-router-outlet--public' : ''}`}>
         <Route exact path={`${appBase}/login`} component={LoginPage} />
           <Route
             exact
             path={`${appBase}/sites/:siteRef`}
-            render={({ match }) => <SiteRouteGuard siteRef={match.params.siteRef}><HomePage /></SiteRouteGuard>}
+            render={({ match }) => {
+              const site = context?.sites.find((candidate) => candidate.uuid === match.params.siteRef || String(candidate.id) === match.params.siteRef);
+              const siteBase = site ? `${appBase}/sites/${site.uuid || site.id}` : null;
+              const landingPath = site ? resolveSiteLandingPath(site) : null;
+              return (
+                <SiteRouteGuard siteRef={match.params.siteRef}>
+                  {landingPath && landingPath !== siteBase ? <Redirect to={landingPath} /> : <HomePage />}
+                </SiteRouteGuard>
+              );
+            }}
           />
           <Route
             exact
@@ -249,7 +257,7 @@ export function App() {
           <Route
             exact
             path={`${appBase}/home`}
-              render={() => requireAuth(selectedSite ? <Redirect to={`${appBase}/sites/${selectedSite.uuid || selectedSite.id}`} /> : <HomePage />)}
+              render={() => requireAuth(selectedSite ? <Redirect to={resolveSiteLandingPath(selectedSite)} /> : <HomePage />)}
           />
           <Route
             exact
@@ -314,6 +322,11 @@ export function App() {
           <Route
             exact
             path={`${appBase}/onboarding/discover`}
+              render={() => requireCapability(<OnboardingDiscoverPage />, canUseOwnerTools)}
+          />
+          <Route
+            exact
+            path={`${appBase}/onboarding/ble`}
               render={() => requireCapability(<OnboardingDiscoverPage />, canUseOwnerTools)}
           />
           <Route
@@ -476,11 +489,6 @@ export function App() {
             exact
             path={`${appBase}/systems`}
               render={() => requireAdmin(<SystemsPage />)}
-          />
-          <Route
-            exact
-            path={`${appBase}/automations`}
-              render={() => requireAdmin(<AutomationsPage />)}
           />
           <Route
             exact

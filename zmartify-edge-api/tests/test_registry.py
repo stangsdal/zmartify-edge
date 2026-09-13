@@ -65,6 +65,7 @@ def test_domain_site_device_crud(monkeypatch, tmp_path):
         firmware_version="0.4.0",
     )
     assert device["site_id"] is None
+    assert device["device_type"] == "hvac_ahc9000"
 
     assigned = assign_device_site("hvac-gateway-7a254c", site["id"])
     assert assigned["site_id"] == site["id"]
@@ -83,6 +84,26 @@ def test_domain_site_device_crud(monkeypatch, tmp_path):
 
     delete_domain(domain["id"])
     assert len(list_domains()) == 0
+
+
+def test_create_device_distinguishes_hvac_controller_families(monkeypatch, tmp_path):
+    _set_db(monkeypatch, tmp_path)
+
+    ahc9000 = create_device(
+        device_id="zmartify-hvac-ahc9000-aabbcc",
+        display_name="Floor heating",
+        mac=None,
+        firmware_version="0.3.54",
+    )
+    nilan = create_device(
+        device_id="zmartify-hvac-nilan-ddeeff",
+        display_name="Comfort 302",
+        mac=None,
+        firmware_version="0.3.7",
+    )
+
+    assert ahc9000["device_type"] == "hvac_ahc9000"
+    assert nilan["device_type"] == "hvac_nilan"
 
 
 def test_list_devices_includes_connectivity_state(monkeypatch, tmp_path):
@@ -105,6 +126,35 @@ def test_list_devices_includes_connectivity_state(monkeypatch, tmp_path):
     assert devices["ahc9000-online"]["mqtt_connected"] == 1
     assert devices["ahc9000-unknown"]["online"] is None
     assert devices["ahc9000-unknown"]["mqtt_connected"] is None
+
+
+def test_list_devices_includes_site_context(monkeypatch, tmp_path):
+    _set_db(monkeypatch, tmp_path)
+    domain = create_domain("customer", "Customer Domain")
+    site = create_site(domain["id"], "home", "Customer Home")
+    device = create_device(
+        device_id="ahc9000-site",
+        display_name="Site Controller",
+        mac=None,
+        firmware_version="1.0.0",
+    )
+    assign_device_site(device["device_id"], site["id"])
+
+    with get_connection() as conn:
+        user = conn.execute(
+            "INSERT INTO users(uuid, username, display_name, password_hash, enabled) VALUES (?, ?, ?, ?, 1)",
+            ("user-uuid", "owner", "Site Owner", "unused"),
+        )
+        conn.execute(
+            "INSERT INTO site_memberships(uuid, user_id, site_id, role, status) VALUES (?, ?, ?, 'owner', 'active')",
+            ("membership-uuid", user.lastrowid, site["id"]),
+        )
+        conn.commit()
+
+    listed = next(item for item in list_devices() if item["device_id"] == device["device_id"])
+    assert listed["site_name"] == "Customer Home"
+    assert listed["domain_name"] == "Customer Domain"
+    assert listed["site_users"] == ["Site Owner"]
 
 
 def test_conflicts_and_not_found(monkeypatch, tmp_path):

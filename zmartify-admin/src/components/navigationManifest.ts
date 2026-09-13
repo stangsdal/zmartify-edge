@@ -1,7 +1,6 @@
 import {
   alertCircleOutline,
   analyticsOutline,
-  constructOutline,
   hardwareChipOutline,
   homeOutline,
   layersOutline,
@@ -34,16 +33,10 @@ const hasSingleProduct = (context: NavigationContext) => (context.hasHvac ? 1 : 
 
 export const navigationManifest: NavigationItem[] = [
   {
-    id: 'home', label: 'Home', icon: homeOutline, layouts: ['mobile', 'desktop'], route: (context) => context.siteBase, visibleWhen: () => true,
-  },
-  {
-    id: 'hvac', label: 'HVAC', icon: homeOutline, layouts: ['desktop'], route: (context) => `${context.siteBase}/hvac`, visibleWhen: (context) => context.hasHvac,
+    id: 'hvac', label: 'Home', icon: homeOutline, layouts: ['mobile', 'desktop'], route: (context) => `${context.siteBase}/hvac`, visibleWhen: (context) => context.hasHvac,
   },
   {
     id: 'irrigation', label: 'Irrigation', icon: waterOutline, layouts: ['desktop'], route: (context) => `${context.siteBase}/irrigation`, visibleWhen: (context) => context.hasIrrigation,
-  },
-  {
-    id: 'single-hvac', label: 'HVAC', icon: homeOutline, layouts: ['mobile'], route: (context) => `${context.siteBase}/hvac`, visibleWhen: (context) => hasSingleProduct(context) && context.hasHvac,
   },
   {
     id: 'single-irrigation', label: 'Irrigation', icon: waterOutline, layouts: ['mobile'], route: (context) => `${context.siteBase}/irrigation`, visibleWhen: (context) => hasSingleProduct(context) && context.hasIrrigation,
@@ -62,12 +55,6 @@ export const navigationManifest: NavigationItem[] = [
   },
   {
     id: 'platform-systems', label: 'Systems', icon: hardwareChipOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/systems`, visibleWhen: (context) => context.isAdministrator,
-  },
-  {
-    id: 'devices', label: 'Controllers', icon: hardwareChipOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/more/controllers`, visibleWhen: (context) => context.isAdministrator,
-  },
-  {
-    id: 'automations', label: 'Automations', icon: constructOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/automations`, visibleWhen: (context) => context.isAdministrator,
   },
   {
     id: 'users', label: 'Users', icon: peopleOutline, layouts: ['desktop'], route: (context) => `${context.appBase}/admin/users`, visibleWhen: (context) => context.isAdministrator,
@@ -90,7 +77,7 @@ export function navigationForLayout(context: NavigationContext, layout: Navigati
 }
 
 export function isNavigationItemActive(pathname: string, item: Pick<NavigationItem, 'id'> & { path: string }): boolean {
-  return pathname === item.path || (item.id !== 'home' && pathname.startsWith(`${item.path}/`));
+  return pathname === item.path || pathname.startsWith(`${item.path}/`);
 }
 
 export function activeNavigationItemId(

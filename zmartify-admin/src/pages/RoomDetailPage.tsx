@@ -13,6 +13,8 @@ interface RouteParams {
   zoneRef: string;
 }
 
+const SETPOINT_STABILITY_DELAY_MS = 2400;
+
 export function RoomDetailPage() {
   const { zoneRef } = useParams<RouteParams>();
   const history = useHistory();
@@ -264,7 +266,7 @@ export function RoomDetailPage() {
       };
 
       void applyTarget();
-    }, 1200);
+    }, SETPOINT_STABILITY_DELAY_MS);
 
     return () => window.clearTimeout(timer);
   }, [dirty, resolvedRef, selectedMode, target]);
@@ -352,7 +354,7 @@ export function RoomDetailPage() {
                 <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-muted hover:bg-slate-100" aria-label="Thermostat options">
                   <span className="text-xl leading-none" aria-hidden="true">⋮</span>
                 </summary>
-                <div className="absolute right-0 top-12 z-10 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                <div className="app-popover-menu absolute right-0 top-12 z-10 w-64 rounded-xl p-3 shadow-lg">
                   <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted">Display</p>
                   <label className="menu-choice">
                     <span>Theme</span>

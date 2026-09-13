@@ -108,6 +108,9 @@ class DeviceOut(BaseModel):
     last_seen_at: str | None
     online: bool | None = None
     mqtt_connected: bool | None = None
+    site_name: str | None = None
+    domain_name: str | None = None
+    site_users: list[str] = Field(default_factory=list)
 
 
 class DeviceDiscoverIn(BaseModel):
@@ -494,6 +497,11 @@ class AuthLoginOut(BaseModel):
     expires_at: str
 
 
+class AuthChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=12)
+
+
 class InviteCreateIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -566,7 +574,8 @@ class UserCreateIn(BaseModel):
     username: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
     password: str = Field(min_length=12)
-    email: str | None = None
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=50)
     roles: list[str] = Field(default_factory=list)
 
 
@@ -576,6 +585,14 @@ class UserRoleUpdateIn(BaseModel):
 
 class UserResetPasswordIn(BaseModel):
     password: str = Field(min_length=12)
+
+
+class UserProfileUpdateIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: str = Field(min_length=1, max_length=255)
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=50)
 
 
 class SiteMembershipCreateIn(BaseModel):
@@ -688,6 +705,7 @@ class UserOut(BaseModel):
     uuid: str | None = None
     username: str
     email: str | None
+    phone: str | None = None
     display_name: str
     enabled: int
     created_at: str

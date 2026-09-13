@@ -11,12 +11,39 @@
       }
     },
     {
+      "identity" : "esp-idf-provisioning-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/espressif/esp-idf-provisioning-ios.git",
+      "state" : {
+        "revision" : "b38391a7ca16d846af1700c902c8e87b9c35c33d",
+        "version" : "2.1.2"
+      }
+    },
+    {
       "identity" : "keychain-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/evgenyneu/keychain-swift.git",
       "state" : {
         "revision" : "265806607b45687a3d646e4c9837c31c90f202e8",
         "version" : "21.0.0"
+      }
+    },
+    {
+      "identity" : "osbarcodelib-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/OutSystems/OSBarcodeLib-iOS.git",
+      "state" : {
+        "revision" : "7f9d166289c10601bfbed95cd3ec56019870ce1b",
+        "version" : "2.2.1"
+      }
+    },
+    {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "55d7a1cc5666b85c13464aea1c4b4a90feccb4c8",
+        "version" : "1.38.1"
       }
     }
   ],

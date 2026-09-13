@@ -9,7 +9,7 @@ from typing import Deque
 from fastapi import Request
 
 
-_SENSITIVE_PATHS = {"/auth/login", "/auth/register", "/auth/invite/validate"}
+_SENSITIVE_PATHS = {"/auth/login", "/auth/register", "/auth/invite/validate", "/auth/change-password"}
 _attempts: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 _lock = threading.Lock()
 

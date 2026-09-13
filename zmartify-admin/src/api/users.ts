@@ -11,8 +11,12 @@ export const usersApi = {
     display_name: string;
     password: string;
     email?: string;
+    phone?: string;
     roles?: string[];
   }): Promise<User> => apiClient.post('/users', payload),
+
+  update: (id: number, payload: { display_name: string; email?: string; phone?: string }): Promise<User> =>
+    apiClient.patch(`/users/${id}`, payload),
 
   disable: (id: number): Promise<User> => apiClient.post(`/users/${id}/disable`, {}),
 

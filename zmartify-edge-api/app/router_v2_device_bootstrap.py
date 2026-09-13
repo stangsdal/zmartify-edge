@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import base64
+import csv
 import hashlib
+import hmac
+import io
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthError, AuthenticatedUser, audit_action
@@ -27,6 +33,7 @@ from app.registry import (
 _EDGE_URL = (os.getenv("ZMART_EDGE_PUBLIC_API_BASE") or "https://api.zmartify.dk").strip().rstrip("/")
 _MQTT_URI = (os.getenv("ZMART_EDGE_PUBLIC_MQTT_URI") or "mqtts://mqtt.zmartify.dk:8883").strip()
 _CLAIM_LIFETIME_S = 600
+_PAIRING_CODE_CONTEXT = b"zmartify-factory-pairing-v1\0"
 
 
 class DeviceBootstrapStageIn(BaseModel):
@@ -53,6 +60,27 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
+def _factory_pairing_code(device_id: str, mac: str) -> str:
+    master_key = os.getenv("ZMART_EDGE_FACTORY_PAIRING_KEY", "").strip()
+    if len(master_key) < 32:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="factory pairing export is not configured",
+        )
+    normalized_mac = "".join(character for character in mac.lower() if character in "0123456789abcdef")
+    digest = hmac.new(
+        master_key.encode("utf-8"),
+        _PAIRING_CODE_CONTEXT + device_id.encode("utf-8") + b"\0" + normalized_mac.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    encoded = base64.b32encode(digest[:10]).decode("ascii").rstrip("=")
+    return "-".join(encoded[index:index + 4] for index in range(0, 16, 4))
+
+
+def _safe_csv_cell(value: str) -> str:
+    return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
 def create_device_bootstrap_v2_router() -> APIRouter:
     router = APIRouter(prefix="/api/v2", tags=["api-v2-device-bootstrap"])
 
@@ -77,6 +105,60 @@ def create_device_bootstrap_v2_router() -> APIRouter:
                 require_site_role(auth_user, int(site_id), {"owner"})
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    @router.get("/devices/bootstrap/labels.csv", response_class=Response)
+    def export_factory_labels(request: Request) -> Response:
+        auth_user: AuthenticatedUser | None = getattr(request.state, "auth_user", None)
+        if auth_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        try:
+            require_global_admin(auth_user)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT d.device_id, d.mac
+                FROM devices d
+                WHERE d.mac IS NOT NULL
+                  AND TRIM(d.mac) <> ''
+                  AND d.last_seen_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM device_health_history history
+                      WHERE history.device_id = d.id AND history.online = 1
+                  )
+                ORDER BY d.device_id
+                """
+            ).fetchall()
+
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=["device_id", "mac", "pairing_code", "qr_url"])
+        writer.writeheader()
+        for row in rows:
+            device_id = str(row["device_id"])
+            mac = str(row["mac"]).upper()
+            pairing_code = _factory_pairing_code(device_id, mac)
+            qr_url = f"https://app.zmartify.dk/app/onboarding/ble?{urlencode({'device_id': device_id, 'pairing_code': pairing_code})}"
+            writer.writerow({
+                "device_id": _safe_csv_cell(device_id),
+                "mac": _safe_csv_cell(mac),
+                "pairing_code": pairing_code,
+                "qr_url": qr_url,
+            })
+
+        audit_action(
+            actor_user_id=auth_user.user_id,
+            action="export_factory_device_labels",
+            resource_type="device",
+            metadata={"device_count": len(rows)},
+        )
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="zmartify-device-labels.csv"'},
+        )
 
     @router.post("/devices/bootstrap/stage", status_code=status.HTTP_201_CREATED)
     def stage_device_bootstrap(payload: DeviceBootstrapStageIn, request: Request) -> dict:

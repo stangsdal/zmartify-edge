@@ -9,6 +9,17 @@ type SelectedSite = {
   products: ProductAccess[];
 };
 
+export function resolveSiteLandingPath(site: SelectedSite): string {
+  const siteBase = `/app/sites/${site.uuid || site.id}`;
+  if (site.products.some((item) => item.type === 'hvac' && item.allowed)) {
+    return `${siteBase}/hvac`;
+  }
+  if (site.products.some((item) => item.type === 'irrigation' && item.allowed)) {
+    return `${siteBase}/irrigation`;
+  }
+  return siteBase;
+}
+
 export function resolveSiteSelectionPath(pathname: string, site: SelectedSite): string | null {
   const match = pathname.match(/^\/app\/sites\/[^/]+\/(hvac|irrigation)(\/.*)?$/);
   if (!match) {
@@ -21,5 +32,5 @@ export function resolveSiteSelectionPath(pathname: string, site: SelectedSite): 
     return `${siteBase}/${product}${match[2] || ''}`;
   }
 
-  return site.products.some((item) => item.type === 'hvac' && item.allowed) ? `${siteBase}/hvac` : siteBase;
+  return resolveSiteLandingPath(site);
 }

@@ -251,7 +251,7 @@ function NilanDeviceCard({ device, canOperate }: { device: MobileSiteDevice; can
             <summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-full text-muted hover:bg-slate-100" aria-label={`More options for ${device.display_name}`}>
               <IonIcon icon={ellipsisVerticalOutline} aria-hidden="true" />
             </summary>
-            <div className="absolute right-0 top-12 z-10 min-w-[170px] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+            <div className="app-popover-menu absolute right-0 top-12 z-10 min-w-[170px] rounded-xl p-1 shadow-lg">
               <button type="button" className="menu-action" onClick={(event) => { closeOptionsMenu(event); setDetailsOpen(true); }}>Open ventilation</button>
             </div>
           </details>

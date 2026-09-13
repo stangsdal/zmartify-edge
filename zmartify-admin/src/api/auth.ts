@@ -25,6 +25,15 @@ export const authApi = {
 
   logout: (): Promise<{ ok: boolean }> => apiClient.post('/auth/logout', {}),
 
+  changePassword: (currentPassword: string, newPassword: string): Promise<{ ok: boolean }> =>
+    apiClient.post('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+
+  updateProfile: (payload: { display_name: string; email?: string; phone?: string }): Promise<User> =>
+    apiClient.patch('/auth/profile', payload),
+
   me: (): Promise<User> => apiClient.get('/auth/me'),
 
   accessContext: (): Promise<AccessContextResponse> => apiClient.get('/api/v2/me/context'),

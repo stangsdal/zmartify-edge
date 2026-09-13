@@ -629,7 +629,7 @@ def list_users() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, uuid, username, email, display_name, enabled, created_at, updated_at, last_login_at
+            SELECT id, uuid, username, email, phone, display_name, enabled, created_at, updated_at, last_login_at
             FROM users
             ORDER BY id
             """
@@ -643,6 +643,7 @@ def list_users() -> list[dict]:
                     "uuid": row["uuid"],
                     "username": row["username"],
                     "email": row["email"],
+                    "phone": row["phone"],
                     "display_name": row["display_name"],
                     "enabled": row["enabled"],
                     "created_at": row["created_at"],
@@ -658,7 +659,7 @@ def get_user(user_id: int) -> dict:
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT id, uuid, username, email, display_name, enabled, created_at, updated_at, last_login_at
+            SELECT id, uuid, username, email, phone, display_name, enabled, created_at, updated_at, last_login_at
             FROM users
             WHERE id = ?
             """,
@@ -671,6 +672,7 @@ def get_user(user_id: int) -> dict:
             "uuid": row["uuid"],
             "username": row["username"],
             "email": row["email"],
+            "phone": row["phone"],
             "display_name": row["display_name"],
             "enabled": row["enabled"],
             "created_at": row["created_at"],
@@ -680,7 +682,7 @@ def get_user(user_id: int) -> dict:
         }
 
 
-def create_user(*, actor_user_id: int | None, username: str, display_name: str, password: str, email: str | None, roles: list[str]) -> dict:
+def create_user(*, actor_user_id: int | None, username: str, display_name: str, password: str, email: str | None, roles: list[str], phone: str | None = None) -> dict:
     if len(password) < 12:
         raise AuthError("password must be at least 12 characters")
     _validate_global_roles(roles)
@@ -689,10 +691,10 @@ def create_user(*, actor_user_id: int | None, username: str, display_name: str, 
         try:
             cur = conn.execute(
                 """
-                INSERT INTO users(uuid, username, email, display_name, password_hash, enabled)
-                VALUES (?, ?, ?, ?, ?, 1)
+                INSERT INTO users(uuid, username, email, phone, display_name, password_hash, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
                 """,
-                (_new_uuid(), username, email, display_name, hash_password(password)),
+                (_new_uuid(), username, email, phone, display_name, hash_password(password)),
             )
         except sqlite3.IntegrityError as exc:
             raise AuthError("username already exists") from exc
@@ -725,6 +727,28 @@ def set_user_enabled(*, actor_user_id: int | None, user_id: int, enabled: bool) 
     return get_user(user_id)
 
 
+def update_user_profile(*, actor_user_id: int, user_id: int, display_name: str, email: str | None, phone: str | None) -> dict:
+    normalized_email = email.strip() if email else None
+    normalized_phone = phone.strip() if phone else None
+    if normalized_email and ("@" not in normalized_email or normalized_email.startswith("@") or normalized_email.endswith("@")):
+        raise AuthError("invalid email address")
+
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE users
+            SET display_name = ?, email = ?, phone = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (display_name.strip(), normalized_email, normalized_phone, user_id),
+        )
+        if cur.rowcount == 0:
+            raise AuthError("user not found")
+        _audit(conn, actor_user_id, "update_profile", "user", str(user_id))
+        conn.commit()
+    return get_user(user_id)
+
+
 def reset_user_password(*, actor_user_id: int | None, user_id: int, password: str) -> dict:
     if len(password) < 12:
         raise AuthError("password must be at least 12 characters")
@@ -739,6 +763,34 @@ def reset_user_password(*, actor_user_id: int | None, user_id: int, password: st
         _audit(conn, actor_user_id, "reset_password", "user", str(user_id))
         conn.commit()
     return get_user(user_id)
+
+
+def change_user_password(*, user_id: int, token_id: int, current_password: str, new_password: str) -> None:
+    if len(new_password) < 12:
+        raise AuthError("password must be at least 12 characters")
+    if current_password == new_password:
+        raise AuthError("new password must be different from current password")
+
+    with get_connection() as conn:
+        user = conn.execute(
+            "SELECT password_hash FROM users WHERE id = ? AND enabled = 1",
+            (user_id,),
+        ).fetchone()
+        if user is None:
+            raise AuthError("user not found")
+        if not verify_password(user["password_hash"], current_password):
+            raise AuthError("current password is incorrect")
+
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (hash_password(new_password), user_id),
+        )
+        conn.execute(
+            "UPDATE api_tokens SET enabled = 0 WHERE user_id = ? AND id != ?",
+            (user_id, token_id),
+        )
+        _audit(conn, user_id, "change_password", "user", str(user_id))
+        conn.commit()
 
 
 def set_user_roles(*, actor_user_id: int | None, user_id: int, roles: list[str]) -> dict:

@@ -142,3 +142,84 @@ def test_auth_me_with_bearer_token(monkeypatch, tmp_path: Path):
     assert me.status_code == 200
     assert me.json()["username"] == "admin2"
     assert "administrator" in me.json()["roles"]
+
+
+def test_authenticated_user_can_change_own_password(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_ENABLE_EMERGENCY_TOKEN", "1")
+    monkeypatch.setenv("ADMIN_API_TOKEN", "emergency-token")
+    client = _client(monkeypatch, tmp_path)
+
+    created = client.post(
+        "/users",
+        headers={"Authorization": "Bearer emergency-token"},
+        json={
+            "username": "profile-user",
+            "display_name": "Profile User",
+            "password": "CurrentPassword123!",
+            "roles": [],
+        },
+    )
+    assert created.status_code == 201
+
+    login = client.post("/auth/login", json={"username": "profile-user", "password": "CurrentPassword123!"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    other_login = client.post("/auth/login", json={"username": "profile-user", "password": "CurrentPassword123!"})
+    assert other_login.status_code == 200
+    other_headers = {"Authorization": f"Bearer {other_login.json()['access_token']}"}
+
+    wrong_current = client.post(
+        "/auth/change-password",
+        headers=headers,
+        json={"current_password": "WrongPassword123!", "new_password": "UpdatedPassword123!"},
+    )
+    assert wrong_current.status_code == 400
+    assert wrong_current.json()["detail"] == "current password is incorrect"
+
+    changed = client.post(
+        "/auth/change-password",
+        headers=headers,
+        json={"current_password": "CurrentPassword123!", "new_password": "UpdatedPassword123!"},
+    )
+    assert changed.status_code == 200
+    assert changed.json() == {"ok": True}
+    assert client.get("/auth/me", headers=headers).status_code == 200
+    assert client.get("/auth/me", headers=other_headers).status_code == 403
+    assert client.post("/auth/login", json={"username": "profile-user", "password": "CurrentPassword123!"}).status_code == 401
+    assert client.post("/auth/login", json={"username": "profile-user", "password": "UpdatedPassword123!"}).status_code == 200
+
+
+def test_authenticated_user_can_update_own_profile(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ZMART_EDGE_ENABLE_EMERGENCY_TOKEN", "1")
+    monkeypatch.setenv("ADMIN_API_TOKEN", "emergency-token")
+    client = _client(monkeypatch, tmp_path)
+
+    created = client.post(
+        "/users",
+        headers={"Authorization": "Bearer emergency-token"},
+        json={
+            "username": "contact-user",
+            "display_name": "Original Name",
+            "password": "CurrentPassword123!",
+            "roles": [],
+        },
+    )
+    assert created.status_code == 201
+
+    login = client.post("/auth/login", json={"username": "contact-user", "password": "CurrentPassword123!"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    updated = client.patch(
+        "/auth/profile",
+        headers=headers,
+        json={
+            "display_name": "Updated Name",
+            "email": "person@example.com",
+            "phone": "+45 12 34 56 78",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["display_name"] == "Updated Name"
+    assert updated.json()["email"] == "person@example.com"
+    assert updated.json()["phone"] == "+45 12 34 56 78"
+    assert client.get("/auth/me", headers=headers).json()["phone"] == "+45 12 34 56 78"

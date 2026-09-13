@@ -181,6 +181,61 @@ def test_v2_mqtt_setpoint_outcome_ingest_logs_outcome(monkeypatch, tmp_path: Pat
     assert len(events.json()) >= 1
 
 
+def test_v2_mqtt_failure_after_confirmation_does_not_create_failure_alert(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi-terminal")
+    command_id = "cmd-confirmed-terminal"
+
+    for result, detail in (("confirmed", ""), ("failed", "controller state unavailable during confirmation")):
+        response = client.post(
+            f"/api/v2/devices/{device_id}/ingest/mqtt/hvac/zones/1/setpoint-outcome",
+            headers=headers,
+            json={
+                "schema_version": "2.0",
+                "command_id": command_id,
+                "result": result,
+                "detail": detail,
+                "source_timestamp": "2026-09-11T04:11:24Z",
+                "requested_target_temperature_c": 21.5,
+                "confirmed_target_temperature_c": 21.5 if result == "confirmed" else 0.0,
+            },
+        )
+        assert response.status_code == 200
+
+    outcomes = client.get("/events/recent", headers=headers, params={"event_type": "setpoint_command_outcome_received"})
+    failures = client.get("/events/recent", headers=headers, params={"event_type": "setpoint_write_failed"})
+    assert [event["payload"]["result"] for event in outcomes.json()] == ["failed", "confirmed"]
+    assert failures.json() == []
+
+
+def test_v2_mqtt_repeated_terminal_failure_creates_one_failure_alert(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    device_id = _seed_device(client, headers, suffix="v2mi-duplicate")
+    command_id = "cmd-rejected-terminal"
+
+    for result, detail in (("rejected", "busy"), ("failed", "controller state unavailable during confirmation")):
+        response = client.post(
+            f"/api/v2/devices/{device_id}/ingest/mqtt/hvac/zones/1/setpoint-outcome",
+            headers=headers,
+            json={
+                "schema_version": "2.0",
+                "command_id": command_id,
+                "result": result,
+                "detail": detail,
+                "source_timestamp": "2026-09-11T04:11:24Z",
+                "requested_target_temperature_c": 21.5,
+                "confirmed_target_temperature_c": 20.0,
+            },
+        )
+        assert response.status_code == 200
+
+    failures = client.get("/events/recent", headers=headers, params={"event_type": "setpoint_write_failed"})
+    assert len(failures.json()) == 1
+    assert failures.json()[0]["payload"]["reason"] == "busy"
+
+
 def test_v2_mqtt_reported_state_ingest_updates_irrigation_runtime(monkeypatch, tmp_path: Path):
     client = _client(monkeypatch, tmp_path)
     headers = {"Authorization": "Bearer emergency-token"}

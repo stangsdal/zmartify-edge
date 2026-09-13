@@ -20,6 +20,7 @@ interface RoomWithRef extends MobileZone {
 
 const roomIdentity = (deviceId: string, zoneId: number) => `${deviceId}:${zoneId}`;
 const HVAC_ZONE_MODES: HvacZoneMode[] = ['MANUAL', 'ECO', 'KOMFORT', 'HOLIDAY', 'STANDBY', 'PARTY'];
+const SETPOINT_STABILITY_DELAY_MS = 1400;
 
 export function RoomsPage() {
   const { context, selectedSiteId, selectSite, can } = useAccess();
@@ -70,7 +71,7 @@ export function RoomsPage() {
       void mobileApi.setZoneSetpoint(room.zone_ref, requestedTarget).catch((error) => {
         console.error('setpoint change failed', error);
       });
-    }, 700);
+    }, SETPOINT_STABILITY_DELAY_MS);
     setpointTimersRef.current.set(room.zone_ref, timer);
   };
 

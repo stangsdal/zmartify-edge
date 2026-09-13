@@ -420,6 +420,7 @@ def ingest_setpoint_command_outcome(
     confirmation_scope: str = "active",
 ) -> dict[str, Any]:
     normalized_result = str(result or "").strip().lower()
+    command_had_terminal_outcome = False
     with get_connection() as conn:
         device = _resolve_device(conn, device_external_id)
         device_pk_id = int(device["id"])
@@ -438,6 +439,30 @@ def ingest_setpoint_command_outcome(
                     break
         if not matched_command_id and pending_events:
             matched_command_id = pending_events[0]["command_id"]
+
+        if matched_command_id and normalized_result not in {"confirmed", "accepted"}:
+            prior_outcomes = conn.execute(
+                """
+                SELECT payload_json
+                FROM event_log
+                WHERE event_type = 'setpoint_command_outcome_received'
+                  AND device_id = ? AND zone_id = ?
+                ORDER BY id DESC
+                LIMIT 100
+                """,
+                (device_pk_id, int(zone_id)),
+            ).fetchall()
+            for row in prior_outcomes:
+                try:
+                    prior = json.loads(row["payload_json"] or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    str(prior.get("command_id") or "") == matched_command_id
+                    and str(prior.get("result") or "").strip().lower() in {"confirmed", "rejected", "failed"}
+                ):
+                    command_had_terminal_outcome = True
+                    break
 
     event_payload: dict[str, Any] = {
         "device_id": device_external_id,
@@ -487,7 +512,7 @@ def ingest_setpoint_command_outcome(
             },
         )
 
-    if normalized_result not in {"confirmed", "accepted"}:
+    if normalized_result not in {"confirmed", "accepted"} and not command_had_terminal_outcome:
         log_event(
             "setpoint_write_failed",
             domain_id=device.get("domain_id"),
