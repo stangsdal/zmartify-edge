@@ -27,6 +27,13 @@ Opdatér først `CONFIG_APP_PROJECT_VER` i `sdkconfig.defaults`. Scriptet bygger
 3. Tilføj controllerens metadata, kompatibilitetsmønstre og relative filstier i `catalog.json`.
 4. Kør `npm run firmware:validate` og `npm run build`.
 
+Alle controller-installersider skal indlæse `../controller-identity.js` og indeholde
+`<zmartify-controller-identity>`. Komponenten aflæser MAC-adressen via Web Serial,
+danner enheds-ID'et fra katalogets `artifact_prefix` og sender begge oplysninger til
+den autentificerede onboarding. Ved staging gemmes enheds-ID, MAC og den afledte
+controllertype i device-registeret. Administratorens label-eksport bruger de gemte
+oplysninger til pairing code og QR-link for controllere, der endnu ikke har været online.
+
 ESP Web Tools-manifestet skal have præcis én build og mindst én part. Den første parts `path` er filen, som bibliotekets downloadknap anvender. `SHA256SUMS` skal indeholde SHA-256 for samme fil.
 
 USB-manifestets første part er et factory/recovery-image og må ikke bruges til OTA. Hver version i `releases.json` deklarerer sine egne artefakter:

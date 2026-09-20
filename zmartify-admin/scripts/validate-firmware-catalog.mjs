@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../public/firmware');
 const catalog = JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'));
+await readFile(join(root, 'controller-identity.js'));
 const ids = new Set();
 
 function resolveCatalogPath(path, label, controllerId) {
@@ -62,6 +63,9 @@ for (const controller of catalog.controllers) {
   }
   if (!versions.has(controller.latest)) throw new Error(`Latest release is missing: ${controller.id} ${controller.latest}`);
 
-  await readFile(resolveCatalogPath(controller.installer, 'installer', controller.id));
+  const installer = await readFile(resolveCatalogPath(controller.installer, 'installer', controller.id), 'utf8');
+  if (!installer.includes('../controller-identity.js') || !installer.includes('<zmartify-controller-identity>')) {
+    throw new Error(`Installer does not use shared controller identity: ${controller.id}`);
+  }
   console.log(`${controller.name}: ${manifest.version} (${releaseIndex.releases.length} releases, ${firmwarePath})`);
 }

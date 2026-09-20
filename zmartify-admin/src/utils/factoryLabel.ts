@@ -1,13 +1,13 @@
-const DEVICE_ID_PREFIX = 'zmartify-hvac-ahc9000-';
+const DEFAULT_DEVICE_ID_PREFIX = 'zmartify-hvac-ahc9000-';
+const DEVICE_ID_PATTERN = /^(zmartify-[a-z0-9-]+-)([0-9a-f]{12})$/;
 
 export function parseControllerIdentity(value: string): { deviceId: string; mac: string } | null {
   const normalized = value.trim().toLowerCase();
-  const macHex = normalized.startsWith(DEVICE_ID_PREFIX)
-    ? normalized.slice(DEVICE_ID_PREFIX.length)
-    : normalized.replace(/[^0-9a-f]/g, '');
+  const deviceIdMatch = normalized.match(DEVICE_ID_PATTERN);
+  const macHex = deviceIdMatch?.[2] || normalized.replace(/[^0-9a-f]/g, '');
   if (!/^[0-9a-f]{12}$/.test(macHex)) return null;
   return {
-    deviceId: `${DEVICE_ID_PREFIX}${macHex}`,
+    deviceId: deviceIdMatch ? normalized : `${DEFAULT_DEVICE_ID_PREFIX}${macHex}`,
     mac: macHex.match(/.{2}/g)?.join(':').toUpperCase() || '',
   };
 }

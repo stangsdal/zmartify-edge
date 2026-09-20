@@ -23,4 +23,11 @@ describe('factory onboarding label', () => {
       mac: 'AA:BB:CC:DD:EE:FF',
     });
   });
+
+  it('preserves the controller family in a full device ID', () => {
+    expect(parseControllerIdentity('zmartify-hvac-nilan-aabbccddeeff')).toEqual({
+      deviceId: 'zmartify-hvac-nilan-aabbccddeeff',
+      mac: 'AA:BB:CC:DD:EE:FF',
+    });
+  });
 });

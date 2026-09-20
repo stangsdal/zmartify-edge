@@ -216,6 +216,7 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
   const allVisibleSelected = visibleDevices.length > 0
     && visibleDevices.every((device) => selectedDeviceIds.includes(device.device_id));
   const onlineCount = devices.filter((device) => device.online === true).length;
+  const latestUsbReleases = releases.filter((release) => release.version === release.latest);
 
   const resetPage = () => setPage(1);
 
@@ -475,9 +476,9 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
                 <p className="controller-eyebrow">USB recovery</p>
                 <h2>Install or recover firmware</h2>
                 <p className="controller-muted">Choose the exact controller family. USB installation may reset network and onboarding settings.</p>
-                {catalogLoading ? <IonSpinner name="crescent" /> : releases.map((release) => (
+                {catalogLoading ? <IonSpinner name="crescent" /> : latestUsbReleases.map((release) => (
                   <IonButton key={release.id} href={release.installerUrl} target="_blank" fill="outline">
-                    <IonIcon slot="start" icon={openOutline} /> {release.name}
+                    <IonIcon slot="start" icon={openOutline} /> {release.name} {release.version}
                   </IonButton>
                 ))}
               </section>

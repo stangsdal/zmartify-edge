@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light" />
     <title>Zmartify NILAN USB Recovery</title>
     <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+    <script type="module" src="../controller-identity.js"></script>
     <style>
       :root { color: #17201d; background: #eef3f0; font-family: "Avenir Next", "Segoe UI", sans-serif; }
       * { box-sizing: border-box; }
@@ -31,12 +32,15 @@
       <h1>NILAN USB Recovery</h1>
       <p>Geninstaller gateway-firmwaren fra USB. En normal opdatering udføres via OTA fra firmwarekataloget.</p>
       <div class="warning"><strong>Recovery kan slette lokal konfiguration.</strong> Brug kun installationen som led i service eller genoprettelse.</div>
+      <h2>Før du starter</h2>
       <ol>
         <li>Brug Chrome eller Edge på en computer.</li>
         <li>Forbind ESP32-S3-gatewayen med et USB-datakabel.</li>
-        <li>Vælg installer og derefter gatewayens USB-port.</li>
+        <li>Vælg <strong>Læs controller-ID</strong>, vælg gatewayens USB-port, og fortsæt til onboarding for at gemme identiteten.</li>
+        <li>Vælg derefter <strong>Installer recovery-firmware</strong> og den samme USB-port.</li>
       </ol>
       <div class="installer">
+        <zmartify-controller-identity></zmartify-controller-identity>
         <esp-web-install-button manifest="manifest.json">
           <button slot="activate">Installer recovery-firmware</button>
           <span slot="unsupported">Browseren understøtter ikke Web Serial. Brug Chrome eller Edge.</span>

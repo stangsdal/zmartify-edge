@@ -64,8 +64,10 @@ export function OnboardingDiscoverPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const deviceId = params.get('device_id');
+    const controllerName = params.get('controller_name');
     const pairingCode = params.get('pairing_code');
     if (deviceId && parseControllerIdentity(deviceId)) setControllerIdentity(deviceId);
+    if (deviceId && controllerName && parseControllerIdentity(deviceId)) setDisplayName(`${controllerName} controller`);
     if (pairingCode && /^[A-Z2-7]{4}(?:-[A-Z2-7]{4}){3}$/i.test(pairingCode)) setPairingCode(pairingCode.toUpperCase());
   }, []);
 
@@ -300,7 +302,7 @@ export function OnboardingDiscoverPage() {
                 Stage for ESPTouch
               </IonButton>
             ) : null}
-            <IonButton className="mt-2" expand="block" fill="outline" href="/app/firmware/ahc9000/index.html" target="_blank">
+            <IonButton className="mt-2" expand="block" fill="outline" href="/app/firmware/index.html" target="_blank">
               USB recovery
             </IonButton>
           </section>
