@@ -10,6 +10,8 @@ export interface Site {
   slug: string;
   name: string;
   address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Device {
@@ -143,7 +145,7 @@ export interface DeviceBootstrapStageRequest {
   site_id: number;
   display_name: string;
   mac?: string;
-  product_type: 'hvac';
+  product_type: 'hvac' | 'irrigation' | 'weather' | 'energy';
 }
 
 export interface DeviceBootstrapStage {

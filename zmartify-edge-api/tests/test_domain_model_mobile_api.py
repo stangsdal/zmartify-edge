@@ -5,6 +5,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from app.db import get_connection
+from app.geocoding import GeocodedLocation
+from app.weather_telemetry import WeatherTelemetryCollector
 
 
 def _client(monkeypatch, tmp_path: Path):
@@ -59,6 +61,58 @@ def _seed_domain_site_device(client: TestClient, headers: dict[str, str], device
     assign = client.post(f"/devices/{device_id}/assign-site", headers=headers, json={"site_id": site_id})
     assert assign.status_code == 200
     return device_id
+
+
+def test_site_address_lookup_and_coordinates(monkeypatch, tmp_path: Path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"Authorization": "Bearer emergency-token"}
+    monkeypatch.setattr(
+        "app.router_domains_sites.geocode_address",
+        lambda address: GeocodedLocation("Radhuspladsen 1, 1550 Copenhagen", 55.6759, 12.5683),
+    )
+
+    lookup = client.post("/sites/geocode", headers=headers, json={"address": "Radhuspladsen 1"})
+
+    assert lookup.status_code == 200
+    assert lookup.json() == {
+        "address": "Radhuspladsen 1, 1550 Copenhagen",
+        "latitude": 55.6759,
+        "longitude": 12.5683,
+    }
+
+    domain = client.post("/domains", headers=headers, json={"slug": "weather", "name": "Weather"})
+    site = client.post(
+        f"/domains/{domain.json()['id']}/sites",
+        headers=headers,
+        json={"slug": "home", "name": "Home", **lookup.json()},
+    )
+    assert site.status_code == 201
+    assert site.json()["latitude"] == 55.6759
+    assert site.json()["longitude"] == 12.5683
+
+    mobile_site = client.get(f"/mobile/sites/{site.json()['uuid']}", headers=headers)
+    assert mobile_site.status_code == 200
+    assert mobile_site.json()["latitude"] == 55.6759
+    assert mobile_site.json()["longitude"] == 12.5683
+
+    partial_coordinates = client.put(
+        f"/sites/{site.json()['id']}",
+        headers=headers,
+        json={"name": "Home", "address": "Radhuspladsen 1", "latitude": 55.6759},
+    )
+    assert partial_coordinates.status_code == 422
+
+    collector = WeatherTelemetryCollector(
+        weather_fetcher=lambda latitude, longitude: {
+            "current": {"time": "2026-09-26T12:00", "temperature_2m": 12.5},
+            "hourly": {"time": []},
+        },
+    )
+    assert collector.collect_weather_once() == 1
+
+    weather = client.get(f"/mobile/sites/{site.json()['uuid']}/weather", headers=headers)
+    assert weather.status_code == 200
+    assert weather.json()["current"]["temperature_c"] == 12.5
 
 
 def test_zone_metadata_and_mobile_shape(monkeypatch, tmp_path: Path):

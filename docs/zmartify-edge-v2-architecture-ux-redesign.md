@@ -23,8 +23,9 @@ Both web hosts use the same frontend bundle, authentication and same-origin
 API. The host only selects the default landing page; it is not an
 authorization boundary. `api.zmartify.dk` remains the canonical machine-facing
 API hostname and can be selected explicitly for integrations.
-The API and server-side permission checks remain authoritative. `pilot`
-remains an optional transition alias, not the canonical public URL.
+The API and server-side permission checks remain authoritative.
+`pilot.zmartify.dk` is retired; use `app.zmartify.dk`, `api.zmartify.dk` or
+`mqtt.zmartify.dk` according to the service being accessed.
 
 The former `admin-ui` bundle is not deployed. Its operational pages are either
 represented by the canonical admin routes in `zmartify-admin` or are retired.

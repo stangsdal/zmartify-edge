@@ -101,6 +101,7 @@ from app.router_v2_irrigation import create_irrigation_v2_router
 from app.rate_limit import check_rate_limit
 from app.realtime_topic_hub import RealtimeTopicHub
 from app.setpoint_outcome_listener import create_setpoint_outcome_listener
+from app.weather_telemetry import WeatherTelemetryCollector, get_site_weather
 from app.schemas import (
     ChannelMetadataIn,
     ChannelOut,
@@ -196,6 +197,7 @@ class ZoneStreamHub:
 zone_stream_hub = ZoneStreamHub()
 realtime_topic_hub = RealtimeTopicHub()
 setpoint_outcome_listener = create_setpoint_outcome_listener()
+weather_telemetry_collector = WeatherTelemetryCollector()
 
 
 def _extract_device_ingest_device_id(path: str) -> str | None:
@@ -546,12 +548,14 @@ async def startup_event() -> None:
     set_irrigation_run_emit_hook(_publish_irrigation_run_update)
     set_irrigation_status_emit_hook(_publish_irrigation_status_update)
     setpoint_outcome_listener.start()
+    weather_telemetry_collector.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     set_irrigation_run_emit_hook(None)
     set_irrigation_status_emit_hook(None)
+    weather_telemetry_collector.stop()
     setpoint_outcome_listener.stop()
 
 
@@ -1099,6 +1103,17 @@ def mobile_site_detail(site_id: str, request: Request) -> dict:
                 continue
         return site
     except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.get("/mobile/sites/{site_id}/weather")
+def mobile_site_weather(site_id: str, request: Request, forecast_hours: int = 48) -> dict:
+    _require_authenticated(request)
+    resolved_site_id = _resolve_site_filter_id(site_id)
+    _enforce_mobile_site_scope(request, resolved_site_id)
+    try:
+        return get_site_weather(site_id, forecast_hours=forecast_hours)
+    except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 

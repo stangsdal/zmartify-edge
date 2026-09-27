@@ -184,6 +184,43 @@ def test_reported_state_worker_recovers_after_unexpected_failure():
     assert seen == ["recovered"]
 
 
+def test_reported_state_workers_do_not_starve_a_third_device():
+    release_hot_devices = threading.Event()
+    stop_hot_devices = threading.Event()
+    hot_started = {device_id: threading.Event() for device_id in ("device-a", "device-b")}
+    irrigation_seen = threading.Event()
+
+    listener = SetpointOutcomeMqttListener(
+        list_devices_fn=lambda: [],
+        get_device_mqtt_credentials_fn=lambda _device_id: {},
+        ingest_setpoint_command_outcome_fn=lambda *_args, **_kwargs: None,
+        mqtt_client_module=None,
+        ingest_reported_state_fn=lambda *_args: None,
+    )
+
+    def ingest(device_id, data):
+        if device_id in hot_started:
+            hot_started[device_id].set()
+            release_hot_devices.wait(1.0)
+            if not stop_hot_devices.is_set():
+                listener._queue_reported_state(device_id, {"sequence": data["sequence"] + 1})
+            return
+        irrigation_seen.set()
+
+    listener._ingest_reported_state_async = ingest
+    listener._queue_reported_state("device-a", {"sequence": 1})
+    listener._queue_reported_state("device-b", {"sequence": 1})
+    assert all(started.wait(1.0) for started in hot_started.values())
+
+    listener._queue_reported_state("irrigation", {"sequence": 1})
+    release_hot_devices.set()
+    observed_irrigation = irrigation_seen.wait(1.0)
+    stop_hot_devices.set()
+    listener._reported_state_executor.shutdown(wait=True)
+
+    assert observed_irrigation
+
+
 def test_on_message_logs_v2_reported_state_ingest(caplog):
     listener = SetpointOutcomeMqttListener(
         list_devices_fn=lambda: [],

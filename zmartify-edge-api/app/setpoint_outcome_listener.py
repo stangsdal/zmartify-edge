@@ -244,18 +244,27 @@ class SetpointOutcomeMqttListener:
 
     def _drain_reported_state(self, device_id: str) -> None:
         try:
-            while True:
-                with self._reported_state_lock:
-                    data = self._reported_state_pending.pop(device_id, None)
-                    if data is None:
-                        return
+            with self._reported_state_lock:
+                data = self._reported_state_pending.pop(device_id, None)
+            if data is not None:
                 try:
                     self._ingest_reported_state_async(device_id, data)
                 except Exception:
                     logger.exception("Unexpected reported_state worker failure for %s", device_id)
         finally:
+            resubmit = False
             with self._reported_state_lock:
                 self._reported_state_active.discard(device_id)
+                if device_id in self._reported_state_pending:
+                    self._reported_state_active.add(device_id)
+                    resubmit = True
+            if resubmit:
+                try:
+                    self._reported_state_executor.submit(self._drain_reported_state, device_id)
+                except Exception:
+                    with self._reported_state_lock:
+                        self._reported_state_active.discard(device_id)
+                    logger.exception("Failed rescheduling MQTT v2 reported_state for %s", device_id)
 
     def _ingest_reported_state_async(self, device_id: str, data: dict[str, Any]) -> None:
         try:

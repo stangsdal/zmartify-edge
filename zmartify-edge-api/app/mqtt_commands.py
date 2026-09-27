@@ -23,6 +23,12 @@ class MqttCommandError(RuntimeError):
     """Raised when a MQTT command publish fails."""
 
 
+_IRRIGATION_MAX_ZONE_ID = 15
+_IRRIGATION_MAX_PROGRAM_ID = 8
+_IRRIGATION_MAX_MANUAL_RUNTIME_SECONDS = 7200
+_IRRIGATION_MAX_RAIN_DELAY_HOURS = 8760
+
+
 def _mqtt_host() -> str:
     return os.getenv("MQTT_HOST", "mosquitto").strip() or "mosquitto"
 
@@ -203,30 +209,43 @@ def publish_irrigation_command(
 
     if command_type == "irrigation.zone.start":
         zone_id = _zone_id_from_ref(target_ref, raw_parameters)
-        if zone_id is None:
-            raise MqttCommandError("irrigation zone command requires a zone target")
+        if zone_id is None or zone_id > _IRRIGATION_MAX_ZONE_ID:
+            raise MqttCommandError("irrigation zone must be between 1 and 15")
+        raw_duration_seconds = raw_parameters.get("duration_seconds", 300)
+        try:
+            duration_seconds = int(raw_duration_seconds)
+        except (TypeError, ValueError) as exc:
+            raise MqttCommandError("irrigation duration_seconds must be between 1 and 7200") from exc
+        if duration_seconds < 1 or duration_seconds > _IRRIGATION_MAX_MANUAL_RUNTIME_SECONDS:
+            raise MqttCommandError("irrigation duration_seconds must be between 1 and 7200")
         firmware_parameters["zone_id"] = zone_id
-        firmware_parameters["duration_seconds"] = int(raw_parameters.get("duration_seconds") or 300)
+        firmware_parameters["duration_seconds"] = duration_seconds
     elif command_type == "irrigation.program.start":
         program_id = raw_parameters.get("program_id")
         try:
             program_number = int(program_id)
         except (TypeError, ValueError) as exc:
-            raise MqttCommandError("irrigation program command requires a numeric program_id") from exc
-        if program_number <= 0:
-            raise MqttCommandError("irrigation program command requires a numeric program_id")
+            raise MqttCommandError("irrigation program_id must be between 1 and 8") from exc
+        if program_number < 1 or program_number > _IRRIGATION_MAX_PROGRAM_ID:
+            raise MqttCommandError("irrigation program_id must be between 1 and 8")
         firmware_parameters["program_id"] = program_number
     elif command_type == "irrigation.program.skip":
         firmware_parameters = {}
     elif command_type == "irrigation.zone.stop":
         zone_id = _zone_id_from_ref(target_ref, raw_parameters)
-        if zone_id is None:
-            raise MqttCommandError("irrigation zone command requires a zone target")
+        if zone_id is None or zone_id > _IRRIGATION_MAX_ZONE_ID:
+            raise MqttCommandError("irrigation zone must be between 1 and 15")
         firmware_parameters["zone_id"] = zone_id
     elif command_type == "irrigation.stop_all":
         firmware_parameters = {}
     elif command_type == "irrigation.rain_delay":
-        firmware_parameters["delay_hours"] = int(raw_parameters.get("delay_hours") or 0)
+        try:
+            delay_hours = int(raw_parameters.get("delay_hours", 0))
+        except (TypeError, ValueError) as exc:
+            raise MqttCommandError("irrigation delay_hours must be between 0 and 8760") from exc
+        if delay_hours < 0 or delay_hours > _IRRIGATION_MAX_RAIN_DELAY_HOURS:
+            raise MqttCommandError("irrigation delay_hours must be between 0 and 8760")
+        firmware_parameters["delay_hours"] = delay_hours
     else:
         firmware_parameters = dict(raw_parameters)
 

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IonContent, IonPage } from '@ionic/react';
+import { IonContent, IonIcon, IonPage } from '@ionic/react';
+import { cloudyOutline, partlySunnyOutline, rainyOutline, snowOutline, sunnyOutline, thunderstormOutline } from 'ionicons/icons';
 import { motion } from 'framer-motion';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
-import { mobileApi, MobileEvent, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
+import { mobileApi, MobileEvent, MobileSiteWeather, MobileZone, subscribeRealtimeTopics } from '../api/mobile';
 import { notificationsApi } from '../api/notifications';
 import { useAccess } from '../auth/AccessContext';
 
@@ -12,6 +13,8 @@ export function HomePage() {
   const [zones, setZones] = useState<MobileZone[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [weather, setWeather] = useState<MobileSiteWeather | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -82,6 +85,26 @@ export function HomePage() {
     };
   }, [selectedSiteId]);
 
+  useEffect(() => {
+    if (!selectedSiteId) {
+      setWeather(null);
+      return;
+    }
+    const loadWeather = async () => {
+      setWeatherLoading(true);
+      try {
+        setWeather(await mobileApi.getSiteWeather(String(selectedSiteId)));
+      } catch {
+        setWeather(null);
+      } finally {
+        setWeatherLoading(false);
+      }
+    };
+    void loadWeather();
+    const refreshTimer = window.setInterval(() => { void loadWeather(); }, 15 * 60 * 1000);
+    return () => window.clearInterval(refreshTimer);
+  }, [selectedSiteId]);
+
   const indoorAverage = useMemo(() => {
     const values = zones.map((z) => z.current_temperature_c).filter((v): v is number => typeof v === 'number');
     if (!values.length) return null;
@@ -122,6 +145,31 @@ export function HomePage() {
       todayWaterLiters: Math.max(120, events.length * 64),
     };
   }, [events]);
+
+  const weatherSummary = useMemo(() => {
+    const current = weather?.current;
+    const temperatures = (weather?.forecast || [])
+      .map((point) => point.temperature_c)
+      .filter((value): value is number => typeof value === 'number');
+    const precipitation = (weather?.forecast || []).reduce(
+      (total, point) => total + (typeof point.precipitation_mm === 'number' ? point.precipitation_mm : 0),
+      0,
+    );
+    const code = current?.weather_code;
+    if (typeof code !== 'number') {
+      return { current, temperatures, precipitation, label: 'Weather unavailable', icon: cloudyOutline };
+    }
+    if (code === 0) return { current, temperatures, precipitation, label: 'Clear', icon: sunnyOutline };
+    if (code <= 3) return { current, temperatures, precipitation, label: 'Partly cloudy', icon: partlySunnyOutline };
+    if (code >= 95) return { current, temperatures, precipitation, label: 'Thunderstorm', icon: thunderstormOutline };
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
+      return { current, temperatures, precipitation, label: 'Snow', icon: snowOutline };
+    }
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
+      return { current, temperatures, precipitation, label: 'Rain', icon: rainyOutline };
+    }
+    return { current, temperatures, precipitation, label: 'Cloudy', icon: cloudyOutline };
+  }, [weather]);
 
   return (
     <IonPage>
@@ -179,10 +227,47 @@ export function HomePage() {
             </div>
 
             <div className="rounded-2xl app-surface p-4 shadow-soft app-system-card app-system-card--weather">
-              <p className="text-xs text-muted uppercase tracking-wide">Weather</p>
-              <p className="text-xl font-bold mt-1">Dry and stable</p>
-              <p className="text-sm text-muted mt-1">Forecast quality is sufficient for schedule optimization.</p>
-              <p className="text-sm mt-3">Wind: 3 m/s</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs text-muted uppercase tracking-wide">Weather</p>
+                  <p className="text-xl font-bold mt-1">
+                    {weatherSummary.current?.temperature_c == null
+                      ? (weatherLoading ? 'Loading...' : '--')
+                      : `${weatherSummary.current.temperature_c.toFixed(1)}°C`}
+                  </p>
+                  <p className="text-sm text-muted mt-1">{weatherSummary.label}</p>
+                </div>
+                <IonIcon icon={weatherSummary.icon} className="text-3xl text-amber-500" aria-hidden="true" />
+              </div>
+              {weatherSummary.current ? (
+                <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted">Feels like</p>
+                    <p className="font-semibold">
+                      {weatherSummary.current.apparent_temperature_c == null ? '--' : `${weatherSummary.current.apparent_temperature_c.toFixed(1)}°C`}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted">Rain · 12h</p>
+                    <p className="font-semibold">{weatherSummary.precipitation.toFixed(1)} mm</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted">Wind</p>
+                    <p className="font-semibold">
+                      {weatherSummary.current.wind_speed_kmh == null ? '--' : `${weatherSummary.current.wind_speed_kmh.toFixed(0)} km/h`}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted mt-3">
+                  {weatherLoading ? 'Fetching local forecast...' : 'Verify the site address to enable local weather.'}
+                </p>
+              )}
+              {weatherSummary.temperatures.length > 0 ? (
+                <p className="text-sm mt-3">
+                  Next 12h: {Math.min(...weatherSummary.temperatures).toFixed(0)}–{Math.max(...weatherSummary.temperatures).toFixed(0)}°C
+                </p>
+              ) : null}
             </div>
           </div>
 

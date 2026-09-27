@@ -5,6 +5,8 @@ export interface MobileSiteSummary {
   site_slug: string;
   site_name: string;
   site_address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   domain_id: string;
   domain_name: string;
   domain_slug: string;
@@ -28,11 +30,32 @@ export interface MobileSiteDetail {
   site_name: string;
   site_slug: string;
   site_address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   domain: {
     domain_id: string;
     domain_name: string;
   };
   devices: MobileSiteDevice[];
+}
+
+export interface MobileWeatherPoint {
+  weather_at: string;
+  fetched_at: string;
+  temperature_c?: number | null;
+  apparent_temperature_c?: number | null;
+  precipitation_mm?: number | null;
+  wind_speed_kmh?: number | null;
+  weather_code?: number | null;
+}
+
+export interface MobileSiteWeather {
+  site_id: string;
+  site_name: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  current?: MobileWeatherPoint | null;
+  forecast: MobileWeatherPoint[];
 }
 
 export interface MobileSiteZonesDetail {
@@ -440,6 +463,9 @@ export const mobileApi = {
   listSites: (): Promise<{ sites: MobileSiteSummary[] }> => apiClient.get('/mobile/sites'),
 
   getSite: (siteId: string): Promise<MobileSiteDetail> => apiClient.get(`/mobile/sites/${siteId}`),
+
+  getSiteWeather: (siteId: string, forecastHours = 12): Promise<MobileSiteWeather> =>
+    apiClient.get(`/mobile/sites/${siteId}/weather?forecast_hours=${forecastHours}`),
 
   getSiteZones: (siteId: string): Promise<MobileSiteZonesDetail> =>
     apiClient.get(`/mobile/sites/${siteId}/zones`),

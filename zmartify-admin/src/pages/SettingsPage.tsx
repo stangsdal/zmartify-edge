@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { IonButton, IonContent, IonItem, IonLabel, IonList, IonPage, IonSelect, IonSelectOption, IonToggle } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
@@ -42,6 +44,7 @@ export function SettingsPage() {
   const [profileLabel, setProfileLabel] = useState('Unknown');
   const [healthRows, setHealthRows] = useState<DeviceHealthRow[]>([]);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [appVersion, setAppVersion] = useState(Capacitor.isNativePlatform() ? 'Loading...' : 'Web app');
 
   const formatAge = (ageMs: number | null): string => {
     if (ageMs == null) return 'Unknown';
@@ -75,6 +78,14 @@ export function SettingsPage() {
     document.body.classList.toggle('dark-mode', darkMode);
     localStorage.setItem('theme_mode', darkMode ? 'dark' : 'light');
   }, [darkMode]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    CapacitorApp.getInfo()
+      .then((info) => setAppVersion(`Version ${info.version} (${info.build})`))
+      .catch(() => setAppVersion('Unknown'));
+  }, []);
 
   useEffect(() => {
     mobileApi.listSites().then((res) => {
@@ -203,6 +214,10 @@ export function SettingsPage() {
               <IonItem>
                 <IonLabel>Privacy</IonLabel>
                 <span className="text-sm text-muted">Local edge only</span>
+              </IonItem>
+              <IonItem lines="none">
+                <IonLabel>App version</IonLabel>
+                <span className="text-sm text-muted">{appVersion}</span>
               </IonItem>
             </IonList>
           </div>

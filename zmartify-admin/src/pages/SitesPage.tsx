@@ -11,12 +11,21 @@ import {
   IonSelect,
   IonSelectOption,
 } from '@ionic/react';
+import { checkmarkCircleOutline, locationOutline } from 'ionicons/icons';
+import { IonIcon } from '@ionic/react';
 import { siteApi } from '../api/sites';
 import { domainApi } from '../api/domains';
 import { siteMembersApi, SiteMembership } from '../api/siteMembers';
 import { usersApi } from '../api/users';
 import { Site, Domain, User } from '../types/api';
 import { AppHeader } from '../components/AppHeader';
+
+interface SiteDraft {
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+}
 
 export function SitesPage() {
   const [sites, setSites] = useState<Site[]>([]);
@@ -28,7 +37,11 @@ export function SitesPage() {
   const [newSiteSlug, setNewSiteSlug] = useState('');
   const [newSiteName, setNewSiteName] = useState('');
   const [newSiteAddress, setNewSiteAddress] = useState('');
-  const [siteDrafts, setSiteDrafts] = useState<Record<number, { name: string; address: string }>>({});
+  const [newSiteLatitude, setNewSiteLatitude] = useState<number | null>(null);
+  const [newSiteLongitude, setNewSiteLongitude] = useState<number | null>(null);
+  const [siteDrafts, setSiteDrafts] = useState<Record<number, SiteDraft>>({});
+  const [locationBusyKey, setLocationBusyKey] = useState<string | null>(null);
+  const [locationStatus, setLocationStatus] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [savingSiteId, setSavingSiteId] = useState<number | null>(null);
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
@@ -93,9 +106,14 @@ export function SitesPage() {
 
   useEffect(() => {
     setSiteDrafts((prev) => {
-      const next: Record<number, { name: string; address: string }> = {};
+      const next: Record<number, SiteDraft> = {};
       for (const site of sites) {
-        next[site.id] = prev[site.id] || { name: site.name, address: site.address || '' };
+        next[site.id] = prev[site.id] || {
+          name: site.name,
+          address: site.address || '',
+          latitude: site.latitude ?? null,
+          longitude: site.longitude ?? null,
+        };
       }
       return next;
     });
@@ -108,10 +126,16 @@ export function SitesPage() {
     }
     try {
       setCreating(true);
-      await siteApi.create(parseInt(selectedDomainId), newSiteSlug, newSiteName, newSiteAddress.trim());
+      await siteApi.create(parseInt(selectedDomainId), newSiteSlug, newSiteName, {
+        address: newSiteAddress.trim() || null,
+        latitude: newSiteLatitude,
+        longitude: newSiteLongitude,
+      });
       setNewSiteSlug('');
       setNewSiteName('');
       setNewSiteAddress('');
+      setNewSiteLatitude(null);
+      setNewSiteLongitude(null);
       setSelectedDomainId('');
       setShowForm(false);
       setError('');
@@ -123,19 +147,26 @@ export function SitesPage() {
     }
   };
 
-  const updateSiteDraft = (siteId: number, patch: Partial<{ name: string; address: string }>) => {
+  const updateSiteDraft = (siteId: number, patch: Partial<SiteDraft>) => {
     setSiteDrafts((prev) => ({
       ...prev,
       [siteId]: {
         name: prev[siteId]?.name || '',
         address: prev[siteId]?.address || '',
+        latitude: prev[siteId]?.latitude ?? null,
+        longitude: prev[siteId]?.longitude ?? null,
         ...patch,
       },
     }));
   };
 
   const handleUpdateSite = async (site: Site) => {
-    const draft = siteDrafts[site.id] || { name: site.name, address: site.address || '' };
+    const draft = siteDrafts[site.id] || {
+      name: site.name,
+      address: site.address || '',
+      latitude: site.latitude ?? null,
+      longitude: site.longitude ?? null,
+    };
     const name = draft.name.trim();
     if (!name) {
       setError('Site name is required');
@@ -143,7 +174,12 @@ export function SitesPage() {
     }
     try {
       setSavingSiteId(site.id);
-      await siteApi.update(site.id, { name, address: draft.address.trim() || null });
+      await siteApi.update(site.id, {
+        name,
+        address: draft.address.trim() || null,
+        latitude: draft.latitude,
+        longitude: draft.longitude,
+      });
       setError('');
       await fetchSites();
     } catch (e) {
@@ -151,6 +187,62 @@ export function SitesPage() {
     } finally {
       setSavingSiteId(null);
     }
+  };
+
+  const applyLocation = (key: string, siteId: number | null, location: Awaited<ReturnType<typeof siteApi.geocode>>) => {
+    if (siteId === null) {
+      setNewSiteAddress(location.address);
+      setNewSiteLatitude(location.latitude);
+      setNewSiteLongitude(location.longitude);
+    } else {
+      updateSiteDraft(siteId, location);
+    }
+    setLocationStatus((current) => ({ ...current, [key]: 'Address verified' }));
+  };
+
+  const verifyAddress = async (siteId: number | null) => {
+    const key = siteId === null ? 'new' : String(siteId);
+    const address = siteId === null ? newSiteAddress : siteDrafts[siteId]?.address || '';
+    if (!address.trim()) {
+      setError('Enter an address first');
+      return;
+    }
+    try {
+      setLocationBusyKey(key);
+      applyLocation(key, siteId, await siteApi.geocode({ address: address.trim() }));
+      setError('');
+    } catch (e) {
+      setError(String(e));
+      setLocationStatus((current) => ({ ...current, [key]: '' }));
+    } finally {
+      setLocationBusyKey(null);
+    }
+  };
+
+  const useCurrentLocation = (siteId: number | null) => {
+    const key = siteId === null ? 'new' : String(siteId);
+    if (!navigator.geolocation) {
+      setError('Location is not supported on this device');
+      return;
+    }
+    setLocationBusyKey(key);
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          applyLocation(key, siteId, await siteApi.geocode({ latitude: coords.latitude, longitude: coords.longitude }));
+          setError('');
+        } catch (e) {
+          setError(String(e));
+        } finally {
+          setLocationBusyKey(null);
+        }
+      },
+      (locationError) => {
+        setError(locationError.message || 'Unable to access your location');
+        setLocationBusyKey(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   };
 
   const handleDeleteSite = async (id: number) => {
@@ -292,10 +384,27 @@ export function SitesPage() {
                 <IonLabel position="stacked">Address</IonLabel>
                 <IonInput
                   value={newSiteAddress}
-                  onIonChange={(e) => setNewSiteAddress(e.detail.value || '')}
+                  onIonChange={(e) => {
+                    setNewSiteAddress(e.detail.value || '');
+                    setNewSiteLatitude(null);
+                    setNewSiteLongitude(null);
+                    setLocationStatus((current) => ({ ...current, new: '' }));
+                  }}
                   placeholder="e.g., 1 Main Street"
                 />
               </IonItem>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <IonButton size="small" fill="outline" disabled={locationBusyKey === 'new'} onClick={() => { void verifyAddress(null); }}>
+                  <IonIcon slot="start" icon={checkmarkCircleOutline} />
+                  Verify address
+                </IonButton>
+                <IonButton size="small" fill="outline" disabled={locationBusyKey === 'new'} onClick={() => useCurrentLocation(null)}>
+                  <IonIcon slot="start" icon={locationOutline} />
+                  Use my location
+                </IonButton>
+                {locationStatus.new ? <span className="text-sm text-emerald-700">{locationStatus.new}</span> : null}
+              </div>
+              <p className="mt-1 text-xs text-muted">Address lookup by OpenStreetMap</p>
               <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
                 <IonButton expand="block" onClick={handleCreateSite}>
                   Create
@@ -316,7 +425,7 @@ export function SitesPage() {
                     Name
                     <input
                       className="mt-1 w-full rounded-xl border px-3 py-2 text-sm normal-case tracking-normal"
-                      value={(siteDrafts[site.id] || { name: site.name, address: site.address || '' }).name}
+                      value={(siteDrafts[site.id] || { name: site.name, address: site.address || '', latitude: null, longitude: null }).name}
                       onChange={(event) => updateSiteDraft(site.id, { name: event.target.value })}
                     />
                   </label>
@@ -324,11 +433,25 @@ export function SitesPage() {
                     Address
                     <input
                       className="mt-1 w-full rounded-xl border px-3 py-2 text-sm normal-case tracking-normal"
-                      value={(siteDrafts[site.id] || { name: site.name, address: site.address || '' }).address}
-                      onChange={(event) => updateSiteDraft(site.id, { address: event.target.value })}
+                      value={(siteDrafts[site.id] || { name: site.name, address: site.address || '', latitude: null, longitude: null }).address}
+                      onChange={(event) => {
+                        updateSiteDraft(site.id, { address: event.target.value, latitude: null, longitude: null });
+                        setLocationStatus((current) => ({ ...current, [site.id]: '' }));
+                      }}
                       placeholder="No address set"
                     />
                   </label>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <IonButton size="small" fill="clear" disabled={locationBusyKey === String(site.id)} onClick={() => { void verifyAddress(site.id); }}>
+                      <IonIcon slot="start" icon={checkmarkCircleOutline} />
+                      Verify
+                    </IonButton>
+                    <IonButton size="small" fill="clear" disabled={locationBusyKey === String(site.id)} onClick={() => useCurrentLocation(site.id)}>
+                      <IonIcon slot="start" icon={locationOutline} />
+                      Locate
+                    </IonButton>
+                    {locationStatus[String(site.id)] ? <span className="text-xs normal-case text-emerald-700">{locationStatus[String(site.id)]}</span> : null}
+                  </div>
                   <IonItem className="ion-no-padding mt-3">
                     <IonLabel position="stacked">Owners</IonLabel>
                     <IonSelect

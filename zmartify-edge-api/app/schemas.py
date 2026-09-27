@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 DEVICE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -41,6 +41,8 @@ class SiteCreate(BaseModel):
     slug: str = Field(min_length=1)
     name: str = Field(min_length=1)
     address: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
     @field_validator("slug")
     @classmethod
@@ -48,6 +50,12 @@ class SiteCreate(BaseModel):
         if not SLUG_RE.fullmatch(value):
             raise ValueError("slug must contain only a-z, 0-9, and hyphen")
         return value
+
+    @model_validator(mode="after")
+    def validate_location(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
 
 
 class SiteOut(BaseModel):
@@ -57,6 +65,8 @@ class SiteOut(BaseModel):
     slug: str
     name: str
     address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     created_at: str
 
 
@@ -65,6 +75,36 @@ class SiteUpdate(BaseModel):
 
     name: str = Field(min_length=1)
     address: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def validate_location(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
+
+
+class SiteGeocodeIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    address: str | None = Field(default=None, min_length=1)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def validate_lookup(self):
+        has_address = self.address is not None
+        has_coordinates = self.latitude is not None and self.longitude is not None
+        if has_address == has_coordinates:
+            raise ValueError("provide either an address or latitude and longitude")
+        return self
+
+
+class SiteGeocodeOut(BaseModel):
+    address: str
+    latitude: float
+    longitude: float
 
 
 class DeviceCreate(BaseModel):

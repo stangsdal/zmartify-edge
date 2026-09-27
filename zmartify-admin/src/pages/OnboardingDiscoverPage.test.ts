@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseControllerIdentity, parseFactoryLabel } from '../utils/factoryLabel';
+import { inferControllerProductType, parseControllerIdentity, parseFactoryLabel } from '../utils/factoryLabel';
 
 describe('factory onboarding label', () => {
   it('parses a valid factory QR URL', () => {
@@ -29,5 +29,13 @@ describe('factory onboarding label', () => {
       deviceId: 'zmartify-hvac-nilan-aabbccddeeff',
       mac: 'AA:BB:CC:DD:EE:FF',
     });
+  });
+
+  it('accepts a stable irrigation controller ID without inventing a MAC', () => {
+    expect(parseControllerIdentity('zmartify-irrigation-01')).toEqual({
+      deviceId: 'zmartify-irrigation-01',
+      mac: '',
+    });
+    expect(inferControllerProductType('zmartify-irrigation-01')).toBe('irrigation');
   });
 });

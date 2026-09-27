@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from app import mqtt_commands
 
 
@@ -246,3 +248,35 @@ def test_publish_irrigation_command_uses_compact_irrigation_payload(monkeypatch)
     assert "target_ref" not in payload
     assert payload["parameters"]["zone_id"] == 3
     assert payload["parameters"]["duration_seconds"] == 600
+
+
+@pytest.mark.parametrize(
+    ("command_type", "target_ref", "parameters", "message"),
+    [
+        ("irrigation.zone.start", "zone:16", {"duration_seconds": 60}, "zone must be between 1 and 15"),
+        ("irrigation.zone.start", "zone:1", {"duration_seconds": 0}, "duration_seconds must be between 1 and 7200"),
+        ("irrigation.zone.start", "zone:1", {"duration_seconds": 7201}, "duration_seconds must be between 1 and 7200"),
+        ("irrigation.program.start", None, {"program_id": 9}, "program_id must be between 1 and 8"),
+        ("irrigation.rain_delay", None, {"delay_hours": 8761}, "delay_hours must be between 0 and 8760"),
+    ],
+)
+def test_publish_irrigation_command_rejects_values_outside_firmware_contract(
+    monkeypatch,
+    command_type,
+    target_ref,
+    parameters,
+    message,
+):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(mqtt_commands, "get_device_mqtt_credentials", lambda _device_id: {"username": "dev-u", "password": "dev-p"})
+    monkeypatch.setattr(mqtt_commands.subprocess, "run", lambda *args, **kwargs: calls.append(list(args[0])) or _Result())
+
+    with pytest.raises(mqtt_commands.MqttCommandError, match=message):
+        mqtt_commands.publish_irrigation_command(
+            "zmartify-irrigation-01",
+            command_type,
+            target_ref,
+            parameters,
+        )
+
+    assert calls == []

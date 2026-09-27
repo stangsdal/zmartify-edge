@@ -6,6 +6,7 @@ import { SiteSelector } from '../components/SiteSelector';
 import { IrrigationZone, mobileApi, MobileEvent, MobileSiteSummary } from '../api/mobile';
 import { commandsApi } from '../api/commands';
 import { toIrrigationFeedback } from '../utils/irrigationErrors';
+import { isIrrigationRuntimeActive } from '../utils/irrigationRuntime';
 import { useIrrigationRunState } from '../hooks/useIrrigationRunState';
 import { useAccess } from '../auth/AccessContext';
 
@@ -75,7 +76,7 @@ export function IrrigationOverviewPage() {
     .map((zoneRun) => ({ deviceId: zoneRun.deviceId, displayName: zoneRun.displayName, zone: zoneRun.zone })), [zoneRuns]);
   const activeZone = activeZones[0] || null;
   const activeRuntime = useMemo(
-    () => (overview?.devices || []).find((device) => device.runtime?.active_program_name || device.runtime?.active_zone_id != null) || null,
+    () => (overview?.devices || []).find((device) => isIrrigationRuntimeActive(device.runtime)) || null,
     [overview],
   );
   const controllerRunning = activeZone != null || activeRuntime != null;

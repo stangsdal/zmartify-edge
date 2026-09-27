@@ -56,21 +56,30 @@ def _ensure_hvac_projection_schema(conn: Any) -> None:
             source_timestamp TEXT, updated_at TEXT, PRIMARY KEY(device_id, element_id))"""
     )
     if get_database_backend() == "postgres":
+        existing_columns = {
+            str(row["column_name"])
+            for row in conn.execute(
+                """SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public' AND table_name = 'zone_state'"""
+            ).fetchall()
+        }
         # PostgreSQL aborts the whole transaction on a duplicate-column error.
         # Keep this projection migration idempotent without relying on an
         # exception that leaves the connection unusable.
-        for sql in (
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS thermostat_element_id INTEGER",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS controlled_element_ids_json TEXT",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS assigned_channel_ids_json TEXT",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS rssi_element_dbm DOUBLE PRECISION",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS rssi_control_unit_dbm DOUBLE PRECISION",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS floor_temperature_c DOUBLE PRECISION",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS configuration_json TEXT",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS setpoint_profiles_json TEXT",
-            "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS zone_mode INTEGER",
+        for column_name, sql in (
+            ("thermostat_element_id", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS thermostat_element_id INTEGER"),
+            ("controlled_element_ids_json", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS controlled_element_ids_json TEXT"),
+            ("assigned_channel_ids_json", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS assigned_channel_ids_json TEXT"),
+            ("rssi_element_dbm", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS rssi_element_dbm DOUBLE PRECISION"),
+            ("rssi_control_unit_dbm", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS rssi_control_unit_dbm DOUBLE PRECISION"),
+            ("floor_temperature_c", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS floor_temperature_c DOUBLE PRECISION"),
+            ("configuration_json", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS configuration_json TEXT"),
+            ("setpoint_profiles_json", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS setpoint_profiles_json TEXT"),
+            ("zone_mode", "ALTER TABLE zone_state ADD COLUMN IF NOT EXISTS zone_mode INTEGER"),
         ):
-            conn.execute(sql)
+            if column_name not in existing_columns:
+                conn.execute(sql)
     else:
         for sql in (
             "ALTER TABLE zone_state ADD COLUMN thermostat_element_id INTEGER",
@@ -653,7 +662,7 @@ def _resolve_device(conn: Any, device_external_id: str) -> dict[str, Any]:
 def _resolve_site(conn: Any, site_ref: str) -> dict[str, Any]:
     row = conn.execute(
         """
-        SELECT s.id, s.uuid, s.name, s.slug, s.address, s.domain_id,
+        SELECT s.id, s.uuid, s.name, s.slug, s.address, s.latitude, s.longitude, s.domain_id,
                d.uuid AS domain_uuid, d.slug AS domain_slug, d.name AS domain_name
         FROM sites s
         JOIN domains d ON d.id = s.domain_id
@@ -2167,14 +2176,14 @@ def list_mobile_sites(*, site_ids: set[int] | None = None) -> list[dict[str, Any
         rows = conn.execute(
             """
                  SELECT COALESCE(s.uuid, s.slug) AS site_id, s.slug AS site_slug, s.name AS site_name,
-                     s.address AS site_address,
+                     s.address AS site_address, s.latitude, s.longitude,
                      COALESCE(d.uuid, d.slug) AS domain_id, d.name AS domain_name, d.slug AS domain_slug,
                    COUNT(dev.id) AS device_count
             FROM sites s
             JOIN domains d ON d.id = s.domain_id
             LEFT JOIN devices dev ON dev.site_id = s.id
             {where_clause}
-            GROUP BY s.id, s.uuid, s.slug, s.name, s.address, d.uuid, d.slug, d.name
+            GROUP BY s.id, s.uuid, s.slug, s.name, s.address, s.latitude, s.longitude, d.uuid, d.slug, d.name
             ORDER BY s.id
             """
             .format(where_clause=where_clause),
@@ -2202,6 +2211,8 @@ def get_mobile_site(site_ref: str) -> dict[str, Any]:
         "site_name": site["name"],
         "site_slug": site["slug"],
         "site_address": site["address"],
+        "latitude": site["latitude"],
+        "longitude": site["longitude"],
         "domain": {
             "domain_id": site["domain_uuid"] or site["domain_slug"],
             "domain_name": site["domain_name"],

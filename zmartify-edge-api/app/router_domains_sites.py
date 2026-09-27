@@ -5,6 +5,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.auth import AuthError, audit_action
+from app.geocoding import GeocodingError, geocode_address, reverse_geocode
 from app.permissions import require_global_admin
 from app.registry import (
     RegistryConflictError,
@@ -20,7 +21,7 @@ from app.registry import (
     rename_domain,
     update_site,
 )
-from app.schemas import DomainCreate, DomainOut, DomainRename, SiteCreate, SiteOut, SiteUpdate
+from app.schemas import DomainCreate, DomainOut, DomainRename, SiteCreate, SiteGeocodeIn, SiteGeocodeOut, SiteOut, SiteUpdate
 
 
 def create_domains_sites_router(require_roles: Callable[[Request, set[str]], None]) -> APIRouter:
@@ -80,7 +81,14 @@ def create_domains_sites_router(require_roles: Callable[[Request, set[str]], Non
     def api_create_site(domain_id: int, payload: SiteCreate, request: Request) -> dict:
         require_platform_administrator(request)
         try:
-            site = create_site(domain_id, payload.slug, payload.name, payload.address)
+            site = create_site(
+                domain_id,
+                payload.slug,
+                payload.name,
+                payload.address,
+                payload.latitude,
+                payload.longitude,
+            )
             audit_action(actor_user_id=request.state.auth_user.user_id, action="create_site", resource_type="site", resource_id=str(site["id"]))
             return site
         except RegistryNotFoundError as exc:
@@ -96,6 +104,23 @@ def create_domains_sites_router(require_roles: Callable[[Request, set[str]], Non
         except RegistryNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    @router.post("/sites/geocode", response_model=SiteGeocodeOut)
+    def api_geocode_site(payload: SiteGeocodeIn, request: Request) -> dict:
+        require_platform_administrator(request)
+        try:
+            if payload.address is not None:
+                location = geocode_address(payload.address)
+            else:
+                assert payload.latitude is not None and payload.longitude is not None
+                location = reverse_geocode(payload.latitude, payload.longitude)
+            return {
+                "address": location.address,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+            }
+        except GeocodingError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
     @router.get("/sites/{site_id}", response_model=SiteOut)
     def api_get_site(site_id: int, request: Request) -> dict:
         require_platform_administrator(request)
@@ -108,7 +133,13 @@ def create_domains_sites_router(require_roles: Callable[[Request, set[str]], Non
     def api_update_site(site_id: int, payload: SiteUpdate, request: Request) -> dict:
         require_platform_administrator(request)
         try:
-            site = update_site(site_id, name=payload.name, address=payload.address)
+            site = update_site(
+                site_id,
+                name=payload.name,
+                address=payload.address,
+                latitude=payload.latitude,
+                longitude=payload.longitude,
+            )
             audit_action(actor_user_id=request.state.auth_user.user_id, action="update_site", resource_type="site", resource_id=str(site_id))
             return site
         except RegistryNotFoundError as exc:

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { IonContent, IonIcon, IonPage, useIonViewWillLeave } from '@ionic/react';
-import { cloudOfflineOutline, flameOutline } from 'ionicons/icons';
+import { cloudOfflineOutline, cloudyOutline, flameOutline, partlySunnyOutline, rainyOutline, snowOutline, sunnyOutline, thunderstormOutline } from 'ionicons/icons';
 import { useHistory } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { SiteSelector } from '../components/SiteSelector';
 import { RoomCard } from '../components/RoomCard';
 import { AdvancedThermostatSettings } from '../components/AdvancedThermostatSettings';
-import { mobileApi, MobileSiteDevice, MobileZone } from '../api/mobile';
+import { mobileApi, MobileSiteDevice, MobileSiteWeather, MobileZone } from '../api/mobile';
 import { NilanControlPanel } from '../components/NilanControlPanel';
 import { apiClient } from '../api/client';
 import { useAccess } from '../auth/AccessContext';
@@ -30,6 +30,7 @@ export function RoomsPage() {
   const [advancedRoom, setAdvancedRoom] = useState<RoomWithRef | null>(null);
   const [bulkModeBusy, setBulkModeBusy] = useState(false);
   const [bulkModeError, setBulkModeError] = useState('');
+  const [weather, setWeather] = useState<MobileSiteWeather | null>(null);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
   const socketPingTimersRef = useRef<Map<string, number>>(new Map());
   const socketReconnectTimersRef = useRef<Map<string, number>>(new Map());
@@ -54,6 +55,23 @@ export function RoomsPage() {
   useIonViewWillLeave(() => {
     blurActiveElement();
   });
+
+  useEffect(() => {
+    if (!selectedSiteId) {
+      setWeather(null);
+      return;
+    }
+    const loadWeather = async () => {
+      try {
+        setWeather(await mobileApi.getSiteWeather(String(selectedSiteId)));
+      } catch {
+        setWeather(null);
+      }
+    };
+    void loadWeather();
+    const refreshTimer = window.setInterval(() => { void loadWeather(); }, 15 * 60 * 1000);
+    return () => window.clearInterval(refreshTimer);
+  }, [selectedSiteId]);
 
   const handleSetpointChange = (room: RoomWithRef, target: number) => {
     const next = Math.max(5, Math.min(35, Math.round(target * 2) / 2));
@@ -369,6 +387,24 @@ export function RoomsPage() {
     () => mostCommonHvacMode(sortedRooms.map((room) => room.setpoint_mode)),
     [sortedRooms]
   );
+  const weatherSummary = useMemo(() => {
+    const current = weather?.current;
+    const rainMm = (weather?.forecast || []).reduce(
+      (total, point) => total + (typeof point.precipitation_mm === 'number' ? point.precipitation_mm : 0),
+      0,
+    );
+    const code = current?.weather_code;
+    if (code === 0) return { current, rainMm, label: 'Clear', icon: sunnyOutline };
+    if (typeof code === 'number' && code <= 3) return { current, rainMm, label: 'Partly cloudy', icon: partlySunnyOutline };
+    if (typeof code === 'number' && code >= 95) return { current, rainMm, label: 'Thunderstorm', icon: thunderstormOutline };
+    if (typeof code === 'number' && ((code >= 71 && code <= 77) || code === 85 || code === 86)) {
+      return { current, rainMm, label: 'Snow', icon: snowOutline };
+    }
+    if (typeof code === 'number' && ((code >= 51 && code <= 67) || (code >= 80 && code <= 82))) {
+      return { current, rainMm, label: 'Rain', icon: rainyOutline };
+    }
+    return { current, rainMm, label: code == null ? 'No weather data' : 'Cloudy', icon: cloudyOutline };
+  }, [weather]);
   const canOperate = selectedSiteId != null && can(selectedSiteId, 'hvac', 'operate');
   const canConfigure = selectedSiteId != null && can(selectedSiteId, 'hvac', 'configure');
   const site = context?.sites.find((candidate) => candidate.id === selectedSiteId);
@@ -387,6 +423,34 @@ export function RoomsPage() {
             value={selectedSiteId ? String(selectedSiteId) : ''}
             onChange={(siteId) => selectSite(Number(siteId))}
           />
+
+          {weatherSummary.current ? (
+            <section className="app-surface shadow-soft flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl px-4 py-3">
+              <div className="flex min-w-[9rem] items-center gap-3">
+                <IonIcon icon={weatherSummary.icon} className="text-2xl text-amber-500" aria-hidden="true" />
+                <div>
+                  <p className="text-xs uppercase text-muted">Outside</p>
+                  <p className="text-lg font-bold">
+                    {weatherSummary.current.temperature_c == null ? '--' : `${weatherSummary.current.temperature_c.toFixed(1)}°C`}
+                  </p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted">Weather</p>
+                <p className="text-sm font-semibold">{weatherSummary.label}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted">Rain · 12h</p>
+                <p className="text-sm font-semibold">{weatherSummary.rainMm.toFixed(1)} mm</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted">Wind</p>
+                <p className="text-sm font-semibold">
+                  {weatherSummary.current.wind_speed_kmh == null ? '--' : `${weatherSummary.current.wind_speed_kmh.toFixed(0)} km/h`}
+                </p>
+              </div>
+            </section>
+          ) : null}
 
           <section className="hvac-summary-card app-surface shadow-soft">
             <div>

@@ -6,6 +6,7 @@ import { deviceApi } from '../api/devices';
 import { DeviceFreshness } from '../types/api';
 import { onboardingFlow } from '../utils/onboardingFlow';
 import { parseApiError } from '../utils/apiError';
+import { inferControllerProductType } from '../utils/factoryLabel';
 import { useAccess } from '../auth/AccessContext';
 
 function isConnectedSinceStaging(status: DeviceFreshness, stagedAt?: string): boolean {
@@ -21,6 +22,8 @@ export function OnboardingCompletePage() {
   const { context, selectedSiteId } = useAccess();
   const flow = onboardingFlow.load();
   const deviceId = flow.deviceId || flow.claimResult?.device?.device_id;
+  const productType = inferControllerProductType(deviceId || '');
+  const isIrrigation = productType === 'irrigation';
   const [statusText, setStatusText] = useState('Waiting for the controller...');
   const [status, setStatus] = useState<DeviceFreshness | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,25 +77,33 @@ export function OnboardingCompletePage() {
     }
   };
 
-  const selectedSite = context?.sites.find((site) => site.id === selectedSiteId);
+  const selectedSite = context?.sites.find((site) => site.id === (flow.selectedSiteId || selectedSiteId));
+  const productPath = isIrrigation ? 'irrigation' : 'hvac';
+  const productLabel = isIrrigation ? 'Irrigation' : 'HVAC';
 
   return (
     <IonPage>
-      <AppHeader title="Onboarding" subtitle="Connect with ESPTouch V2" />
+      <AppHeader title="Onboarding" subtitle={isIrrigation ? 'Connect irrigation controller' : 'Connect with ESPTouch V2'} />
       <IonContent className="ion-padding">
         <div className="space-y-4 pb-20 lg:pb-8">
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <p className="text-sm text-muted">Step 2 of 2</p>
-            <h2 className="text-lg font-semibold mt-1">Connect controller to Wi-Fi</h2>
+            <h2 className="text-lg font-semibold mt-1">{isIrrigation ? 'Apply controller configuration' : 'Connect controller to Wi-Fi'}</h2>
             <p className="text-sm text-muted mt-2">Device ID: {deviceId || 'n/a'}</p>
             <p className="text-sm text-muted mt-1">Claim code: <strong>{flow.claimToken || 'n/a'}</strong></p>
-            <ol className="text-sm text-muted mt-3 list-decimal pl-5 space-y-1">
-              <li>Open the official Espressif ESPTouch app and select ESPTouch V2.</li>
-              <li>Enter the local 2.4 GHz Wi-Fi password.</li>
-              <li>Enter <strong>{flow.claimToken || 'the claim code'}</strong> in Custom Data and start provisioning.</li>
-              <li>Return here when ESPTouch reports success. Status updates automatically.</li>
-            </ol>
+            {isIrrigation ? (
+              <p className="text-sm text-muted mt-3">
+                Apply the staged MQTT configuration to the controller, then reboot it. Status updates automatically.
+              </p>
+            ) : (
+              <ol className="text-sm text-muted mt-3 list-decimal pl-5 space-y-1">
+                <li>Open the official Espressif ESPTouch app and select ESPTouch V2.</li>
+                <li>Enter the local 2.4 GHz Wi-Fi password.</li>
+                <li>Enter <strong>{flow.claimToken || 'the claim code'}</strong> in Custom Data and start provisioning.</li>
+                <li>Return here when ESPTouch reports success. Status updates automatically.</li>
+              </ol>
+            )}
             <p className="text-sm mt-2">Status: {statusText}</p>
             {status ? (
               <div className="text-sm text-muted mt-2">
@@ -115,8 +126,8 @@ export function OnboardingCompletePage() {
               >
                 New onboarding
               </IonButton>
-              <IonButton onClick={() => history.push(selectedSite ? `/app/sites/${selectedSite.uuid || selectedSite.id}/hvac` : '/app/devices')}>
-                Open HVAC
+              <IonButton onClick={() => history.push(selectedSite ? `/app/sites/${selectedSite.uuid || selectedSite.id}/${productPath}` : '/app/devices')}>
+                Open {productLabel}
               </IonButton>
             </div>
           </section>

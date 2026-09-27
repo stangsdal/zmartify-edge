@@ -18,7 +18,7 @@ import { AppHeader } from '../components/AppHeader';
 import { deviceApi } from '../api/devices';
 import { onboardingFlow } from '../utils/onboardingFlow';
 import { parseApiError } from '../utils/apiError';
-import { parseControllerIdentity, parseFactoryLabel } from '../utils/factoryLabel';
+import { inferControllerProductType, parseControllerIdentity, parseFactoryLabel } from '../utils/factoryLabel';
 import { useAccess } from '../auth/AccessContext';
 
 function generateClaimToken(): string {
@@ -34,7 +34,7 @@ export function OnboardingDiscoverPage() {
   const [controllerIdentity, setControllerIdentity] = useState(flow.deviceId || flow.mac || '');
   const [pairingCode, setPairingCode] = useState('');
   const [claimToken] = useState(generateClaimToken);
-  const [displayName, setDisplayName] = useState(flow.displayName || 'AHC9000 controller');
+  const [displayName, setDisplayName] = useState(flow.displayName || 'Zmartify controller');
   const [domainId, setDomainId] = useState<number | undefined>(flow.selectedDomainId);
   const [siteId, setSiteId] = useState<number | undefined>(flow.selectedSiteId);
   const [bleDeviceName, setBleDeviceName] = useState('');
@@ -165,8 +165,8 @@ export function OnboardingDiscoverPage() {
         domain_id: domainId!,
         site_id: siteId!,
         display_name: displayName.trim(),
-        mac: identity.mac,
-        product_type: 'hvac',
+        mac: identity.mac || undefined,
+        product_type: inferControllerProductType(identity.deviceId),
       });
       saveStagedFlow(identity, result);
       history.push('/app/onboarding/complete');
@@ -193,8 +193,8 @@ export function OnboardingDiscoverPage() {
         domain_id: domainId!,
         site_id: siteId!,
         display_name: displayName.trim(),
-        mac: identity.mac,
-        product_type: 'hvac',
+        mac: identity.mac || undefined,
+        product_type: inferControllerProductType(identity.deviceId),
       });
       saveStagedFlow(identity, result);
       const customData = await EspProvisioning.sendCustomDataString({
@@ -224,7 +224,7 @@ export function OnboardingDiscoverPage() {
 
   return (
     <IonPage>
-      <AppHeader title="Onboarding" subtitle="Connect AHC9000 controller" />
+      <AppHeader title="Onboarding" subtitle="Connect Zmartify controller" />
       <IonContent className="ion-padding">
         <IonLoading isOpen={loading} message={progressMessage || 'Preparing...'} />
         <div className="space-y-4 pb-20 lg:pb-8">
