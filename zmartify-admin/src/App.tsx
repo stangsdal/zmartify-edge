@@ -39,6 +39,7 @@ import { OnboardingAssignSitePage } from './pages/OnboardingAssignSitePage';
 import { OnboardingCompletePage } from './pages/OnboardingCompletePage';
 import { SystemsPage } from './pages/SystemsPage';
 import { SiteSystemsPage } from './pages/SiteSystemsPage';
+import { PrivacyPage } from './pages/PrivacyPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ResponsiveNavigation } from './components/ResponsiveNavigation';
 import { useAccess } from './auth/AccessContext';
@@ -79,7 +80,7 @@ export function App() {
   const appBase = '/app';
   const isAdminHost = typeof window !== 'undefined' && window.location.hostname === 'admin.zmartify.dk';
   const defaultAuthenticatedPath = isAdminHost ? `${appBase}/dashboard` : `${appBase}/home`;
-  const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`];
+  const publicRoutePrefixes = [`${appBase}/login`, `${appBase}/setup`, `${appBase}/privacy`];
   const isPublicRoute = publicRoutePrefixes.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
   );
@@ -145,6 +146,7 @@ export function App() {
       <IonTabs className="app-layout-tabs">
         <IonRouterOutlet className={`app-router-outlet${isPublicRoute ? ' app-router-outlet--public' : ''}`}>
         <Route exact path={`${appBase}/login`} component={LoginPage} />
+          <Route exact path={`${appBase}/privacy`} component={PrivacyPage} />
           <Route
             exact
             path={`${appBase}/sites/:siteRef`}
