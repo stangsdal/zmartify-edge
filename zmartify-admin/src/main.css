@@ -1429,6 +1429,18 @@ ion-card {
   gap: 10px;
 }
 
+.reset-password-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.reset-password-fields ion-item {
+  --padding-start: 12px;
+  border-radius: 12px;
+}
+
 .controller-detail {
   position: sticky;
   top: 12px;

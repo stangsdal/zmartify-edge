@@ -402,7 +402,7 @@ export function UsersPage() {
             )}
             <h3 className="ion-margin-top">Set a new password directly</h3>
             <p>The user should change this password after signing in.</p>
-            <div className="profile-contact-fields">
+            <div className="reset-password-fields">
               <IonItem><IonLabel position="stacked">New password (min 12)</IonLabel><IonInput type="password" value={resetNewPassword} onIonInput={(event) => setResetNewPassword(event.detail.value || '')} /></IonItem>
               <IonItem><IonLabel position="stacked">Confirm new password</IonLabel><IonInput type="password" value={resetConfirmPassword} onIonInput={(event) => setResetConfirmPassword(event.detail.value || '')} /></IonItem>
             </div>
