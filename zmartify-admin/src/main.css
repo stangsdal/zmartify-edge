@@ -124,6 +124,14 @@ ion-button {
   text-transform: none;
 }
 
+/* The default primary (#164c68) is too dark against dark-mode surfaces, which
+   made outline/clear buttons without an explicit color nearly invisible. */
+body.dark-mode ion-button[fill='outline']:not([color]),
+body.dark-mode ion-button[fill='clear']:not([color]) {
+  --color: #a9d1e6;
+  --border-color: #4e86a0;
+}
+
 ion-card {
   border-radius: 16px;
   box-shadow: 0 12px 32px rgba(14, 52, 73, 0.08);
