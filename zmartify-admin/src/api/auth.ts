@@ -11,6 +11,13 @@ export type SiteInvitationValidateResponse = {
   reason?: string | null;
 };
 
+export type PasswordResetValidateResponse = {
+  valid: boolean;
+  username?: string | null;
+  expires_at?: string | null;
+  reason?: string | null;
+};
+
 export const authApi = {
   setupStatus: (): Promise<SetupStatus> => apiClient.get('/setup/status'),
 
@@ -46,4 +53,10 @@ export const authApi = {
 
   registerBySiteInvitation: (payload: { token: string; username: string; display_name: string; password: string }): Promise<LoginResponse> =>
     apiClient.post('/api/v2/site-invitations/register', payload),
+
+  validatePasswordReset: (token: string): Promise<PasswordResetValidateResponse> =>
+    apiClient.get(`/api/v2/auth/password-reset/validate?token=${encodeURIComponent(token)}`),
+
+  completePasswordReset: (token: string, newPassword: string): Promise<{ ok: boolean; username: string }> =>
+    apiClient.post('/api/v2/auth/password-reset/complete', { token, new_password: newPassword }),
 };

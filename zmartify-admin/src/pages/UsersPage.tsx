@@ -78,6 +78,12 @@ export function UsersPage() {
   const [profileEditName, setProfileEditName] = useState('');
   const [profileEditEmail, setProfileEditEmail] = useState('');
   const [profileEditPhone, setProfileEditPhone] = useState('');
+  const [resetUser, setResetUser] = useState<User | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetFeedback, setResetFeedback] = useState('');
+  const [resetFeedbackTone, setResetFeedbackTone] = useState<'info' | 'error'>('info');
+  const [resetBusy, setResetBusy] = useState(false);
 
   const load = async () => {
     try {
@@ -224,17 +230,57 @@ export function UsersPage() {
     }
   };
 
-  const resetPassword = async (user: User) => {
-    const nextPassword = window.prompt('New password (min 12 chars)');
-    if (!nextPassword) return;
+  const openResetPassword = (user: User) => {
+    setResetUser(user);
+    setResetNewPassword('');
+    setResetConfirmPassword('');
+    setResetFeedback('');
+    setResetFeedbackTone('info');
+  };
+
+  const sendResetLink = async () => {
+    if (!resetUser) return;
     try {
-      setSiteAccessLoading(true);
-      await usersApi.resetPassword(user.id, nextPassword);
+      setResetBusy(true);
+      setResetFeedbackTone('info');
+      setResetFeedback('Sending reset link...');
+      const result = await usersApi.sendPasswordReset(resetUser.id);
+      setResetFeedback(`Reset link sent to ${result.email}. The link expires in 24 hours.`);
+    } catch (e) {
+      setResetFeedbackTone('error');
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/503|email is not configured|could not send email/i.test(msg)) {
+        setResetFeedback('Could not send the email. Check the system email settings and try again.');
+      } else {
+        setResetFeedback('Failed to send reset link. Please try again.');
+      }
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  const setNewPassword = async () => {
+    if (!resetUser) return;
+    if (resetNewPassword.length < 12) {
+      setResetFeedbackTone('error');
+      setResetFeedback('Password must be at least 12 characters.');
+      return;
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetFeedbackTone('error');
+      setResetFeedback('Passwords do not match.');
+      return;
+    }
+    try {
+      setResetBusy(true);
+      await usersApi.resetPassword(resetUser.id, resetNewPassword);
+      setResetUser(null);
       await load();
     } catch (e) {
-      setError(String(e));
+      setResetFeedbackTone('error');
+      setResetFeedback(String(e));
     } finally {
-      setSiteAccessLoading(false);
+      setResetBusy(false);
     }
   };
 
@@ -337,6 +383,35 @@ export function UsersPage() {
             <IonButton className="ion-margin-top" disabled={!profileEditName.trim()} onClick={() => { void saveProfile(); }}>Save information</IonButton>
           </IonContent>
         </IonModal>
+        <IonModal isOpen={resetUser !== null} onDidDismiss={() => setResetUser(null)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>{resetUser ? `Reset password: ${resetUser.username}` : 'Reset password'}</IonTitle>
+              <IonButton slot="end" fill="clear" onClick={() => setResetUser(null)}>Close</IonButton>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
+            <h3>Email a reset link</h3>
+            {resetUser?.email ? (
+              <>
+                <p>Send a one-time password reset link to <strong>{resetUser.email}</strong>. The link expires after 24 hours, and the user chooses their own new password.</p>
+                <IonButton disabled={resetBusy} onClick={() => { void sendResetLink(); }}>Send reset link</IonButton>
+              </>
+            ) : (
+              <p>This user has no email address on file, so a reset link cannot be sent. Add an email under “Edit details” first, or set a password directly below.</p>
+            )}
+            <h3 className="ion-margin-top">Set a new password directly</h3>
+            <p>The user should change this password after signing in.</p>
+            <div className="profile-contact-fields">
+              <IonItem><IonLabel position="stacked">New password (min 12)</IonLabel><IonInput type="password" value={resetNewPassword} onIonInput={(event) => setResetNewPassword(event.detail.value || '')} /></IonItem>
+              <IonItem><IonLabel position="stacked">Confirm new password</IonLabel><IonInput type="password" value={resetConfirmPassword} onIonInput={(event) => setResetConfirmPassword(event.detail.value || '')} /></IonItem>
+            </div>
+            <IonButton className="ion-margin-top" disabled={resetBusy || resetNewPassword.length < 12 || resetNewPassword !== resetConfirmPassword} onClick={() => { void setNewPassword(); }}>Set password</IonButton>
+            {resetFeedback && (
+              <p style={{ color: resetFeedbackTone === 'error' ? '#b00020' : '#146c2e' }}>{resetFeedback}</p>
+            )}
+          </IonContent>
+        </IonModal>
         <div className="users-workspace">
           <IonSegment value={view} onIonChange={(event) => setView(event.detail.value as UsersView)}>
             <IonSegmentButton value="directory"><IonLabel>Directory</IonLabel></IonSegmentButton>
@@ -405,7 +480,7 @@ export function UsersPage() {
                       <IonButton size="small" fill="outline" onClick={() => editProfile(selectedUser)}><IonIcon slot="start" icon={createOutline} />Edit details</IonButton>
                       <IonButton size="small" fill="outline" onClick={() => changeRoles(selectedUser)}><IonIcon slot="start" icon={shieldCheckmarkOutline} />Global role</IonButton>
                       <IonButton size="small" fill="outline" onClick={() => { void changeSiteRoles(selectedUser); }}>Site roles</IonButton>
-                      <IonButton size="small" fill="outline" onClick={() => { void resetPassword(selectedUser); }}><IonIcon slot="start" icon={keyOutline} />Reset password</IonButton>
+                      <IonButton size="small" fill="outline" onClick={() => openResetPassword(selectedUser)}><IonIcon slot="start" icon={keyOutline} />Reset password</IonButton>
                       <IonButton size="small" color={selectedUser.enabled ? 'warning' : 'success'} onClick={() => { void setEnabled(selectedUser, !selectedUser.enabled); }}>{selectedUser.enabled ? 'Disable' : 'Enable'}</IonButton>
                       <IonButton size="small" fill="outline" color="danger" onClick={() => setDeleteTarget(selectedUser)}><IonIcon slot="start" icon={trashOutline} />Delete</IonButton>
                     </div>

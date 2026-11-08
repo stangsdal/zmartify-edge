@@ -269,6 +269,8 @@ def _is_protected_path(path: str) -> bool:
         return False
     if path in {"/api/v2/site-invitations/validate", "/api/v2/site-invitations/register"}:
         return False
+    if path in {"/api/v2/auth/password-reset/validate", "/api/v2/auth/password-reset/complete"}:
+        return False
     if path.startswith("/api/v2/devices/") and "/ota/download" in path:
         return False
     if path in _PROTECTED_EXACT_PATHS:

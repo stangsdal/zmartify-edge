@@ -144,6 +144,8 @@ Base URL examples:
 - POST /auth/register
 - POST /auth/logout
 - GET /auth/me
+- GET /api/v2/auth/password-reset/validate
+- POST /api/v2/auth/password-reset/complete
 
 ### Service and ACL
 
@@ -287,6 +289,7 @@ a targeted refresh before returning the result.
 - POST /users/{user_id}/disable
 - POST /users/{user_id}/enable
 - POST /users/{user_id}/reset-password
+- POST /api/v2/users/{user_id}/send-password-reset
 - POST /users/{user_id}/roles
 - DELETE /users/{user_id}
 - GET /users/{user_id}/site-access

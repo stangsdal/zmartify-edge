@@ -627,6 +627,29 @@ class UserResetPasswordIn(BaseModel):
     password: str = Field(min_length=12)
 
 
+class PasswordResetSendOut(BaseModel):
+    sent: bool
+    email: str
+    expires_at: str
+
+
+class PasswordResetValidateOut(BaseModel):
+    valid: bool
+    username: str | None = None
+    expires_at: str | None = None
+    reason: str | None = None
+
+
+class PasswordResetCompleteIn(BaseModel):
+    token: str = Field(min_length=16)
+    new_password: str = Field(min_length=12)
+
+
+class PasswordResetCompleteOut(BaseModel):
+    ok: bool
+    username: str
+
+
 class UserProfileUpdateIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 

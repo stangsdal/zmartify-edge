@@ -13,7 +13,7 @@ import {
   IonSpinner,
 } from '@ionic/react';
 import { apiClient } from '../api/client';
-import { authApi, SiteInvitationValidateResponse } from '../api/auth';
+import { authApi, PasswordResetValidateResponse, SiteInvitationValidateResponse } from '../api/auth';
 import { useAccess } from '../auth/AccessContext';
 import { InviteValidateResponse } from '../types/api';
 
@@ -67,6 +67,12 @@ export function LoginPage() {
   const [siteInviteToken, setSiteInviteToken] = useState('');
   const [siteInviteState, setSiteInviteState] = useState<SiteInvitationValidateResponse | null>(null);
   const [isInviteLoading, setIsInviteLoading] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [resetState, setResetState] = useState<PasswordResetValidateResponse | null>(null);
+  const [isResetLoading, setIsResetLoading] = useState(false);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [isCompletingReset, setIsCompletingReset] = useState(false);
   const history = useHistory();
   const { isAuthenticated, refresh } = useAccess();
   const inviteOriginBaseUrl = isNativeBuild
@@ -92,13 +98,19 @@ export function LoginPage() {
     const params = new URLSearchParams(location.search);
     const token = (params.get('invite_token') || '').trim();
     const siteToken = (params.get('site_invitation_token') || '').trim();
+    const passwordResetToken = (params.get('password_reset_token') || '').trim();
     setInviteToken(token);
     setSiteInviteToken(siteToken);
+    setResetToken(passwordResetToken);
 
     // QR invite links should always validate against the same host that served the link.
-    if ((token || siteToken) && baseUrl !== inviteOriginBaseUrl) {
+    if ((token || siteToken || passwordResetToken) && baseUrl !== inviteOriginBaseUrl) {
       setBaseUrl(inviteOriginBaseUrl);
       apiClient.setBaseUrl(inviteOriginBaseUrl);
+    }
+
+    if (!passwordResetToken) {
+      setResetState(null);
     }
 
     if (!token && !siteToken) {
@@ -141,6 +153,40 @@ export function LoginPage() {
       canceled = true;
     };
   }, [location.search, baseUrl, inviteOriginBaseUrl]);
+
+  useEffect(() => {
+    if (!resetToken) {
+      return;
+    }
+
+    let canceled = false;
+    const validateReset = async () => {
+      try {
+        setIsResetLoading(true);
+        apiClient.setBaseUrl(inviteOriginBaseUrl);
+        const result = await authApi.validatePasswordReset(resetToken);
+        if (!canceled) {
+          setResetState(result);
+          if (result.valid && result.username) {
+            setUsername(result.username);
+          }
+        }
+      } catch {
+        if (!canceled) {
+          setResetState({ valid: false, reason: 'failed to validate reset link' });
+        }
+      } finally {
+        if (!canceled) {
+          setIsResetLoading(false);
+        }
+      }
+    };
+
+    validateReset();
+    return () => {
+      canceled = true;
+    };
+  }, [resetToken, inviteOriginBaseUrl]);
 
   useEffect(() => {
     let canceled = false;
@@ -279,6 +325,46 @@ export function LoginPage() {
     }
   };
 
+  const handleCompleteReset = async () => {
+    if (resetNewPassword.length < 12) {
+      setMessageTone('error');
+      setMessage('Password must be at least 12 characters.');
+      return;
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setMessageTone('error');
+      setMessage('Passwords do not match.');
+      return;
+    }
+
+    try {
+      setIsCompletingReset(true);
+      setMessageTone('info');
+      setMessage('Updating password...');
+      apiClient.setBaseUrl(inviteOriginBaseUrl);
+      const result = await authApi.completePasswordReset(resetToken, resetNewPassword);
+      setUsername(result.username);
+      setPassword('');
+      setResetNewPassword('');
+      setResetConfirmPassword('');
+      setResetToken('');
+      setResetState(null);
+      setMessageTone('info');
+      setMessage('Password updated. Sign in with your new password.');
+      history.replace(`${appBase}/login`);
+    } catch (e) {
+      setMessageTone('error');
+      const msg = e instanceof Error ? e.message : String(e || '');
+      if (/expired|already been used|invalid/i.test(msg)) {
+        setMessage('This reset link is invalid, used, or expired. Ask your administrator for a new one.');
+      } else {
+        setMessage('Failed to update password. Please try again.');
+      }
+    } finally {
+      setIsCompletingReset(false);
+    }
+  };
+
   const handleClearToken = () => {
     setUsername('');
     setPassword('');
@@ -286,6 +372,8 @@ export function LoginPage() {
     setMessageTone('info');
     setMessage('Token cleared');
   };
+
+  const resetActive = !!resetToken && !!resetState?.valid;
 
   return (
     <IonPage className="login-page">
@@ -307,8 +395,8 @@ export function LoginPage() {
           <IonCard className="login-card">
           <div className="login-card__content">
             <div className="login-card__heading">
-              <p>Welcome back</p>
-              <h1>Sign in</h1>
+              <p>{resetActive ? 'Password reset' : 'Welcome back'}</p>
+              <h1>{resetActive ? 'Choose a new password' : 'Sign in'}</h1>
             </div>
             {!isNativeBuild && (
               <div className="login-api-config">
@@ -355,6 +443,59 @@ export function LoginPage() {
               </div>
             )}
 
+            {!!resetToken && (
+              <div className="login-notice">
+                <strong>Password reset</strong>
+                {isResetLoading && <p style={{ margin: '6px 0 0' }}>Validating reset link...</p>}
+                {!isResetLoading && resetState?.valid && (
+                  <p style={{ margin: '6px 0 0', color: '#146c2e' }}>
+                    Choose a new password for {resetState.username}.
+                  </p>
+                )}
+                {!isResetLoading && resetState && !resetState.valid && (
+                  <p style={{ margin: '6px 0 0', color: '#b00020' }}>
+                    Reset link invalid: {resetState.reason || 'unknown reason'}. Ask your administrator for a new one.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {resetActive ? (
+              <>
+                <IonLabel className="login-label">
+                  New password (min 12 characters)
+                </IonLabel>
+                <IonInput
+                  value={resetNewPassword}
+                  onIonInput={(e) => setResetNewPassword(e.detail.value || '')}
+                  placeholder="New password"
+                  type="password"
+                  autocomplete="new-password"
+                />
+
+                <IonLabel className="login-label">
+                  Confirm new password
+                </IonLabel>
+                <IonInput
+                  value={resetConfirmPassword}
+                  onIonInput={(e) => setResetConfirmPassword(e.detail.value || '')}
+                  placeholder="Repeat new password"
+                  type="password"
+                  autocomplete="new-password"
+                />
+
+                <div className="login-actions">
+                  <IonButton
+                    onClick={handleCompleteReset}
+                    expand="block"
+                    disabled={isCompletingReset || resetNewPassword.length < 12 || resetNewPassword !== resetConfirmPassword}
+                  >
+                    {isCompletingReset ? <IonSpinner name="crescent" /> : 'Set new password'}
+                  </IonButton>
+                </div>
+              </>
+            ) : (
+              <>
             <IonLabel className="login-label">
               Username
             </IonLabel>
@@ -418,6 +559,8 @@ export function LoginPage() {
                 Clear
               </IonButton>
             </div>
+              </>
+            )}
 
             {message && (
               <p className={`login-message login-message--${messageTone}`}>

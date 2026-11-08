@@ -53,6 +53,20 @@ def send_site_invitation(*, recipient: str, site_name: str, role: str, invitatio
     )
 
 
+def send_password_reset(*, recipient: str, display_name: str, reset_url: str, expires_at: str) -> None:
+    _send_email(
+        recipient=recipient,
+        subject="Zmartify password reset",
+        content=(
+            f"Hi {display_name},\n\n"
+            "An administrator has requested a password reset for your Zmartify account.\n\n"
+            f"Choose a new password by opening this link:\n{reset_url}\n\n"
+            f"The link expires at {expires_at} and can only be used once.\n"
+            "If you did not expect this email, you can safely ignore it.\n"
+        ),
+    )
+
+
 def send_smtp_test_email(*, recipient: str) -> None:
     _send_email(
         recipient=recipient,

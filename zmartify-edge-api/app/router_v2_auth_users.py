@@ -11,11 +11,12 @@ from app.auth import (
     login,
     logout_token,
 )
-from app.email_delivery import EmailDeliveryError, send_site_invitation, send_smtp_test_email
+from app.email_delivery import EmailDeliveryError, send_password_reset, send_site_invitation, send_smtp_test_email
 from app.email_settings import EmailSettingsError, get_email_settings, update_email_settings
+from app.password_resets import complete_password_reset, create_password_reset, delete_password_reset, password_reset_url, validate_password_reset
 from app.permissions import access_context, require_global_admin
 from app.permissions import require_site_permission
-from app.schemas import AuthLoginOut, SiteInvitationAcceptIn, SiteInvitationCreateIn, SiteInvitationOut, SiteInvitationRegisterIn, SiteInvitationValidateOut, SiteMembershipCandidateOut, SiteMembershipCreateIn, SiteMembershipOut, SiteMembershipUpdateIn, SystemEmailSettingsIn, SystemEmailSettingsOut, SystemEmailTestIn, UserOut
+from app.schemas import AuthLoginOut, PasswordResetCompleteIn, PasswordResetCompleteOut, PasswordResetSendOut, PasswordResetValidateOut, SiteInvitationAcceptIn, SiteInvitationCreateIn, SiteInvitationOut, SiteInvitationRegisterIn, SiteInvitationValidateOut, SiteMembershipCandidateOut, SiteMembershipCreateIn, SiteMembershipOut, SiteMembershipUpdateIn, SystemEmailSettingsIn, SystemEmailSettingsOut, SystemEmailTestIn, UserOut
 from app.site_invitations import accept_site_invitation, create_site_invitation, delete_site_invitation, invitation_url, list_site_invitations, register_and_accept_site_invitation, validate_site_invitation
 from app.site_memberships import create_site_member, delete_site_member, list_site_member_candidates, list_site_members, update_site_member
 
@@ -233,6 +234,40 @@ def create_auth_users_v2_router(require_roles: Callable[[Request, set[str]], Non
             return get_user(user_id)
         except AuthError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    @router.post("/users/{user_id}/send-password-reset", response_model=PasswordResetSendOut)
+    def v2_send_password_reset(user_id: int, request: Request) -> dict:
+        require_platform_administration(request)
+        try:
+            reset, raw_token = create_password_reset(
+                user_id=user_id,
+                actor_user_id=request.state.auth_user.user_id,
+            )
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        try:
+            send_password_reset(
+                recipient=reset["email"],
+                display_name=reset["display_name"],
+                reset_url=password_reset_url(raw_token),
+                expires_at=reset["expires_at"],
+            )
+        except EmailDeliveryError as exc:
+            delete_password_reset(reset["id"])
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        return {"sent": True, "email": reset["email"], "expires_at": reset["expires_at"]}
+
+    @router.get("/auth/password-reset/validate", response_model=PasswordResetValidateOut)
+    def v2_validate_password_reset(token: str) -> dict:
+        return validate_password_reset(token)
+
+    @router.post("/auth/password-reset/complete", response_model=PasswordResetCompleteOut)
+    def v2_complete_password_reset(payload: PasswordResetCompleteIn) -> dict:
+        try:
+            username = complete_password_reset(token=payload.token, new_password=payload.new_password)
+        except AuthError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return {"ok": True, "username": username}
 
     @router.get("/auth/ping")
     def v2_auth_ping(request: Request) -> Response:

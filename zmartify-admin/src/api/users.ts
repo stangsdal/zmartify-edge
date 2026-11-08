@@ -25,6 +25,9 @@ export const usersApi = {
   resetPassword: (id: number, password: string): Promise<User> =>
     apiClient.post(`/users/${id}/reset-password`, { password }),
 
+  sendPasswordReset: (id: number): Promise<{ sent: boolean; email: string; expires_at: string }> =>
+    apiClient.post(`/api/v2/users/${id}/send-password-reset`, {}),
+
   setRoles: (id: number, roles: string[]): Promise<User> =>
     apiClient.post(`/users/${id}/roles`, { roles }),
 

@@ -157,6 +157,19 @@ CREATE TABLE IF NOT EXISTS site_invitation_product_access (
 CREATE INDEX IF NOT EXISTS idx_site_invitations_email ON site_invitations(email, expires_at);
 CREATE INDEX IF NOT EXISTS idx_site_invitations_site ON site_invitations(site_id, expires_at);
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    uuid TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id, expires_at);
+
 CREATE TABLE IF NOT EXISTS system_email_settings (
     id SMALLINT PRIMARY KEY CHECK (id = 1),
     host TEXT NOT NULL,
