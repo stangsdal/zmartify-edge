@@ -403,8 +403,10 @@ export function UsersPage() {
             <h3 className="ion-margin-top">Set a new password directly</h3>
             <p>The user should change this password after signing in.</p>
             <div className="reset-password-fields">
-              <IonItem><IonLabel position="stacked">New password (min 12)</IonLabel><IonInput type="password" value={resetNewPassword} onIonInput={(event) => setResetNewPassword(event.detail.value || '')} /></IonItem>
-              <IonItem><IonLabel position="stacked">Confirm new password</IonLabel><IonInput type="password" value={resetConfirmPassword} onIonInput={(event) => setResetConfirmPassword(event.detail.value || '')} /></IonItem>
+              <IonLabel>New password (min 12 characters)</IonLabel>
+              <IonInput type="password" placeholder="New password" value={resetNewPassword} onIonInput={(event) => setResetNewPassword(event.detail.value || '')} />
+              <IonLabel>Confirm new password</IonLabel>
+              <IonInput type="password" placeholder="Repeat new password" value={resetConfirmPassword} onIonInput={(event) => setResetConfirmPassword(event.detail.value || '')} />
             </div>
             <IonButton className="ion-margin-top" disabled={resetBusy || resetNewPassword.length < 12 || resetNewPassword !== resetConfirmPassword} onClick={() => { void setNewPassword(); }}>Set password</IonButton>
             {resetFeedback && (
