@@ -31,6 +31,7 @@ import {
   loadFirmwareCatalog,
 } from '../api/firmwareCatalog';
 import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, systemsHubNav } from '../components/PageSubNav';
 import { Device, DeviceOtaStatus } from '../types/api';
 import {
   ControllerStatusFilter,
@@ -322,6 +323,7 @@ export function ControllersPage({ canManageFleet }: ControllersPageProps) {
     <IonPage>
       <AppHeader title="Controllers" subtitle="Onboarding, fleet operations and firmware releases" />
       <IonContent className="ion-padding">
+        {canManageFleet ? <PageSubNav items={systemsHubNav} /> : null}
         <IonLoading isOpen={busy} message="Processing..." />
         <IonAlert
           isOpen={deleteTarget !== null}

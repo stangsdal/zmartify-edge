@@ -9,6 +9,7 @@ import {
 import { useEffect, useState } from 'react';
 import { CloudStatusCard } from '../components/CloudStatusCard';
 import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, systemHubNav } from '../components/PageSubNav';
 import { apiClient } from '../api/client';
 
 type EmailSettings = {
@@ -76,6 +77,7 @@ export function SystemPage() {
     <IonPage>
       <AppHeader title="System" subtitle="Diagnostics, connectivity and runtime status" />
       <IonContent className="ion-padding">
+        <PageSubNav items={systemHubNav} />
         <div className="space-y-4 pb-20 lg:pb-8">
           <section className="rounded-2xl app-surface p-4 shadow-soft border border-slate-100">
             <h2 className="text-lg font-semibold">Runtime diagnostics</h2>

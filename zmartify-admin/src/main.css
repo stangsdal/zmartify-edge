@@ -1436,6 +1436,43 @@ ion-card {
   max-width: 420px;
 }
 
+.page-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.page-subnav__link {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--ion-text-color);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.page-subnav__link.active {
+  background: var(--app-navy);
+  border-color: var(--app-navy);
+  color: #ffffff;
+}
+
+.more-section + .more-section {
+  margin-top: 24px;
+}
+
+.more-section__title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-muted);
+  margin: 0 0 10px;
+}
+
 .reset-password-fields ion-label {
   font-size: 12px;
   font-weight: 600;

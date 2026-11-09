@@ -15,6 +15,13 @@ The format is inspired by Keep a Changelog and this project follows semantic ver
   app login page. Completing a reset revokes all existing sessions for the user.
 - Reset password dialog in the admin Users page with both "email reset link"
   and "set a new password directly" options, replacing the old browser prompt.
+- Reorganised admin navigation: the More page now groups entries into
+  Personal, Site management and Platform administration sections and only
+  shows entries that are not already visible as top-level sidebar items.
+  Systems, Sites and System pages gained sub-navigation rows (Controllers and
+  Firmware library under Systems, Site members under Sites, Audit log under
+  System), giving the audit log a menu entry for the first time and giving
+  mobile administrators access to Sites, Systems and the audit log.
 
 ## [0.1.0] - 2026-07-01
 

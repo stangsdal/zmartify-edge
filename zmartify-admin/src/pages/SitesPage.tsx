@@ -19,6 +19,7 @@ import { siteMembersApi, SiteMembership } from '../api/siteMembers';
 import { usersApi } from '../api/users';
 import { Site, Domain, User } from '../types/api';
 import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, sitesHubNav } from '../components/PageSubNav';
 
 interface SiteDraft {
   name: string;
@@ -310,6 +311,7 @@ export function SitesPage() {
     <IonPage>
       <AppHeader title="Sites" subtitle="Domain locations and ownership boundaries" />
       <IonContent className="ion-padding">
+        <PageSubNav items={sitesHubNav} />
         <IonLoading isOpen={creating} message="Processing..." />
         <IonAlert
           isOpen={showDeleteAlert}

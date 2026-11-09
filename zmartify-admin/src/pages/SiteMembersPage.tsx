@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { IonButton, IonContent, IonInput, IonItem, IonLabel, IonLoading, IonPage, IonSelect, IonSelectOption } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, sitesHubNav } from '../components/PageSubNav';
 import { useAccess } from '../auth/AccessContext';
 import { SiteInvitation, SiteMembership, SiteMembershipCandidate, siteMembersApi } from '../api/siteMembers';
 
@@ -127,6 +128,7 @@ export function SiteMembersPage() {
     <IonPage>
       <AppHeader title="Site Members" subtitle="Access roles and installed product access" />
       <IonContent className="ion-padding">
+        {isAdministrator ? <PageSubNav items={sitesHubNav} /> : null}
         <IonLoading isOpen={loading} message="Updating members..." />
         <div className="space-y-4 pb-20 lg:pb-8">
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}

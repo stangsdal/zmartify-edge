@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { IonContent, IonPage } from '@ionic/react';
 import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, systemsHubNav } from '../components/PageSubNav';
 import { mobileApi, MobileSiteSummary } from '../api/mobile';
 import { systemApi } from '../api/system';
 import { parseApiError } from '../utils/apiError';
@@ -66,6 +67,7 @@ export function SystemsPage() {
     <IonPage>
       <AppHeader title="Systems" subtitle="Site systems and runtime footprint" />
       <IonContent className="ion-padding">
+        <PageSubNav items={systemsHubNav} />
         <div className="space-y-4 pb-20 lg:pb-8">
           {error ? <p className="text-sm text-rose-600">{error}</p> : null}
           {loading ? <p className="text-sm text-muted">Loading systems overview...</p> : null}

@@ -3,8 +3,11 @@ import { IonButton, IonContent, IonIcon, IonPage, IonSpinner } from '@ionic/reac
 import { downloadOutline, openOutline } from 'ionicons/icons';
 import { FirmwareCatalogRelease, loadFirmwareCatalog } from '../api/firmwareCatalog';
 import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, systemsHubNav } from '../components/PageSubNav';
+import { useAccess } from '../auth/AccessContext';
 
 export function FirmwareLibraryPage() {
+  const { isAdministrator } = useAccess();
   const [releases, setReleases] = useState<FirmwareCatalogRelease[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -20,6 +23,7 @@ export function FirmwareLibraryPage() {
     <IonPage>
       <AppHeader title="Firmware library" subtitle="Published controller releases and installation artifacts" />
       <IonContent className="ion-padding">
+        {isAdministrator ? <PageSubNav items={systemsHubNav} /> : null}
         <div className="controllers-workspace">
           {loading ? <div className="controller-loading"><IonSpinner name="crescent" /> Loading firmware catalog...</div> : null}
           {error ? <p className="controller-message controller-message--error">{error}</p> : null}

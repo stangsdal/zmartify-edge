@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { IonContent, IonHeader, IonTitle, IonToolbar, IonPage, IonCard, IonCardContent, IonButton } from '@ionic/react';
+import { IonContent, IonPage, IonCard, IonCardContent, IonButton } from '@ionic/react';
+import { AppHeader } from '../components/AppHeader';
+import { PageSubNav, systemHubNav } from '../components/PageSubNav';
 import { usersApi } from '../api/users';
 import { AuditLogEntry } from '../types/api';
 
@@ -20,8 +22,9 @@ export function AuditLogPage() {
 
   return (
     <IonPage>
-      <IonHeader><IonToolbar><IonTitle>Audit Log</IonTitle></IonToolbar></IonHeader>
+      <AppHeader title="Audit log" subtitle="Administrative actions across the platform" />
       <IonContent className="ion-padding">
+        <PageSubNav items={systemHubNav} />
         <IonButton onClick={load} size="small">Refresh</IonButton>
         {error && <p style={{ color: 'red' }}>{error}</p>}
         {entries.map((e) => (
